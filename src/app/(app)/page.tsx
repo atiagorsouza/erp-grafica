@@ -12,7 +12,8 @@ import {
   transactions,
   products,
 } from "@/db/schema";
-import { desc, asc } from "drizzle-orm";
+import { desc, asc, isNull } from "drizzle-orm";
+import { toLocalISODate, lastDays } from "@/lib/period";
 import { DashboardClient } from "@/components/modules/DashboardClient";
 
 export const dynamic = "force-dynamic";
@@ -29,37 +30,36 @@ export default async function DashboardPage() {
       db.select().from(materials),
       db.select().from(printers).orderBy(asc(printers.name)),
       db.select().from(printerCategories),
-      db.select().from(transactions),
+      db.select().from(transactions).where(isNull(transactions.archivedAt)),
       db.select().from(products),
     ]);
 
-  /* ── série de faturamento (14 dias) ── */
-  const dayKey = (d: Date | string) => new Date(d).toISOString().slice(0, 10);
+  /* ── série de faturamento (14 dias) ──
+     Datas no fuso da loja e SEM vendas canceladas (v3.11.0): antes o
+     corte era em UTC e venda após 21h caía no dia seguinte. */
+  const validSales = salesRows.filter((s) => s.status !== "cancelada");
+  const dayKey = (d: Date | string) => toLocalISODate(d);
   const perDay = new Map<string, number>();
-  for (let i = 13; i >= 0; i--) {
-    const d = new Date();
-    d.setDate(d.getDate() - i);
-    perDay.set(dayKey(d), 0);
-  }
-  for (const s of salesRows) {
+  for (const day of lastDays(14)) perDay.set(day.key, 0);
+  for (const s of validSales) {
     const k = dayKey(s.createdAt);
     if (perDay.has(k)) perDay.set(k, (perDay.get(k) || 0) + Number(s.total || 0));
   }
-  const todayK = dayKey(new Date());
+  const todayK = toLocalISODate(new Date());
   const series14 = Array.from(perDay.entries()).map(([k, v]) => {
-    const d = new Date(`${k}T12:00:00`);
+    const d = new Date(`${k}T12:00:00Z`);
     return {
-      label: d.toLocaleDateString("pt-BR", { day: "2-digit" }),
+      label: d.toLocaleDateString("pt-BR", { day: "2-digit", timeZone: "UTC" }),
       value: Math.round(v * 100) / 100,
-      hint: `${d.toLocaleDateString("pt-BR", { day: "2-digit", month: "short" })} · R$ ${v.toFixed(2)}`,
+      hint: `${d.toLocaleDateString("pt-BR", { day: "2-digit", month: "short", timeZone: "UTC" })} · R$ ${v.toFixed(2)}`,
     };
   });
   const revenue14 = series14.reduce((s, d) => s + d.value, 0);
   const todayRevenue = perDay.get(todayK) || 0;
 
   /* ── KPIs ── */
-  const totalRevenue = salesRows.reduce((s, r) => s + Number(r.total || 0), 0);
-  const avgTicket = salesRows.length ? totalRevenue / salesRows.length : 0;
+  const totalRevenue = validSales.reduce((s, r) => s + Number(r.total || 0), 0);
+  const avgTicket = validSales.length ? totalRevenue / validSales.length : 0;
   const pendingReceivable = txRows
     .filter((t) => t.type === "receita" && t.status !== "pago")
     .reduce((s, t) => s + Number(t.amount || 0), 0);

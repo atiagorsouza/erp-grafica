@@ -28,8 +28,8 @@ import {
 } from "@/components/ui";
 import { Icon } from "@/components/icons";
 import { cn, initials } from "@/lib/format";
+import { formatCEP, formatCNPJ, formatCPF, formatPhone, formatStateRegistration } from "@/lib/validators";
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Row = Record<string, any>;
 
 const COLUMNS = ["novo", "qualificacao", "orcamento", "negociacao", "ganho", "perdido"];
@@ -67,6 +67,7 @@ export function ClientsClient({ customers, leads, activities, quotes, orders, sa
   const [q, setQ] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
 
+  const [importOpen, setImportOpen] = useState(false);
   const [custModal, setCustModal] = useState<null | { edit?: Row }>(null);
   const [leadModal, setLeadModal] = useState<null | { edit?: Row; column?: string }>(null);
   const [deleteModal, setDeleteModal] = useState<null | { id: number; name: string; kind: "customer" | "lead" }>(null);
@@ -78,6 +79,21 @@ export function ClientsClient({ customers, leads, activities, quotes, orders, sa
   const [actForm, setActForm] = useState({ type: "nota", title: "", description: "" });
 
   const set = (k: string) => (e: { target: { value: string } }) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  /* Máscara aplicada enquanto digita: o operador digita só números e o
+     campo se formata sozinho. Evita CPF gravado em três formatos
+     diferentes e o retrabalho de conferir pontuação. */
+  const setMasked =
+    (k: string, mask: (v: string) => string) =>
+    (e: { target: { value: string } }) =>
+      setForm((f) => ({ ...f, [k]: mask(e.target.value) }));
+
+  /* O documento muda de máscara conforme PF/PJ escolhido no seletor. */
+  const setDocument = (e: { target: { value: string } }) =>
+    setForm((f) => ({
+      ...f,
+      document: f.type === "pj" ? formatCNPJ(e.target.value) : formatCPF(e.target.value),
+    }));
   const drawer = customers.find((c) => Number(c.id) === drawerId) || null;
 
   /* LTV por cliente — soma vendas PDV + pedidos */
@@ -141,12 +157,18 @@ export function ClientsClient({ customers, leads, activities, quotes, orders, sa
         city: form.city?.trim() || null,
         state: form.state?.trim() || null,
         rg: form.rg?.trim() || null,
+        rgIssuer: form.rgIssuer?.trim() || null,
         birthDate: form.birthDate?.trim() || null,
         gender: form.gender || null,
+        maritalStatus: form.maritalStatus || null,
         stateRegistration: form.stateRegistration?.trim() || null,
         municipalRegistration: form.municipalRegistration?.trim() || null,
         legalNature: form.legalNature?.trim() || null,
         taxRegime: form.taxRegime || null,
+        companySize: form.companySize || null,
+        foundedAt: form.foundedAt?.trim() || null,
+        origin: form.origin || null,
+        whatsappOptOut: form.whatsappOptOut === "1",
         status: form.status || "lead",
         creditLimit: form.creditLimit || "0",
         tags: form.tags?.trim() || null,
@@ -263,6 +285,9 @@ export function ClientsClient({ customers, leads, activities, quotes, orders, sa
         description="Pessoa física e jurídica no mesmo lugar, com funil comercial de 6 etapas e histórico 360° de cada conta."
         actions={
           <>
+            <Button variant="outline" icon="download" onClick={() => setImportOpen(true)}>
+              Importar PDF
+            </Button>
             <Button variant="outline" icon="plus" onClick={() => { setForm({ type: "pf", status: "lead", column: "novo" }); setLeadModal({}); }}>
               Oportunidade
             </Button>
@@ -346,7 +371,11 @@ export function ClientsClient({ customers, leads, activities, quotes, orders, sa
                       <IconButton size="sm" name="phone" label="Ligar" onClick={() => openPhone(c)} />
                       <IconButton size="sm" name="pencil" label="Editar" onClick={() => {
                         const f: Record<string, string> = {};
-                        for (const [k, v] of Object.entries(c)) if (v !== null && typeof v !== "object") f[k] = String(v);
+                        for (const [k, v] of Object.entries(c)) {
+                          if (v === null || typeof v === "object") continue;
+                          /* checkbox usa "1"/""; o banco devolve boolean */
+                          f[k] = typeof v === "boolean" ? (v ? "1" : "") : String(v);
+                        }
                         setForm(f);
                         setCustModal({ edit: c });
                       }} />
@@ -445,95 +474,224 @@ export function ClientsClient({ customers, leads, activities, quotes, orders, sa
             ]}
           />
         </div>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <Field label={form.type === "pj" ? "Razão social" : "Nome completo"} required>
-            <Input value={form.name || ""} onChange={set("name")} autoFocus />
-          </Field>
-          {form.type === "pj" ? (
-            <Field label="Nome fantasia">
-              <Input value={form.tradeName || ""} onChange={set("tradeName")} />
+        {/* ── IDENTIFICAÇÃO ── */}
+        <FormSection title="Identificação">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <Field
+              label={form.type === "pj" ? "Razão social" : "Nome completo"}
+              required
+              className="sm:col-span-2"
+            >
+              <Input value={form.name || ""} onChange={set("name")} autoFocus />
             </Field>
-          ) : (
-            <Field label="Data de nascimento">
-              <Input mono type="date" value={form.birthDate || ""} onChange={set("birthDate")} />
+
+            {form.type === "pj" && (
+              <Field label="Nome fantasia" className="sm:col-span-2">
+                <Input value={form.tradeName || ""} onChange={set("tradeName")} />
+              </Field>
+            )}
+
+            <Field label={form.type === "pj" ? "CNPJ" : "CPF"} required>
+              <Input
+                mono
+                value={form.document || ""}
+                onChange={setDocument}
+                inputMode="numeric"
+                placeholder={form.type === "pj" ? "00.000.000/0001-00" : "000.000.000-00"}
+              />
             </Field>
-          )}
-          <Field label={form.type === "pj" ? "CNPJ" : "CPF"}>
-            <Input mono value={form.document || ""} onChange={set("document")} placeholder={form.type === "pj" ? "00.000.000/0001-00" : "000.000.000-00"} />
-          </Field>
-          {form.type === "pj" ? (
-            <Field label="Regime tributário">
-              <Select value={form.taxRegime || ""} onChange={set("taxRegime")}>
+
+            <Field label="Origem do cliente">
+              <Select value={form.origin || ""} onChange={set("origin")}>
                 <option value="">—</option>
-                <option>Simples Nacional</option>
-                <option>Lucro Presumido</option>
-                <option>Lucro Real</option>
-                <option>MEI</option>
+                <option value="balcao">Balcão</option>
+                <option value="whatsapp">WhatsApp</option>
+                <option value="indicacao">Indicação</option>
+                <option value="instagram">Instagram</option>
+                <option value="site">Site</option>
+                <option value="google">Google</option>
+                <option value="marketplace">Marketplace</option>
+                <option value="outro">Outro</option>
               </Select>
             </Field>
-          ) : (
-            <Field label="RG">
-              <Input mono value={form.rg || ""} onChange={set("rg")} />
+          </div>
+        </FormSection>
+
+        {/* ── DOCUMENTOS ── */}
+        <FormSection title={form.type === "pj" ? "Dados da empresa" : "Documentos pessoais"}>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+            {form.type === "pj" ? (
+              <>
+                <Field label="Inscrição estadual" hint="ou ISENTO">
+                  <Input
+                    mono
+                    value={form.stateRegistration || ""}
+                    onChange={setMasked("stateRegistration", formatStateRegistration)}
+                    placeholder="ISENTO"
+                  />
+                </Field>
+                <Field label="Inscrição municipal">
+                  <Input mono value={form.municipalRegistration || ""} onChange={set("municipalRegistration")} />
+                </Field>
+                <Field label="Regime tributário">
+                  <Select value={form.taxRegime || ""} onChange={set("taxRegime")}>
+                    <option value="">—</option>
+                    <option>Simples Nacional</option>
+                    <option>Lucro Presumido</option>
+                    <option>Lucro Real</option>
+                    <option>MEI</option>
+                  </Select>
+                </Field>
+                <Field label="Porte da empresa">
+                  <Select value={form.companySize || ""} onChange={set("companySize")}>
+                    <option value="">—</option>
+                    <option value="MEI">MEI</option>
+                    <option value="ME">Microempresa (ME)</option>
+                    <option value="EPP">Pequeno porte (EPP)</option>
+                    <option value="demais">Demais</option>
+                  </Select>
+                </Field>
+                <Field label="Data de fundação">
+                  <Input mono type="date" value={form.foundedAt || ""} onChange={set("foundedAt")} />
+                </Field>
+              </>
+            ) : (
+              <>
+                <Field label="RG">
+                  <Input mono value={form.rg || ""} onChange={set("rg")} />
+                </Field>
+                <Field label="Órgão emissor">
+                  <Input value={form.rgIssuer || ""} onChange={set("rgIssuer")} placeholder="DETRAN-RJ" />
+                </Field>
+                <Field label="Data de nascimento">
+                  <Input mono type="date" value={form.birthDate || ""} onChange={set("birthDate")} />
+                </Field>
+                <Field label="Estado civil">
+                  <Select value={form.maritalStatus || ""} onChange={set("maritalStatus")}>
+                    <option value="">—</option>
+                    <option value="solteiro">Solteiro(a)</option>
+                    <option value="casado">Casado(a)</option>
+                    <option value="divorciado">Divorciado(a)</option>
+                    <option value="viuvo">Viúvo(a)</option>
+                    <option value="uniao_estavel">União estável</option>
+                  </Select>
+                </Field>
+              </>
+            )}
+          </div>
+        </FormSection>
+
+        {/* ── ENDEREÇO (CEP primeiro: preenche o resto) ── */}
+        <FormSection title="Endereço">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-6">
+            <Field
+              label="CEP"
+              className="sm:col-span-2"
+              hint={fetchingCep ? "buscando endereço…" : "preenche o resto sozinho"}
+            >
+              <Input
+                mono
+                value={form.cep || ""}
+                onChange={setMasked("cep", formatCEP)}
+                onBlur={handleCepBlur}
+                inputMode="numeric"
+                placeholder="00000-000"
+              />
             </Field>
-          )}
-          <Field label="E-mail">
-            <Input value={form.email || ""} onChange={set("email")} type="email" placeholder="email@empresa.com.br" />
-          </Field>
-          <Field label="Telefone">
-            <Input mono value={form.phone || ""} onChange={set("phone")} placeholder="(21) 99999-0000" />
-          </Field>
-          {form.type === "pj" && (
-            <>
-              <Field label="Contato na empresa">
-                <Input value={form.contactName || ""} onChange={set("contactName")} />
-              </Field>
-              <Field label="Cargo do contato">
-                <Input value={form.contactRole || ""} onChange={set("contactRole")} />
-              </Field>
-            </>
-          )}
+            <Field label="Rua / Logradouro" className="sm:col-span-3">
+              <Input value={form.street || ""} onChange={set("street")} placeholder="Rua das Flores" />
+            </Field>
+            <Field label="Número">
+              <Input value={form.number || ""} onChange={set("number")} placeholder="100" />
+            </Field>
+            <Field label="Complemento" className="sm:col-span-2">
+              <Input value={form.complement || ""} onChange={set("complement")} placeholder="Sala 2, fundos…" />
+            </Field>
+            <Field label="Bairro" className="sm:col-span-2">
+              <Input value={form.district || ""} onChange={set("district")} />
+            </Field>
+            <Field label="Cidade">
+              <Input value={form.city || ""} onChange={set("city")} />
+            </Field>
+            <Field label="UF">
+              <Input
+                value={form.state || ""}
+                onChange={(e) => setForm((f) => ({ ...f, state: e.target.value.toUpperCase().slice(0, 2) }))}
+                placeholder="RJ"
+              />
+            </Field>
+          </div>
+        </FormSection>
 
-          {/* Endereço com ViaCEP */}
-          <Field label="CEP" hint={fetchingCep ? "🔍 buscando..." : "Digite para preencher o endereço"}>
-            <Input
-              mono
-              value={form.cep || ""}
-              onChange={set("cep")}
-              onBlur={handleCepBlur}
-              placeholder="00000-000"
-            />
-          </Field>
-          <Field label="Cidade / UF">
-            <div className="flex gap-2">
-              <Input value={form.city || ""} onChange={set("city")} placeholder="Rio de Janeiro" />
-              <Input value={form.state || ""} onChange={set("state")} className="w-16" placeholder="RJ" />
-            </div>
-          </Field>
-          <Field label="Endereço / Rua">
-            <Input value={form.street || ""} onChange={set("street")} placeholder="Rua das Flores" />
-          </Field>
-          <Field label="Número / Bairro">
-            <div className="flex gap-2">
-              <Input value={form.number || ""} onChange={set("number")} className="w-20" placeholder="100" />
-              <Input value={form.district || ""} onChange={set("district")} placeholder="Bairro" />
-            </div>
-          </Field>
+        {/* ── CONTATO ── */}
+        <FormSection title="Contato">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <Field label="Telefone">
+              <Input
+                mono
+                value={form.phone || ""}
+                onChange={setMasked("phone", formatPhone)}
+                inputMode="numeric"
+                placeholder="(21) 3000-0000"
+              />
+            </Field>
+            <Field label="WhatsApp">
+              <Input
+                mono
+                value={form.whatsapp || ""}
+                onChange={setMasked("whatsapp", formatPhone)}
+                inputMode="numeric"
+                placeholder="(21) 99999-0000"
+              />
+            </Field>
+            <Field label="E-mail" className="sm:col-span-2">
+              <Input value={form.email || ""} onChange={set("email")} type="email" placeholder="email@empresa.com.br" />
+            </Field>
 
-          <Field label="Status comercial">
-            <Select value={form.status || "lead"} onChange={set("status")}>
-              <option value="lead">Lead</option>
-              <option value="ativo">Ativo</option>
-              <option value="inativo">Inativo</option>
-              <option value="bloqueado">Bloqueado</option>
-            </Select>
-          </Field>
-          <Field label="Limite de crédito (R$)">
-            <Input mono value={form.creditLimit || "0"} onChange={set("creditLimit")} />
-          </Field>
-          <Field label="Observações" className="sm:col-span-2">
-            <Textarea value={form.notes || ""} onChange={set("notes")} placeholder="Preferências, histórico, observações do relacionamento..." />
-          </Field>
-        </div>
+            {form.type === "pj" && (
+              <>
+                <Field label="Pessoa de contato">
+                  <Input value={form.contactName || ""} onChange={set("contactName")} />
+                </Field>
+                <Field label="Cargo do contato">
+                  <Input value={form.contactRole || ""} onChange={set("contactRole")} />
+                </Field>
+              </>
+            )}
+
+            <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-paper-200 bg-paper-50 px-3 py-2 sm:col-span-2">
+              <input
+                type="checkbox"
+                checked={form.whatsappOptOut === "1"}
+                onChange={(e) => setForm((f) => ({ ...f, whatsappOptOut: e.target.checked ? "1" : "" }))}
+                className="h-4 w-4 accent-ink-900"
+              />
+              <span className="text-[12.5px] text-ink-700">
+                Cliente NÃO autoriza mensagens automáticas de WhatsApp
+              </span>
+            </label>
+          </div>
+        </FormSection>
+
+        {/* ── COMERCIAL ── */}
+        <FormSection title="Situação comercial" last>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <Field label="Status">
+              <Select value={form.status || "lead"} onChange={set("status")}>
+                <option value="lead">Lead</option>
+                <option value="ativo">Ativo</option>
+                <option value="inativo">Inativo</option>
+                <option value="bloqueado">Bloqueado</option>
+              </Select>
+            </Field>
+            <Field label="Limite de crédito (R$)">
+              <Input mono value={form.creditLimit || "0"} onChange={set("creditLimit")} />
+            </Field>
+            <Field label="Observações" className="sm:col-span-2">
+              <Textarea value={form.notes || ""} onChange={set("notes")} placeholder="Preferências, histórico, observações do relacionamento..." />
+            </Field>
+          </div>
+        </FormSection>
       </Modal>
 
       {/* ── MODAL LEAD ── */}
@@ -614,7 +772,7 @@ export function ClientsClient({ customers, leads, activities, quotes, orders, sa
         <p className="text-[13px] text-ink-700">
           {deleteModal?.kind === "customer"
             ? <>O cliente <strong>{deleteModal.name}</strong> será marcado como inativo e permanecerá no histórico de orçamentos, pedidos e vendas.</>
-            : <>A oportunidade <strong>"{deleteModal?.name}"</strong> será marcada como perdida, preservando o histórico.</>
+            : <>A oportunidade <strong>&ldquo;{deleteModal?.name}&rdquo;</strong> será marcada como perdida, preservando o histórico.</>
           }
         </p>
         <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-[11.5px] text-amber-800">
@@ -658,7 +816,10 @@ export function ClientsClient({ customers, leads, activities, quotes, orders, sa
                   icon="pencil"
                   onClick={() => {
                     const f: Record<string, string> = {};
-                    for (const [k, v] of Object.entries(drawer)) if (v !== null && typeof v !== "object") f[k] = String(v);
+                    for (const [k, v] of Object.entries(drawer)) {
+                      if (v === null || typeof v === "object") continue;
+                      f[k] = typeof v === "boolean" ? (v ? "1" : "") : String(v);
+                    }
                     setForm(f);
                     setCustModal({ edit: drawer });
                   }}
@@ -803,6 +964,258 @@ export function ClientsClient({ customers, leads, activities, quotes, orders, sa
           </div>
         )}
       </Drawer>
+
+      {/* ── IMPORTAR CLIENTES DO SISTEMA ANTIGO ── */}
+      <ImportCustomersModal
+        key={importOpen ? "import-open" : "import-closed"}
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        onDone={() => {
+          setImportOpen(false);
+          router.refresh();
+        }}
+      />
     </div>
+  );
+}
+
+/* ==================================================================
+   IMPORTAÇÃO DE CLIENTES (PDF DO SISTEMA ANTIGO)
+   ================================================================== */
+
+type ImportPreviewRow = {
+  legacyCode: string | null;
+  name: string;
+  document: string | null;
+  type: "pf" | "pj";
+  email: string | null;
+  phone: string | null;
+  city: string | null;
+};
+
+type ImportResult = {
+  confirmed: boolean;
+  totalFichas: number;
+  imported: number;
+  updated: number;
+  skipped: number;
+  issues: { index: number; name: string; reason: string }[];
+  preview: ImportPreviewRow[];
+};
+
+function ImportCustomersModal({
+  open,
+  onClose,
+  onDone,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [file, setFile] = useState<File | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<ImportResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function send(confirm: boolean) {
+    if (!file || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      if (confirm) fd.append("confirm", "1");
+
+      const res = await fetch("/api/crm/import", { method: "POST", body: fd });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Falha na importação");
+
+      setResult(json as ImportResult);
+      if (confirm) {
+        toast.success(
+          "Importação concluída",
+          `${json.imported} novos · ${json.updated} atualizados`
+        );
+        onDone();
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Erro inesperado");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /* Depois de simular, o mesmo botão passa a gravar. */
+  const simulated = !!result && !result.confirmed;
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title="Importar clientes do sistema antigo"
+      subtitle="Envie o PDF com as fichas de cliente exportadas do sistema anterior."
+      width="max-w-2xl"
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>
+            Fechar
+          </Button>
+          {simulated ? (
+            <Button icon="check" loading={busy} onClick={() => send(true)}>
+              Confirmar importação
+            </Button>
+          ) : (
+            <Button icon="eye" loading={busy} disabled={!file} onClick={() => send(false)}>
+              Analisar arquivo
+            </Button>
+          )}
+        </>
+      }
+    >
+      <div className="space-y-3">
+        <label className="block cursor-pointer rounded-xl border border-dashed border-paper-300 bg-paper-50 px-4 py-6 text-center transition-colors hover:border-ink-400">
+          <input
+            type="file"
+            accept="application/pdf,.pdf"
+            className="hidden"
+            onChange={(e) => {
+              setFile(e.target.files?.[0] ?? null);
+              setResult(null);
+              setError(null);
+            }}
+          />
+          <Icon name="download" size={20} className="mx-auto mb-1.5 text-ink-400" />
+          <p className="text-[13px] font-semibold text-ink-800">
+            {file ? file.name : "Escolher arquivo PDF"}
+          </p>
+          <p className="mt-0.5 text-[11.5px] text-ink-500">
+            {file
+              ? `${(file.size / 1024).toFixed(0)} KB — clique para trocar`
+              : "Relatório “Ficha do Cliente” do sistema anterior · até 8 MB"}
+          </p>
+        </label>
+
+        {error && (
+          <p className="rounded-lg bg-red-50 px-3 py-2 text-[12.5px] leading-relaxed text-red-800">
+            {error}
+          </p>
+        )}
+
+        {result && (
+          <>
+            <div className="grid grid-cols-4 gap-2">
+              {[
+                { label: "fichas lidas", value: result.totalFichas, tone: "text-ink-800" },
+                { label: "novos", value: result.imported, tone: "text-emerald-700" },
+                { label: "já existem", value: result.updated, tone: "text-cyan-700" },
+                { label: "ignorados", value: result.skipped, tone: "text-amber-700" },
+              ].map((s) => (
+                <div key={s.label} className="rounded-lg border border-paper-200 bg-white px-2 py-2 text-center">
+                  <p className={cn("font-mono text-[19px] leading-none font-semibold tnum", s.tone)}>
+                    {s.value}
+                  </p>
+                  <p className="mt-1 text-[10px] tracking-wider text-ink-500 uppercase">{s.label}</p>
+                </div>
+              ))}
+            </div>
+
+            {simulated && (
+              <p className="rounded-lg bg-cyan-50 px-3 py-2 text-[12px] leading-relaxed text-cyan-900">
+                Nada foi gravado ainda. Confira a prévia abaixo e clique em
+                <strong> Confirmar importação</strong> para efetivar.
+                {result.updated > 0 && (
+                  <>
+                    {" "}
+                    Os {result.updated} já cadastrados terão apenas os campos em branco
+                    preenchidos — nada do que você já digitou é sobrescrito.
+                  </>
+                )}
+              </p>
+            )}
+
+            {result.preview.length > 0 && (
+              <div className="max-h-56 overflow-y-auto rounded-lg border border-paper-200">
+                <table className="w-full text-[12px]">
+                  <thead className="sticky top-0 bg-paper-50 text-left font-mono text-[10px] tracking-wider text-ink-500 uppercase">
+                    <tr>
+                      <th className="px-2 py-1.5">Nome</th>
+                      <th className="px-2 py-1.5">Documento</th>
+                      <th className="px-2 py-1.5">Contato</th>
+                      <th className="px-2 py-1.5">Cidade</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {result.preview.map((p, i) => (
+                      <tr key={`${p.legacyCode}-${i}`} className="border-t border-paper-200">
+                        <td className="px-2 py-1.5">
+                          {p.name}
+                          <span className="ml-1 rounded bg-paper-100 px-1 text-[9.5px] text-ink-500 uppercase">
+                            {p.type}
+                          </span>
+                        </td>
+                        <td className="px-2 py-1.5 font-mono text-[11px]">{p.document || "—"}</td>
+                        <td className="max-w-[150px] truncate px-2 py-1.5 text-ink-600">
+                          {p.email || p.phone || "—"}
+                        </td>
+                        <td className="px-2 py-1.5 text-ink-600">{p.city || "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {result.totalFichas > result.preview.length && (
+                  <p className="border-t border-paper-200 bg-paper-50 px-2 py-1 text-center text-[11px] text-ink-500">
+                    … e mais {result.totalFichas - result.preview.length} fichas
+                  </p>
+                )}
+              </div>
+            )}
+
+            {result.issues.length > 0 && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+                <p className="mb-1 text-[11.5px] font-semibold text-amber-900">
+                  {result.issues.length} ficha(s) com observação
+                </p>
+                <ul className="max-h-28 space-y-0.5 overflow-y-auto text-[11.5px] leading-snug text-amber-900">
+                  {result.issues.map((it) => (
+                    <li key={`${it.index}-${it.name}`}>
+                      <span className="font-mono">#{it.index}</span> {it.name} — {it.reason}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
+/* ==================================================================
+   AGRUPAMENTO VISUAL DO FORMULÁRIO
+   ================================================================== */
+
+/**
+ * Bloco de campos com título, no mesmo espírito das caixas da ficha do
+ * sistema antigo. Mantém a paleta e os componentes existentes — só
+ * organiza: um cadastro com ~25 campos numa grade única vira parede.
+ */
+function FormSection({
+  title,
+  last,
+  children,
+}: {
+  title: string;
+  last?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className={last ? "" : "mb-5"}>
+      <h3 className="mb-2.5 flex items-center gap-2 font-mono text-[10px] font-semibold tracking-[0.16em] text-ink-500 uppercase">
+        {title}
+        <span className="h-px flex-1 bg-paper-200" />
+      </h3>
+      {children}
+    </section>
   );
 }

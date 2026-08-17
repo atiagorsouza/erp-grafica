@@ -127,8 +127,9 @@ export async function getDashboardStats() {
     db.select().from(services),
     db.select().from(quotes),
   ]);
-  const salesRows = await db.select().from(sales);
-  const tx = await db.select().from(transactions);
+  /* v3.11.0 — cancelada não é faturamento; arquivado não é conta */
+  const salesRows = (await db.select().from(sales)).filter((r) => r.status !== "cancelada");
+  const tx = (await db.select().from(transactions)).filter((r) => !r.archivedAt);
 
   const revenue = salesRows.reduce(
     (sum, r) => sum + (Number(r.total) || 0),

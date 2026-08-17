@@ -90,6 +90,7 @@ export default async function PdvPage() {
         requireCustomer: defaults.pdv_require_customer,
         requireOpenCash: defaults.pdv_require_open_cash,
         receiptFooter: defaults.pdv_receipt_footer,
+        receiptBoldness: defaults.pdv_receipt_boldness,
       }}
       cashSession={
         session

@@ -33,30 +33,53 @@ export interface PricingDefaults {
   pdv_require_customer: boolean;
   pdv_require_open_cash: boolean;
   pdv_receipt_footer: string;
+  /* peso da fonte no cupom impresso (400–800): compensa cabeça térmica
+     gasta ou bobina de baixa sensibilidade */
+  pdv_receipt_boldness: number;
+  /* Emitente — exigidos na NF-e (v3.21.0) */
+  company_ie: string;
+  company_im: string;
+  company_tax_regime: string;
+  company_cnae: string;
+  company_city_code: string;
+  company_complement: string;
+  company_crt: string;
 }
 
+/**
+ * Os campos `company_*` e `pix_key` nascem VAZIOS de propósito.
+ *
+ * Até a v3.17.0 eles vinham com os dados da VTDIGITAL fixos no código.
+ * Consequência: campo apagado no Painel continuava sendo impresso em
+ * cupom, orçamento e OS — o operador limpava e nada mudava — e uma
+ * instalação em outra gráfica sairia com dados que não são dela.
+ *
+ * Campo vazio deve sumir do documento, nunca ser "completado" por um
+ * exemplo. Os valores reais vêm do Painel de Controle → Identidade da
+ * empresa (tabela `settings`).
+ */
 const DEFAULTS: PricingDefaults = {
   taxRate: 0.06,
   operationalRate: 0.15,
   cardFeeRate: 0.0199,
   cardFeeCreditRate: 0.0499,
-  company_name: "VTDIGITAL ART STUDIO",
-  company_legal_name: "VTDIGITAL ART STUDIO",
-  company_trade_name: "VTDIGITAL ART STUDIO",
-  company_document: "30.189.224/0001-54",
-  company_email: "contato.vt@vtdigital.com.br",
-  company_phone: "(21) 2038-3504",
-  company_phone2: "(21) 97886-9414",
-  company_whatsapp: "(21) 97886-9414",
-  company_address: "RUA ARAQUEM 910 — BANGU, RIO DE JANEIRO - RJ",
-  company_street: "RUA ARAQUEM 910",
+  company_name: "",
+  company_legal_name: "",
+  company_trade_name: "",
+  company_document: "",
+  company_email: "",
+  company_phone: "",
+  company_phone2: "",
+  company_whatsapp: "",
+  company_address: "",
+  company_street: "",
   company_number: "",
-  company_district: "BANGU",
-  company_city: "RIO DE JANEIRO",
-  company_state: "RJ",
-  company_cep: "21863-090",
-  company_website: "http://www.vtdigital.com.br",
-  pix_key: "contato.vt@vtdigital.com.br",
+  company_district: "",
+  company_city: "",
+  company_state: "",
+  company_cep: "",
+  company_website: "",
+  pix_key: "",
   fiscal_environment: "homologacao",
   fiscal_tax_regime: "simples",
   pdv_seller_default: "OPERADOR",
@@ -65,7 +88,34 @@ const DEFAULTS: PricingDefaults = {
   pdv_require_customer: false,
   pdv_require_open_cash: true,
   pdv_receipt_footer: "Agradecemos a preferência! Volte sempre.",
+  pdv_receipt_boldness: 600,
+  company_ie: "",
+  company_im: "",
+  company_tax_regime: "simples",
+  company_cnae: "",
+  company_city_code: "",
+  company_complement: "",
+  company_crt: "1",
 };
+
+/**
+ * Aplica máscara de CNPJ/CPF no documento da empresa.
+ *
+ * O Painel aceita o número digitado como vier; sem isto, um CNPJ salvo
+ * como "07978674738" saía cru no cupom, orçamento e OS. Se a contagem
+ * de dígitos não for de CPF (11) nem de CNPJ (14), devolve o texto
+ * original — pode ser inscrição estrangeira ou algo em digitação.
+ */
+function formatDocument(raw: string): string {
+  const digits = String(raw || "").replace(/\D/g, "");
+  if (digits.length === 14) {
+    return digits.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, "$1.$2.$3/$4-$5");
+  }
+  if (digits.length === 11) {
+    return digits.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/, "$1.$2.$3-$4");
+  }
+  return String(raw || "");
+}
 
 let cache: PricingDefaults | null = null;
 
@@ -106,7 +156,9 @@ export async function getPricingDefaults(): Promise<PricingDefaults> {
       company_name: tradeName,
       company_legal_name: legalName,
       company_trade_name: tradeName,
-      company_document: map.get("company_cnpj") || map.get("company_document") || DEFAULTS.company_document,
+      company_document: formatDocument(
+        map.get("company_cnpj") || map.get("company_document") || DEFAULTS.company_document
+      ),
       company_email: map.get("company_email") || DEFAULTS.company_email,
       company_phone: map.get("company_phone") || DEFAULTS.company_phone,
       company_phone2: map.get("company_phone2") || map.get("company_whatsapp") || DEFAULTS.company_phone2,
@@ -131,6 +183,20 @@ export async function getPricingDefaults(): Promise<PricingDefaults> {
           ? DEFAULTS.pdv_require_open_cash
           : isSettingEnabled(map.get("pdv_require_open_cash")),
       pdv_receipt_footer: map.get("pdv_receipt_footer") || DEFAULTS.pdv_receipt_footer,
+      pdv_receipt_boldness: (() => {
+        const raw = Number(map.get("pdv_receipt_boldness"));
+        /* fora de 400–800 o navegador ignora o valor: melhor cair no padrão */
+        return Number.isFinite(raw) && raw >= 400 && raw <= 800
+          ? raw
+          : DEFAULTS.pdv_receipt_boldness;
+      })(),
+      company_ie: map.get("company_ie") || DEFAULTS.company_ie,
+      company_im: map.get("company_im") || DEFAULTS.company_im,
+      company_tax_regime: map.get("company_tax_regime") || DEFAULTS.company_tax_regime,
+      company_cnae: map.get("company_cnae") || DEFAULTS.company_cnae,
+      company_city_code: map.get("company_city_code") || DEFAULTS.company_city_code,
+      company_complement: map.get("company_complement") || DEFAULTS.company_complement,
+      company_crt: map.get("company_crt") || DEFAULTS.company_crt,
     };
     return cache;
   } catch {

@@ -3,7 +3,6 @@
 import { formatMoney } from "@/lib/pricing";
 import { cn } from "@/lib/format";
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Row = Record<string, any>;
 
 type DocType = "order" | "quote";
@@ -157,10 +156,24 @@ tbody td.num{text-align:center}
           <div className="grid grid-4">
             <div><div className="field-label">CLIENTE</div><div className="field-value">{customer?.tradeName || customer?.name || "Consumidor avulso"}</div></div>
             <div><div className="field-label">CPF/CNPJ</div><div className="field-value">{customer?.document || "—"}</div></div>
-            <div><div className="field-label">CONTATO</div><div className="field-value">{customer?.whatsapp || customer?.mobilePhone || customer?.phone || "—"}</div></div>
+            {/* `mobilePhone` não existe na tabela desde sempre — a coluna
+                é `whatsapp`. Mantido só telefone e WhatsApp reais. */}
+            <div><div className="field-label">CONTATO</div><div className="field-value">{customer?.whatsapp || customer?.phone || "—"}</div></div>
             <div><div className="field-label">E-MAIL</div><div className="field-value">{customer?.email || "—"}</div></div>
           </div>
-          <div><div className="field-label">ENDEREÇO</div><div className="field-value">{[customer?.street, customer?.number, customer?.district, customer?.city, customer?.state].filter(Boolean).join(", ") || "—"}</div></div>
+
+          {/* Razão social e IE só aparecem quando o cliente é PJ: em
+              documento fiscal esses dados identificam o destinatário. */}
+          {customer?.type === "pj" && (
+            <div className="grid grid-4">
+              <div><div className="field-label">RAZÃO SOCIAL</div><div className="field-value">{customer?.name || "—"}</div></div>
+              <div><div className="field-label">INSC. ESTADUAL</div><div className="field-value">{customer?.stateRegistration || "ISENTO"}</div></div>
+              <div><div className="field-label">INSC. MUNICIPAL</div><div className="field-value">{customer?.municipalRegistration || "—"}</div></div>
+              <div><div className="field-label">A/C</div><div className="field-value">{customer?.contactName || "—"}</div></div>
+            </div>
+          )}
+
+          <div><div className="field-label">ENDEREÇO</div><div className="field-value">{[customer?.street, customer?.number, customer?.complement, customer?.district, customer?.city, customer?.state, customer?.cep && `CEP ${customer.cep}`].filter(Boolean).join(", ") || "—"}</div></div>
 
           {/* Condições */}
           {isOrder && (

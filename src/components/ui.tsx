@@ -80,6 +80,8 @@ export function IconButton({
   label,
   tone = "default",
   size = "md",
+  loading,
+  disabled,
   className,
   ...rest
 }: ButtonHTMLAttributes<HTMLButtonElement> & {
@@ -87,13 +89,16 @@ export function IconButton({
   label: string;
   tone?: "default" | "danger" | "primary";
   size?: "sm" | "md";
+  /** trava o botão e mostra spinner enquanto a ação está em voo */
+  loading?: boolean;
 }) {
   return (
     <button
       title={label}
       aria-label={label}
+      disabled={disabled || loading}
       className={cn(
-        "focus-ring inline-flex cursor-pointer items-center justify-center rounded-md transition-colors",
+        "focus-ring inline-flex cursor-pointer items-center justify-center rounded-md transition-colors disabled:cursor-not-allowed disabled:opacity-40",
         size === "sm" ? "h-7 w-7" : "h-8.5 w-8.5",
         tone === "danger" && "text-ink-400 hover:bg-red-50 hover:text-red-700",
         tone === "primary" && "text-proc-c-strong hover:bg-proc-c-soft",
@@ -102,7 +107,16 @@ export function IconButton({
       )}
       {...rest}
     >
-      <Icon name={name} size={size === "sm" ? 14 : 16} />
+      {loading ? (
+        <span
+          className={cn(
+            "animate-spin rounded-full border-2 border-current border-t-transparent",
+            size === "sm" ? "h-3 w-3" : "h-3.5 w-3.5"
+          )}
+        />
+      ) : (
+        <Icon name={name} size={size === "sm" ? 14 : 16} />
+      )}
     </button>
   );
 }

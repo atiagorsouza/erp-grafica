@@ -6,11 +6,17 @@ import { listProducts } from "@/lib/queries";
 import { getServices } from "@/lib/queries-extra";
 import { getPricingDefaults } from "@/lib/settings";
 import { QuotesClient } from "@/components/modules/QuotesClient";
+import { expireStaleQuotes } from "@/lib/quotes";
 
 export const metadata: Metadata = { title: "Orçamentos" };
 export const dynamic = "force-dynamic";
 
 export default async function OrcamentosPage() {
+  /* Propostas vencidas passam a "expirado" antes da leitura: sem isto,
+     a expiração só acontecia no install/update e o funil ficava
+     otimista entre um deploy e outro. */
+  await expireStaleQuotes();
+
   const [quoteRows, items, customerRows, productRows, serviceRows, orderRows, defaults] = await Promise.all([
     db.select().from(quotes).orderBy(desc(quotes.createdAt)),
     db.select().from(quoteItems),

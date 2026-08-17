@@ -10,8 +10,8 @@
  *   MINOR — nova funcionalidade de módulo (atualização com `scripts/update.sh`)
  *   PATCH — correção de bug (atualização com `scripts/update.sh`)
  */
-export const APP_VERSION = "3.10.0";
-export const APP_RELEASE = "Clean Start";
+export const APP_VERSION = "3.21.0";
+export const APP_RELEASE = "Quadro Confiável";
 export const APP_CHANNEL = "stable";
 export const APP_REPO = "atiagorsouza/erp-grafica";
 export const APP_LABEL = `v${APP_VERSION} · ${APP_RELEASE}`;

@@ -7,6 +7,8 @@ import { eq, sql } from "drizzle-orm";
 import { nextDocumentNumber } from "@/lib/documents";
 import { formatCEP, formatPhone, isValidEmail } from "@/lib/validators";
 import { round2, toDecimalString, toNumber } from "@/lib/money";
+import { upsertAutoTransaction } from "@/lib/finance";
+import { todayISO } from "@/lib/period";
 
 export type StockError = { error: string; status: number; details?: unknown };
 
@@ -202,6 +204,35 @@ export async function receivePurchase(purchaseId: number) {
       await tx.insert(stockMovements).values({ kind: "entrada", targetType: "material", materialId: item.materialId, quantity: toDecimalString(quantity, 3), unitCost: toDecimalString(unitCost, 4), reason: "compra", reference: purchase.number, notes: "Recebimento automático de compra.", automatic: true });
     }
     const [updated] = await tx.update(purchases).set({ status: "recebido", receivedAt: new Date() }).where(eq(purchases.id, purchaseId)).returning();
+
+    /* ------------------------------------------------------------
+     * DESPESA DA COMPRA (v3.11.0)
+     *
+     * Até a v3.10.0 o recebimento só mexia em estoque: o custo do
+     * insumo NUNCA entrava no financeiro, embora a própria tela do
+     * Financeiro prometesse "compras, as despesas". O resultado do
+     * período mostrava receita sem o custo de material.
+     *
+     * `upsertAutoTransaction` casa por purchaseId, então receber a
+     * mesma compra duas vezes atualiza — não duplica a despesa.
+     * ----------------------------------------------------------- */
+    const totalPurchase = toNumber(updated.total, 0);
+    if (totalPurchase > 0) {
+      const [supplier] = updated.supplierId
+        ? await tx.select().from(suppliers).where(eq(suppliers.id, updated.supplierId)).limit(1)
+        : [];
+      await upsertAutoTransaction(tx, {
+        type: "despesa",
+        category: "compra",
+        description: `Compra ${updated.number}${supplier?.name ? ` — ${supplier.name}` : ""}`,
+        amount: totalPurchase,
+        dueDate: updated.expectedDate || todayISO(),
+        status: "pendente",
+        purchaseId: updated.id,
+        notes: "Gerada automaticamente pelo recebimento da compra.",
+      });
+    }
+
     return updated;
   });
   return { ok: true as const, row };

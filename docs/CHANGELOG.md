@@ -5,6 +5,864 @@ Versionamento: [SemVer](https://semver.org/lang/pt-BR/).
 
 ---
 
+## [3.21.0] — 2026-08-17
+
+Reestruturação do cadastro de Clientes conforme as telas PF/PJ enviadas
+pelo usuário. Documentado em `docs/AUDIT-CADASTRO-CLIENTES.md`.
+
+### Adicionado — cadastro estruturado PF/PJ
+
+Seis colunas em `customers`: `rg_issuer`, `marital_status`,
+`company_size`, `founded_at`, `origin`, `whatsapp_opt_out`.
+
+O formulário passou de uma grade única para cinco blocos — Identificação,
+Documentos pessoais / Dados da empresa, Endereço, Contato e Situação
+comercial — **sem alterar layout, cores ou componentes**. O segundo bloco
+troca de conteúdo conforme PF ou PJ. Nome de contato existe só para PJ.
+
+Fora do escopo por decisão do usuário: segmento, Instagram, Facebook,
+nº de celular e apelido.
+
+### Adicionado — CPF/CNPJ obrigatório e validado
+
+O cadastro completo exige documento com dígito verificador válido (422).
+O **cadastro rápido do balcão (F8) continua livre** via `quickEntry`, no
+PDV, em Pedidos e em Orçamentos. `birthDate` e `foundedAt` são validadas
+como `YYYY-MM-DD` e recusadas se estiverem no futuro.
+
+### Adicionado — máscaras corrigidas durante a digitação
+
+Documento (alterna CPF/CNPJ pelos dígitos), CEP, telefone, WhatsApp e
+inscrição estadual. O CEP voltou para o início do bloco de endereço e
+mantém o preenchimento automático via ViaCEP.
+
+### Adicionado — campos fiscais do emitente no Painel de Controle
+
+Inscrição estadual, inscrição municipal, regime tributário, CNAE
+principal, código IBGE do município, complemento e CRT — o que faltava
+para emissão de nota fiscal. `company_city_code` = 3304557 (Rio de
+Janeiro).
+
+### Corrigido — `mobilePhone` nunca existiu
+
+`PrintDocument.tsx` lia `customer.mobilePhone`, coluna inexistente: o
+contato caía silenciosamente para o telefone fixo. Passou a usar
+`whatsapp` / `phone`.
+
+### Corrigido — importador de PDF perdia campos e vazava rótulos
+
+Passou a extrair complemento, RG, órgão emissor, nascimento, estado
+civil, IE, IM e contato, com `origin: "importacao"`. Sem âncora, os
+regexes capturavam o rótulo seguinte (estado civil trazia
+"Cônjuge..: Escolaridade:"); `grab()` foi ancorado e `clean()` cobre ~20
+rótulos do legado.
+
+### Alterado — documentos impressos
+
+Cupom 80 mm mostra fantasia, razão social e `A/C:` para PJ. OS/A4 ganhou
+bloco fiscal (razão social, IE, IM, A/C) exibido só para PJ, e o endereço
+passou a incluir complemento e CEP.
+
+### Testes
+
+`e2e:smoke` foi de 101 para **112 checks**.
+
+---
+
+## [3.20.0] — 2026-08-17
+
+Auditoria do Kanban de Produção. Documentado em `docs/AUDIT-KANBAN.md`.
+
+### Corrigido — `reorder` era uma porta lateral sem regras (crítico)
+
+`updateKanbanCard` impede que um card ligado a um Pedido vá para
+"cancelado" — cancelamento exige motivo e estorno formais em Pedidos & OS.
+O `reorderKanban` alterava a mesma coluna sem passar por nenhuma dessas
+regras:
+
+```
+via update   → 409 "Cancele pedidos vinculados em Pedidos & OS..."
+via reorder  → {"ok":true}   ← card cancelado, pedido intacto
+```
+
+Agora o `reorder` aplica a mesma trava.
+
+### Corrigido — `reorder` não sincronizava o Pedido (crítico)
+
+`updateKanbanCard` traduz a coluna do card em status do pedido (`pronto` →
+produção concluída, `entregue` → entrega concluída). O `reorder` não fazia
+nada disso:
+
+```
+card movido para "pronto" via reorder
+  → card:   column = pronto
+  → pedido: production_status = aguardando   ← não mudou
+```
+
+O quadro dizia "pronto" enquanto a tela de Pedidos dizia "nem começou". Como
+arrastar é justamente a operação que usa `reorder`, esse era o caminho normal
+de uso. Agora só os cards que realmente mudaram de coluna disparam a
+sincronização — reordenar dentro da coluna não altera o andamento.
+
+### Corrigido — `reorder` movia cards por acidente
+
+A função aplicava a coluna a **todos** os ids recebidos, sem conferir a
+origem: uma requisição de "reordenar backlog" que incluísse por engano o id de
+outro card o trazia para o backlog silenciosamente.
+
+Agora existe o parâmetro `allowMove`: sem ele, card de outra coluna é
+recusado com 422 (e a resposta diz quais ids). Ids repetidos também são
+recusados.
+
+### Corrigido — prazo no passado no card
+
+`dueDate: "2020-01-01"` era aceito. Mesma correção já aplicada em Orçamentos
+(v3.16.0) e Pedidos (v3.19.0).
+
+### Corrigido — `quoteId` sem chave estrangeira
+
+`orderId` e `customerId` sempre tiveram FK; `quoteId` era um `integer` solto,
+e um orçamento removido deixaria o card apontando para um id inexistente.
+Agora tem FK com `on delete set null`.
+
+### Adicionado — ordenar a fila arrastando
+
+O campo `order` existia no banco e o endpoint `reorder` funcionava, mas **a
+tela nunca os usava**: todos os cards ficavam com ordem 0 e não havia como
+priorizar a fila de produção — o trabalho urgente ficava na mesma altura do
+resto.
+
+Agora, soltar um card **sobre outro** insere-o naquela posição, com uma linha
+guia indicando onde vai entrar. Soltar no vazio da coluna manda para o fim. A
+ordem escolhida é salva e respeitada ao recarregar.
+
+### Corrigido — dois erros de lint pré-existentes em `KanbanClient.tsx`
+
+### Alterado
+
+- `MutateOp` ganhou a operação `reorder`.
+- `e2e-smoke.mjs`: 93 → 101 verificações.
+
+---
+
+## [3.19.0] — 2026-08-17
+
+Auditoria de Pedidos & OS. Documentado em `docs/AUDIT-PEDIDOS-OS.md`.
+
+### Corrigido — pedido de R$ 0,00 virava receita (crítico)
+
+`createOrder` não validava o total. Desconto maior que o subtotal zerava o
+pedido e o zero seguia para o Financeiro:
+
+```
+POST /api/crud/orders { items:[{unitPrice:100}], discount:99999 }
+  → PED-2026-0022 aceito, total 0.0000
+  → transactions: receita | pedido | 0.00 | pendente
+```
+
+Quantidade `0,0001` produzia o mesmo efeito. Última porta aberta do mesmo bug
+já fechado no PDV (v3.14.0) e no Orçamento (v3.16.0): agora há guarda de total,
+teto de 100% no desconto percentual, recusa de desconto maior que o subtotal e
+quantidade mínima de 0,001. As regras valem na criação **e** na edição.
+
+### Corrigido — status inventado sumia da gestão (crítico)
+
+Os cinco eixos de status eram `text` livre, sem validação:
+
+```
+PATCH { status:"banana", productionStatus:"voando" }  → aceito e gravado
+```
+
+As abas da tela filtram por valor exato, então um pedido com status fora da
+lista **não aparecia em nenhuma aba** — invisível na gestão, apesar de existir,
+ter card no Kanban e lançamento no Financeiro. Um erro de digitação numa
+integração bastava para "perder" um pedido em produção.
+
+Agora os cinco campos (mais `priority`) são enums, e o erro lista os valores
+aceitos. Os enums incluem `cancelado` em produção/entrega/financeiro porque é
+assim que `cancelOrder` marca o pedido desfeito, e mantêm `aprovado`/`recusado`
+no masculino para não invalidar os pedidos já gravados.
+
+### Corrigido — prazo de entrega no passado
+
+`dueDate: "2020-01-01"` era aceito e virava prazo do card no Kanban e da
+entrega. Agora recusado com 422.
+
+### Corrigido — erro do módulo vazava mensagem crua
+
+`/api/crud/orders` devolvia `e.message` no catch, podendo expor SQL. Agora
+responde mensagem genérica e registra o detalhe no log.
+
+### Adicionado — controle de atraso
+
+O prazo era exibido mas nunca comparado com hoje: nada sinalizava atraso, numa
+gráfica onde prazo é o que mais importa.
+
+- nova aba **Atrasados** com contador;
+- prazo vencido em vermelho, com selo `7d atraso`;
+- prazo de hoje em âmbar, com selo `hoje`;
+- pedidos concluídos ou cancelados não contam como atrasados.
+
+### Corrigido — três erros de React 19 no OrdersClient
+
+Herdados: `Date.now()` durante o render em **duas** impressões de OS (A4 e
+80 mm) — que também podia divergir entre servidor e cliente — e reset do modal
+de cliente por `setState` em efeito, trocado por `key` no pai. O módulo passa
+no ESLint sem erros.
+
+### Verificado — cancelamento está correto
+
+Registrado por ter sido testado a fundo: estorna com `estorno_pedido`
+preservando a receita original, é idempotente (segundo cancelamento → 409) e
+resiste à corrida (5 cancelamentos paralelos → 1 estorno).
+
+### Alterado
+
+- `e2e-smoke.mjs`: 81 → 93 verificações.
+
+---
+
+## [3.18.0] — 2026-08-17
+
+Importação de clientes do sistema antigo e endurecimento do CRM.
+
+### Adicionado — importar clientes por PDF
+
+O sistema anterior só exporta clientes como PDF (relatório "FICHA DO
+CLIENTE"). O arquivo tem texto real, não é imagem escaneada, então os campos
+podem ser lidos por rótulo — `Nome/Razão:`, `Bairro..:`, `Nº do CPF:` — em vez
+de por posição, o que sobrevive à variação de espaçamento entre fichas.
+
+**Clientes & CRM → Importar PDF.** O fluxo é em duas etapas:
+
+1. **Analisar arquivo** — lê o PDF e mostra quantas fichas encontrou, quantas
+   são novas, quantas já existem e quantas serão ignoradas, com prévia das
+   10 primeiras. Nada é gravado.
+2. **Confirmar importação** — grava.
+
+Regras de gravação:
+
+- **Deduplicação por documento**, ignorando máscara: `034.460.327-03` e
+  `03446032703` são o mesmo cliente. Reimportar o mesmo arquivo não duplica.
+- **Cliente já existente é completado, nunca sobrescrito**: só os campos em
+  branco no PrintFlow recebem o dado do PDF. O que foi digitado aqui tem
+  precedência.
+- **PF ou PJ pela contagem de dígitos**, já que o legado deixa "Tipo Cadastro"
+  em branco.
+- **Documento inválido não bloqueia a ficha**: o cliente entra sem documento e
+  o caso aparece no relatório de observações.
+- Máscaras vazias do legado (`(  )     -`, `  .   .   /    -`) viram campo
+  nulo, não texto sujo.
+- Origem registrada nas observações: `Importado do sistema antigo · código 82`.
+
+Novo endpoint `POST /api/crm/import`, `src/lib/import-customers.ts` e a
+dependência `unpdf` para leitura do PDF.
+
+### Corrigido — documento duplicado dependia só do código
+
+`customers.document` não tinha índice único: a checagem de duplicata era um
+`SELECT` seguido de `INSERT`, o mesmo TOCTOU que duplicou pedidos na v3.16.0.
+Com importação em lote o risco cresce — centenas de inserções seguidas.
+
+```
+Teste: 5 cadastros paralelos do mesmo CNPJ
+ANTES  passava por sorte de timing, sem garantia
+AGORA  1 criado, 4 recusados com mensagem clara
+```
+
+Índice `customers_document_unique_idx` (parcial: documento é opcional).
+
+### Corrigido — erro de duplicata vazava SQL
+
+A rota `/api/crud/customers` devolvia `e.message` no catch, expondo o `INSERT`
+inteiro ao navegador. Agora responde 409 com "Este documento já está
+cadastrado para outro cliente"; o detalhe fica no log.
+
+### Corrigido — CNPJ válido recusado como "CPF inválido"
+
+O campo tipo tem default `pf`, então um CNPJ correto enviado sem marcar PJ era
+validado como CPF e recusado — mensagem que não ajudava quem digitou o
+documento certo. O tipo agora é inferido pela contagem de dígitos (14 = CNPJ,
+11 = CPF) antes da validação.
+
+### Alterado
+
+- `scripts/repair-crm.mjs` cria o índice novo e trata bases com duplicatas:
+  mantém o cadastro mais antigo e move o documento dos demais para as
+  observações — nenhum cliente é apagado.
+- Corrigidos dois erros de lint pré-existentes em `ClientsClient.tsx`.
+- `e2e-smoke.mjs`: 79 → 81 verificações.
+
+---
+
+## [3.17.1] — 2026-08-17
+
+Correção de segurança nos dados da empresa impressos nos documentos.
+
+### Corrigido — campo vazio no Painel era preenchido pelo código
+
+Os valores padrão de `company_*` em `src/lib/settings.ts` — e os fallbacks
+`||` dentro do cupom — vinham com os dados da VTDIGITAL fixos no código:
+nome, endereço, telefones, site e CNPJ.
+
+Consequência: qualquer campo deixado em branco no Painel de Controle era
+"completado" silenciosamente pelo código, sem que ninguém percebesse. O
+operador achava que tinha limpado o campo, mas o documento continuava
+imprimindo o valor antigo — e numa instalação em outra gráfica, sairiam dados
+que não são dela.
+
+```
+Teste: apagar o telefone no Painel
+ANTES  cupom continua imprimindo (21) 2038-3504 (valor fixo no código)
+AGORA  a linha simplesmente não é impressa
+```
+
+Dado de empresa é responsabilidade do Painel, nunca do código-fonte: o que
+está em branco deve sumir do documento.
+
+Todos os `company_*` e `pix_key` passam a nascer vazios, e o cabeçalho do
+cupom só renderiza a linha quando há dado. Vale para cupom, orçamento e OS,
+que compartilham o mesmo `getPricingDefaults()`.
+
+### Corrigido — CNPJ/CPF saía sem máscara
+
+O Painel salva o documento como digitado. Sem formatação, um CNPJ gravado como
+`12345678000190` saía cru no impresso. Agora recebe máscara na leitura
+(14 dígitos → CNPJ, 11 → CPF); contagem diferente é devolvida intacta, para
+não corromper inscrição estrangeira ou valor em digitação.
+
+---
+
+## [3.17.0] — 2026-08-17
+
+Legibilidade do cupom na impressora térmica 80 mm, a partir de um cupom real
+fotografado pelo usuário: só o texto em negrito saía nítido; endereço, CNPJ,
+telefones, o item vendido e o rodapé saíam lavados.
+
+### Corrigido — cupom saía lavado na térmica
+
+Não era a impressora. A cabeça térmica só sabe queimar ou não queimar o ponto,
+mas o navegador rasteriza o texto com antialiasing — os pixels cinzentos das
+bordas viram pontos meio queimados. Só o que tinha `font-bold` tinha corpo
+para resistir.
+
+No `@media print` do cupom (`#receipt-print`, `#order-print-80mm`):
+
+- tudo em `color: #000` com `font-weight` reforçado e
+  `-webkit-font-smoothing: none` — sem meio-tom;
+- divisórias tracejadas viram sólidas (tracejado fino desaparece);
+- piso de 11 px: o rodapé usava 9 px e 10 px, e a 203 dpi a cabeça não tem
+  resolução para formar o glifo.
+
+### Adicionado — intensidade calibrável
+
+Painel de Controle → PDV → **Intensidade da impressão térmica**: Normal /
+Reforçado (padrão) / Escuro / Muito escuro. Cada bobina e cada cabeça gasta se
+comporta diferente: peso 700 numa impressora nova pode empastar os caracteres
+estreitos (`8`, `B`, `R`). Valor fora da faixa 400–800 cai no padrão 600.
+
+### Adicionado — botão "Nítido" (impressão em texto puro)
+
+Ao lado de "Imprimir Cupom". Abre o cupom já montado em texto puro dentro de
+um `<pre>`, sem rasterização de layout — a máxima nitidez que a bobina aceita,
+para quando a cabeça térmica já estiver gasta.
+
+Reaproveita o `buildTextReceipt` que já existia para o WhatsApp. Nele, o
+negrito era marcado com `*asteriscos*` (sintaxe do WhatsApp), que no papel
+virariam sujeira: agora são convertidos em maiúsculas.
+
+### Alterado — bloco do cliente reorganizado
+
+O bairro dividia a linha com o telefone, partindo o endereço ao meio e
+deixando o número solto à direita, sem rótulo. Agora segue a sequência de
+correspondência, com os telefones identificados:
+
+```
+PADARIA PÃO QUENTE LTDA
+12.345.678/0001-95
+RUA LUZIA DE MACEDO DANTAS, 151
+BANGU - RIO DE JANEIRO/RJ
+CEP: 21863-030
+TEL: (21) 3000-0000
+WHATSAPP: (21) 99999-1111
+```
+
+Quando telefone e WhatsApp são o mesmo número, funde em uma linha
+`TEL/WHATSAPP` em vez de repetir o dígito — a comparação ignora a máscara.
+Linha sem dado não é impressa. Os mesmos rótulos valem para o cupom de texto,
+mantendo impresso, botão "Nítido" e envio por WhatsApp consistentes.
+
+---
+
+## [3.16.0] — 2026-08-17
+
+Auditoria do módulo Orçamentos. Sete problemas, todos reproduzidos contra o
+sistema rodando antes da correção. Documentado em
+`docs/AUDIT-ORCAMENTOS.md`.
+
+### Corrigido — um orçamento virava vários pedidos (crítico)
+
+`POST /api/orders/convert` conferia a existência do pedido com um `SELECT` e
+inseria em seguida, sem trava — o mesmo TOCTOU do PDV, mas muito mais fácil de
+disparar: bastava um duplo-clique em "Converter em Pedido".
+
+```
+Teste: 5 conversões paralelas do mesmo orçamento
+ANTES  PED-2026-0040, PED-2026-0041, PED-2026-0042  → 3 pedidos
+AGORA  PED-2026-0044 nas cinco respostas            → 1 pedido
+```
+
+Índice único parcial `orders_one_per_quote_idx` em `orders(quote_id)`. As
+requisições perdedoras recebem o pedido vencedor com `existing: true`, sem
+erro. O botão também trava durante a conversão.
+
+### Corrigido — orçamento de R$ 0,00 virava receita paga (crítico)
+
+Não havia validação de total mínimo, e o zero atravessava toda a cadeia:
+proposta zerada → pedido com `financialStatus: pago` → **receita de R$ 0,00
+marcada como paga** no Financeiro e no ticket médio dos Relatórios. Mesmo
+buraco fechado no PDV na v3.14.0, aberto pela porta do orçamento.
+
+### Corrigido — desconto percentual acima de 100%
+
+`discountMode: "percent"` aceitava qualquer número; com `500` o sistema
+calculava 500% de desconto. Teto de 100% e recusa de desconto maior que o
+subtotal.
+
+### Corrigido — validade no passado
+
+`validUntil: "2020-01-01"` era gravado sem aviso e o orçamento nascia como
+rascunho, não expirado. O vendedor podia enviar ao cliente uma proposta
+vencida havia anos.
+
+### Corrigido — orçamento aprovado podia ser alterado por baixo
+
+A trava de edição só existia depois de virar pedido. Enquanto `aprovado`, itens
+e valores podiam ser trocados livremente: uma proposta de R$ 5.000 aceita pelo
+cliente virava R$ 10 sem deixar rastro.
+
+Agora alterar valores de orçamento aprovado exige **reabrir para
+renegociação** (botão novo, ou `reopen: true` na API). A reabertura devolve a
+proposta para `rascunho` e registra o valor anterior nas observações. Mudança
+apenas de status continua livre.
+
+### Corrigido — preço não era conferido com o catálogo
+
+O PDV recalcula o preço pelo cadastro; o orçamento aceitava qualquer
+`unitPrice` do navegador, sem registro. Como orçamento é negociação e desconto
+de linha é legítimo, o valor do vendedor continua valendo — mas a divergência
+agora volta em `warnings[]` e a tela avisa:
+
+```
+Cartão de Visita 4x4 (10un): 0.10 vs 0.27 de tabela (-63.0%)
+```
+
+### Corrigido — expiração só acontecia no deploy
+
+`repairExpiredQuotes()` rodava apenas em `install.sh`/`update.sh`. Entre dois
+deploys, propostas vencidas seguiam exibidas como "enviado", inflando o funil
+dos Relatórios. A página `/orcamentos` agora chama `expireStaleQuotes()` a
+cada carga (UPDATE em lote), movendo também o card do Kanban para cancelado.
+
+### Corrigido — três erros de React 19 no QuotesClient
+
+Herdados, do mesmo tipo já corrigido no `PosClient`: `setState` síncrono em
+efeito (abertura via `?novo=1` e reset do modal de cliente) e `Date.now()`
+lido durante o render da proposta impressa — que também podia divergir entre
+servidor e cliente. O módulo passa no ESLint sem erros.
+
+### Alterado
+
+- `scripts/repair-quotes.mjs` cria o índice novo e desvincula pedidos
+  duplicados de bases antigas (mantém o mais antigo, não apaga nada).
+- Erros do módulo deixam de devolver a mensagem crua ao navegador.
+- `e2e-smoke.mjs`: 66 → 79 verificações.
+
+---
+
+## [3.15.0] — 2026-08-17
+
+Melhorias de operação no PDV. Três recursos que o servidor já suportava mas a
+tela nunca ofereceu, mais recuperação de carrinho.
+
+### Adicionado — pagamento dividido
+
+O balcão só conseguia registrar **uma** forma de pagamento por venda. Quando o
+cliente pagava metade no PIX e metade no dinheiro, o operador tinha que
+escolher uma e mentir — o que sujava o fechamento de caixa e a apuração de
+taxas.
+
+`createSale` aceitava `payments[]` desde a v3.10, com taxa calculada por
+parcela. A tela simplesmente não usava. Agora:
+
+- botão **⇄ dividir** (atalho **F5**) ao lado do seletor de pagamento;
+- até 4 formas por venda, com botão "resto" para jogar o saldo restante;
+- indicador ao vivo de quanto falta distribuir; o botão de finalizar só libera
+  quando a divisão fecha;
+- a taxa aparece separada, calculada por parcela — crédito 4,99% incide só
+  sobre a parte no crédito;
+- troco calculado sobre a **parcela em dinheiro**, não sobre o total;
+- cupom impresso discrimina cada forma.
+
+### Adicionado — últimas vendas, reimpressão e cancelamento
+
+Depois de finalizar, o cupom sumia. Reimprimir a segunda via exigia sair do
+PDV; cancelar uma venda só era possível pela API.
+
+- botão **Últimas vendas** (atalho **F6**) lista o movimento das últimas 24h;
+- **reimprimir** remonta o cupom térmico a partir da venda gravada;
+- **cancelar** com motivo obrigatório, direto do balcão.
+
+O cancelamento usa o `cancelSale` que já existia: devolve o estoque item a
+item (produtos e materiais), estorna a receita e a taxa de cartão no
+Financeiro e mantém a venda no histórico marcada como cancelada — nada é
+apagado.
+
+Novo endpoint `GET /api/pdv/recent-sales`.
+
+### Adicionado — recuperação de carrinho
+
+F5 acidental, queda de energia ou aba fechada no meio do atendimento apagavam
+o carrinho inteiro. O carrinho agora é espelhado no navegador e oferecido de
+volta ao reabrir o PDV, com a hora em que foi salvo. Rascunho de mais de 12h é
+descartado.
+
+O `clientRef` original é preservado na recuperação: se a venda chegou a ser
+enviada antes da queda, a idempotência do servidor impede a duplicação.
+
+### Alterado
+
+- **F5** deixa de recarregar a página no meio da venda e passa a acionar a
+  divisão de pagamento.
+- Rodapé de atalhos atualizado: F2 buscar · F4 pagamento · F5 dividir ·
+  F6 últimas · F8 cliente · F9 finalizar.
+- `e2e-smoke.mjs`: 53 → 66 verificações.
+
+---
+
+## [3.14.0] — 2026-08-17
+
+Auditoria do PDV. Três bugs críticos de concorrência e integridade, todos
+reproduzidos com teste antes da correção.
+
+### Corrigido — corrida de estoque (crítico)
+
+`checkStock()` rodava FORA da transação que gravava a venda (clássico TOCTOU:
+time-of-check to time-of-use). Duas vendas simultâneas liam o mesmo saldo e
+ambas passavam.
+
+```
+Teste: estoque 10, cinco vendas paralelas de 3 unidades
+ANTES  5 aprovadas · estoque final -5  (com allowNegativeStock: false)
+AGORA  3 aprovadas, 2 bloqueadas · estoque final 1
+```
+
+A conferência passou a ser refeita DENTRO da transação com
+`SELECT ... FOR UPDATE`: a segunda venda espera a primeira e enxerga o saldo
+já debitado. Retorna 409 com `code: STOCK_RACE`.
+
+### Corrigido — múltiplos caixas abertos (crítico)
+
+Três requisições simultâneas de "abrir caixa" criavam três sessões, e a
+conferência de gaveta perdia o sentido (cada venda ia para uma sessão
+diferente). A verificação era um `SELECT` seguido de `INSERT`, sem trava.
+
+Agora existe o índice único parcial `cash_sessions_one_open_idx`
+(`WHERE status = 'aberto'`), declarado no schema. Teste com cinco aberturas
+paralelas: uma abre, quatro recebem "Já existe um caixa aberto".
+
+### Corrigido — venda de R$ 0,00 (alto)
+
+Desconto maior que o subtotal, desconto de 100% ou quantidade `0,0001`
+geravam cupom zerado, lançamento financeiro de R$ 0,00 e distorção do ticket
+médio. Agora o total precisa ser maior que zero, com mensagem específica para
+o caso de desconto, e a quantidade mínima é `0,001`.
+
+### Corrigido — vazamento de SQL no caixa
+
+O handler de `/api/pdv/cash-session` devolvia `e.message` ao navegador; em
+violação de índice isso expunha o INSERT inteiro com nomes de colunas. Agora
+a mensagem é genérica e o detalhe fica no log do servidor — mesmo tratamento
+já aplicado no Financeiro na v3.11.0.
+
+### Corrigido — 6 erros de lint do React 19 no PosClient
+
+O arquivo tinha 6 erros `react-hooks` herdados (`setState` dentro de effect e
+acesso a variável antes da declaração), que mascaravam problemas reais de
+render em cascata:
+
+- preferência de vendedor: `useEffect` + `setState` → leitura na montagem com
+  `startTransition`
+- sessão sincronizada de props: efeito → ajuste durante o render
+- reset de campos dos modais (cliente, item avulso, caixa): três efeitos com
+  `setState` → remontagem por `key`
+- atalhos de teclado: o efeito usava `checkout()` antes da declaração e foi
+  movido para depois da função
+
+`PosClient.tsx` agora passa no ESLint sem nenhum erro.
+
+### Operação
+- `npm run e2e:smoke` foi de 47 para **53 verificações**, cobrindo corrida de
+  estoque, estoque negativo, venda zerada, abertura concorrente de caixa e
+  não vazamento de SQL.
+
+---
+
+## [3.13.1] — 2026-08-17
+
+### Corrigido — conflito entre a taxa da maquininha e a tarifa do link
+
+O grupo *Tributação* do Painel já tinha `card_fee_debit` (1,99%) e
+`card_fee_credit` (4,99%), usados pelo PDV com gross-up quando o cliente passa
+o cartão na **maquininha física**. O módulo de Cobranças, lançado na v3.13.0,
+ignorava esse contexto e gerava duas distorções:
+
+1. **Venda do PDV no cartão cobrada por link cobrava markup de maquininha.**
+   `sale.total` já embute o gross-up de 4,99%; o link cobrava esse total e a
+   InfinitePay ainda descontava a tarifa dela por cima. Em uma venda de
+   R$ 270,00 o cliente pagaria R$ 284,18 por uma maquininha que não foi usada.
+   Agora o link desconta `sale.card_fee` e cobra o valor real.
+
+2. **A tarifa do checkout não virava despesa.** O PDV lançava `taxa_cartao`,
+   mas o link lançava a receita cheia — o resultado ficava inflado. Agora a
+   tarifa vira despesa na categoria própria `taxa_infinitepay`, para o DRE
+   separar o custo do checkout online do custo da maquininha.
+
+### Adicionado
+- Taxas próprias da InfinitePay no Painel (grupo *Pagamentos*): Pix, crédito à
+  vista e crédito parcelado, mais a política **quem paga a tarifa**
+  (loja absorve ou repassa ao cliente com gross-up).
+- Campos `passed_fee` e `provider_fee` em `payment_links`.
+- Rótulos `Tarifa InfinitePay` e `Frete / etiqueta` no Financeiro, com as
+  categorias disponíveis no seletor de lançamento manual.
+
+### Alterado
+- As regras de negócio da cobrança (pedido cancelado, já quitado, valor zero)
+  passaram a ser avaliadas **antes** da checagem de configuração: a mensagem
+  fica mais útil que "InfiniteTag não configurada".
+- `repair-payments.mjs` avisa quando há cobrança paga sem tarifa registrada.
+
+---
+
+## [3.13.0] — 2026-08-17
+
+Módulo **Cobranças** integrado à API de Checkout da InfinitePay.
+
+### Contexto
+O stub anterior (`/api/integrations/infinitepay`) nunca funcionou: enviava
+`Authorization: Bearer <handle>` com `{ amount }`, e a API responde
+`400 param is missing or the value is empty or invalid: handle`. O contrato
+real exige o handle no CORPO e `items` com `price` em CENTAVOS. Nada no
+sistema chamava esse endpoint.
+
+### Adicionado — Módulo de Cobranças
+- Nova camada `src/lib/infinitepay.ts` com o contrato correto, verificado
+  contra a API de produção: `POST /links` e `POST /payment_check`.
+- Nova tela `/cobrancas`: total a receber, recebido, link da loja, criação de
+  cobrança (de pedido ou avulsa), verificação manual, comprovante e
+  cancelamento.
+- Nova tabela `payment_links` com vínculo para pedido, venda, orçamento,
+  cliente e o lançamento financeiro gerado.
+- Nova API `/api/payments` (`create`, `check`, `cancel`) e o webhook público
+  `/api/payments/webhook`.
+- Página `/pagamento/retorno` para onde o cliente volta após pagar, que já
+  confirma o pagamento ativamente.
+- Botão **Cobrar via InfinitePay** dentro de Pedidos & OS, com o link pronto
+  para copiar ou enviar por WhatsApp.
+
+### Segurança — webhook não confiável por padrão
+A InfinitePay **não assina** o webhook: não há HMAC nem token no header.
+Tratar o corpo como verdade permitiria a qualquer um marcar pedidos como
+pagos com um POST.
+
+- Nenhum webhook dá baixa sozinho: todo aviso dispara `payment_check` na API,
+  e **só a resposta da API quita o documento**.
+- `order_nsu` desconhecido é ignorado sem gravar nada.
+- Pagamento menor que o cobrado é registrado mas **não quita** o documento,
+  ficando sinalizado para conferência manual.
+- Verificado em teste: webhook forjado de R$ 500 manteve a cobrança
+  `pendente` e não lançou receita.
+
+### Integração com o sistema
+- **Pedidos/OS**: pagamento confirmado muda `financial_status` para pago e
+  grava a forma real (PIX/Crédito).
+- **Financeiro**: lança a receita automática vinculada ao documento, com
+  parcelas e link do comprovante nas observações.
+- **Relatórios**: entra no DRE e no mix de pagamento.
+- **Frete**: pedido com frete cotado inclui a linha "Frete" na cobrança.
+- Soma dos itens é conferida contra o total; divergindo, cobra em item único
+  para o cliente nunca pagar valor diferente do documento.
+
+### Painel de Controle
+Novo grupo *Pagamentos · InfinitePay* (7 chaves): InfiniteTag, URL pública do
+sistema, formas aceitas, baixa automática, validade do link e URLs de retorno
+e webhook.
+
+### Operação
+- Criado `scripts/repair-payments.mjs`: normaliza valores, expira vencidas,
+  religa cobranças pagas ao financeiro, reconstrói receitas faltantes, quita
+  pedidos confirmados e sinaliza divergência de valor.
+- Registrado em `install.sh` e `update.sh`.
+- `npm run e2e:smoke` foi de 41 para **47 verificações**.
+
+---
+
+## [3.12.0] — 2026-08-17
+
+Módulo **Envios & Frete** integrado ponta a ponta com a API SuperFrete.
+
+### Contexto
+Até a v3.11.0 existia apenas `/api/integrations/superfrete`: um stub isolado
+que calculava frete e devolvia JSON. `grep superfrete src/` não retornava
+nenhum consumidor — nada no sistema o chamava, não havia peso nos produtos,
+nada era gravado no banco e não sabia emitir etiqueta.
+
+### Adicionado — Módulo de Envios
+- Nova camada `src/lib/superfrete.ts` cobrindo o ciclo real da API:
+  cotação → carrinho → checkout → etiqueta → rastreio.
+- Nova tela `/envios`: saldo da conta, envios em trânsito, entregues, gasto
+  com frete, criação de envio a partir de pedido, pagamento da etiqueta,
+  impressão, atualização de rastreio e cancelamento.
+- Nova tabela `shipments` com vínculo para pedido, venda, entrega e cliente,
+  guardando cada etapa (`superfrete_order_id`, `tracking_code`, `label_url`),
+  o ambiente usado e o payload cru para auditoria.
+- Nova API `/api/shipping` com as operações `quote`, `cart`, `checkout`,
+  `label`, `track`, `cancel` e `sync`.
+- Componente compartilhado `ShippingQuote` usado por Envios e PDV, para que
+  os módulos cotem exatamente da mesma forma.
+
+### Adicionado — Integração com o sistema
+- **Produtos**: novos campos de peso, altura, largura e comprimento. A cotação
+  soma o peso real dos itens do carrinho; quando o produto não tem medida,
+  usa o pacote padrão do Painel de Controle e avisa na tela.
+- **PDV**: cotação de frete direto na venda quando a modalidade é entrega. O
+  valor entra em `sales.shipping_fee` e **o servidor soma no total** — o
+  cliente não pode forjar o frete, mesma regra do preço do produto.
+- **Entregas**: envio pago cria/atualiza o registro em `deliveries` com
+  método `correios`, código de rastreio e valor.
+- **Pedidos/OS**: `delivery_status` acompanha o envio automaticamente
+  (pago → separado, postado → em rota, entregue → entregue).
+- **Financeiro**: a etiqueta vira despesa automática na categoria `frete`,
+  vinculada ao pedido/venda, aparecendo no DRE dos Relatórios.
+- **Painel de Controle**: novo grupo *Envios & Frete* (11 chaves) com token,
+  ambiente, CEP de origem, serviços cotados, pacote padrão e políticas de
+  repasse ao cliente e de lançamento da despesa.
+
+### Segurança operacional
+- Checkout **confere o saldo antes de chamar a API** e informa quanto falta —
+  o erro nativo da SuperFrete é genérico e deixaria o operador sem saber o
+  que aconteceu.
+- A tela de pagamento mostra valor da etiqueta e saldo atual, e avisa em
+  vermelho quando o saldo não cobre.
+- Bloqueios com mensagem específica: pedido cancelado, cliente sem endereço
+  completo (lista os campos faltantes), impressão antes do pagamento e CNPJ
+  da empresa ausente.
+- Erros técnicos da API são traduzidos: `(correios.destination_postcode) é
+  obrigatório` virou "CEP de destino não encontrado na base dos Correios".
+- `sandbox` e `production` ficam gravados por envio, para os ambientes não se
+  misturarem.
+
+### Alterado
+- `/api/integrations/superfrete` continua respondendo no contrato antigo, mas
+  agora é só um adaptador sobre a camada nova.
+- `sales` ganhou `shipping_fee`, `shipping_service` e `shipping_service_id`.
+
+### Operação
+- Criado `scripts/repair-shipping.mjs`: normaliza medidas, corrige nome de
+  serviço, religa envios às entregas, sincroniza `delivery_status`,
+  reconstrói despesas de etiquetas pagas e marca carrinhos abandonados.
+- Registrado em `install.sh` e `update.sh`.
+- `npm run e2e:smoke` foi de 33 para **41 verificações**.
+
+---
+
+## [3.11.0] — 2026-08-17
+
+Fecha os dois últimos módulos sem camada server-side. Financeiro e
+Relatórios passam a seguir o mesmo padrão dos outros dez módulos:
+`src/lib/*.ts` + script de reparo + cobertura no smoke.
+
+### Corrigido — Financeiro (crítico)
+- **Valor em padrão brasileiro derrubava o lançamento.** `"10,50"` virava NaN
+  no `numeric` e a API respondia 500 devolvendo o SQL inteiro ao navegador.
+  Agora `src/lib/finance.ts` valida com Zod usando `money.ts`, aceita
+  `"1.234,56"` e `"R$ 10,50"`, e o erro nunca expõe a query.
+- **Valor negativo e descrição vazia eram aceitos** com 200 OK.
+- **Lançamento automático podia ser excluído e adulterado** pela UI: a receita
+  do PDV sumia do caixa e a reconciliação quebrava sem trilha. Lançamento com
+  origem (`sale_id`/`order_id`/`purchase_id`/`cash_session_id`) agora é
+  bloqueado para edição e exclusão — só a baixa é permitida.
+- **Exclusão virou arquivamento** (`archived_at` + motivo), no padrão adotado
+  desde a v3.0.4, com restauração.
+- **Status `atrasado` nunca era atribuído.** O enum previa, a UI filtrava e o
+  Dashboard somava, mas nada escrevia. `refreshOverdue()` marca os vencidos.
+- Coerência status × datas: `pago` exige data de pagamento; em aberto zera.
+
+### Corrigido — Relatórios (crítico)
+- **Vendas e pedidos cancelados entravam no faturamento.** Contaminava receita,
+  ticket médio, gráfico mensal, mix e top clientes. Agregações agora filtram
+  `status <> 'cancelada'` / `<> 'cancelado'`, e a tela informa quantas vendas
+  foram excluídas.
+- **Fuso horário jogava faturamento para o mês errado.** O corte era em UTC
+  (`toISOString`) e o rótulo em pt-BR: venda de 31/08 às 21:30 BRT caía em
+  setembro. Criado `src/lib/period.ts`; a conversão acontece em SQL com
+  `AT TIME ZONE` no fuso da loja (`APP_TZ`, padrão America/Sao_Paulo).
+- **Mix de pagamento quebrava com pagamento dividido**: agrupava a string
+  `"PIX + Dinheiro"` como se fosse uma forma. Agora lê o JSONB `payments` com
+  `jsonb_array_elements`, com fallback para vendas legadas.
+- **Margem negativa renderizava barra cheia**: `width` negativo é CSS inválido,
+  era descartado e a pior margem aparecia como a melhor. Clamp em [-100, 100] e
+  `HBars` passou a escalar por valor absoluto, com hachura no negativo.
+- Ticket médio não considera mais venda cancelada no divisor.
+- Agregação movida para SQL — a página carregava `sales`, `orders`, `quotes`,
+  `customers` e `products` inteiros e somava em JavaScript.
+
+### Adicionado — Integração entre módulos
+- **Compra recebida gera despesa.** A tela do Financeiro prometia "compras, as
+  despesas", mas `receivePurchase()` nunca tocava em `transactions`: o custo de
+  insumo jamais entrava no resultado. Agora lança de forma transacional e
+  idempotente (receber duas vezes não duplica).
+- **Caixa integrado ao Financeiro**: sangria, suprimento e a quebra/sobra do
+  fechamento cego viram lançamento vinculado à sessão.
+- **DRE simplificado nos Relatórios**: receitas e despesas por categoria,
+  resultado por competência, saldo em caixa realizado e margem. Relatórios não
+  importava `transactions` — não existia lucro nem contas a pagar/receber.
+- Cancelamento de venda e de pedido arquivam a receita em aberto e registram o
+  estorno vinculado ao documento.
+
+### Alterado — Schema
+- `transactions` ganhou `sale_id`, `order_id`, `purchase_id`, `cash_session_id`
+  (todas com FK), `automatic`, `archived_at`, `archive_reason` e `notes`.
+- `syncFinancial` em `orders.ts` casa por `order_id`. Antes usava
+  `ilike("Pedido PED-2026-001%")`, que casava também com `PED-2026-0010`,
+  `0011`… — a partir do décimo pedido um sobrescrevia o outro.
+
+### Alterado — UX / layout
+- Seletor de período em Financeiro e Relatórios (mês atual por padrão, presets
+  e intervalo livre). O card dizia "Saldo do período" e somava a base inteira.
+- Financeiro: paginação, busca por descrição, agenda de vencimentos em 30 dias,
+  cartões em vez de tabela no mobile, badge `auto` no lançamento do sistema.
+- Ações com estado de carregamento e tratamento de erro — `markPaid` e excluir
+  não tratavam falha e davam `refresh()` como se tivessem funcionado.
+- `confirm()` nativo substituído por `Modal`, alinhado ao resto do sistema.
+- Exportação CSV (com BOM para o Excel) e impressão em Relatórios.
+- Categorias canônicas: o seed gravava `"Vendas"`/`"Insumos"` e o código
+  automático `"venda"`/`"taxa_cartao"`; os filtros tratavam como distintos.
+- `Donut` não muta mais acumulador durante o render (regra de imutabilidade do
+  React 19) e ignora fatias não positivas.
+
+### Operação
+- Criado `scripts/repair-finance.mjs`: normaliza valores e categorias, religa
+  lançamentos órfãos aos documentos, marca automáticos, reconstrói a despesa de
+  compras já recebidas e aplica o status `atrasado`.
+- `scripts/install.sh` e `scripts/update.sh` agora executam `repair-finance.mjs`.
+- `npm run e2e:smoke` passou de 20 para 33 verificações, cobrindo valor em
+  padrão BR, rejeição de valor inválido, não vazamento de SQL, bloqueio de
+  lançamento automático, arquivamento, despesa de compra idempotente e exclusão
+  de cancelados do faturamento.
+
+---
+
 ## [3.10.0] — 2026-08-17
 
 ### Integração ponta a ponta

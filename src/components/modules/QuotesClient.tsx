@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { mutate } from "@/lib/mutate";
 import {
@@ -31,7 +31,6 @@ import { applyDiscount, formatBRL, round2, toNumber, toPositive } from "@/lib/mo
    TIPOS
    ================================================================== */
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Row = Record<string, any>;
 
 export type PosCompany = {
@@ -94,6 +93,9 @@ export function QuotesClient({
   const [editorOpen, setEditorOpen] = useState(false);
   const [editId, setEditId] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
+  /* Trava do botão "virar pedido": o índice único no banco já impede a
+     duplicata, mas travar aqui evita a ida e volta desnecessária. */
+  const [converting, setConverting] = useState<number | null>(null);
   const [form, setForm] = useState<Record<string, string>>({});
   const [editItems, setEditItems] = useState<Item[]>([]);
   const [viewId, setViewId] = useState<number | null>(null);
@@ -160,10 +162,13 @@ export function QuotesClient({
     setEditorOpen(true);
   }
 
+  /* Abertura automática via ?novo=1 (vinda do CRM/atalhos).
+     `startTransition` evita a cascata de render que o React 19 sinaliza
+     quando um efeito chama setState de forma síncrona. */
   useEffect(() => {
-    if (params.get("novo") === "1") {
-      openNew(params.get("customerId") || undefined);
-    }
+    if (params.get("novo") !== "1") return;
+    const preset = params.get("customerId") || undefined;
+    startTransition(() => openNew(preset));
     // abre somente na entrada da página
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -272,10 +277,22 @@ export function QuotesClient({
         notes: form.notes || null,
         items: editItems.map((i) => ({ ...i, description: i.description || "Item avulso" })),
       };
-      if (editId) await mutate("quotes", "update", data, editId);
-      else await mutate("quotes", "create", data);
+      const saved = editId
+        ? await mutate("quotes", "update", data, editId)
+        : await mutate("quotes", "create", data);
 
       toast.success("Orçamento salvo com sucesso!", `Total ${formatBRL(totals.total)}`);
+
+      /* Preço fora da tabela não bloqueia — orçamento é negociação —,
+         mas o vendedor precisa saber que saiu do preço de catálogo. */
+      const warnings: string[] = Array.isArray(saved?.warnings) ? saved.warnings : [];
+      if (warnings.length > 0) {
+        toast.info(
+          warnings.length === 1 ? "Preço fora da tabela" : `${warnings.length} preços fora da tabela`,
+          warnings.join(" · ")
+        );
+      }
+
       setEditorOpen(false);
       router.refresh();
     } catch (e) {
@@ -286,12 +303,39 @@ export function QuotesClient({
   }
 
   async function setStatus(q: Row, status: string) {
-    await mutate("quotes", "update", { status }, Number(q.id));
-    toast.success(`Orçamento marcado como ${status}`);
-    router.refresh();
+    try {
+      await mutate("quotes", "update", { status }, Number(q.id));
+      toast.success(`Orçamento marcado como ${status}`);
+      router.refresh();
+    } catch (e) {
+      toast.error("Não foi possível mudar o status", e instanceof Error ? e.message : undefined);
+    }
+  }
+
+  /* Orçamento aprovado é acordo fechado: o servidor recusa alteração de
+     valor. Reabrir devolve para rascunho e registra o valor anterior nas
+     observações, para a renegociação ficar rastreável. */
+  async function reopenQuote(q: Row) {
+    const total = formatBRL(toNumber(q.total, 0));
+    if (
+      !confirm(
+        `Reabrir o orçamento ${q.number} para renegociação?\n\nEle volta para "rascunho" e o valor aprovado (${total}) fica registrado nas observações.`
+      )
+    ) {
+      return;
+    }
+    try {
+      await mutate("quotes", "update", { reopen: true, discount: toNumber(q.discount, 0) }, Number(q.id));
+      toast.success("Orçamento reaberto", `${q.number} voltou para rascunho`);
+      router.refresh();
+    } catch (e) {
+      toast.error("Não foi possível reabrir", e instanceof Error ? e.message : undefined);
+    }
   }
 
   async function convertToOrder(q: Row) {
+    if (converting !== null) return;
+    setConverting(Number(q.id));
     try {
       const res = await fetch("/api/orders/convert", {
         method: "POST",
@@ -308,6 +352,8 @@ export function QuotesClient({
       router.refresh();
     } catch (e) {
       toast.error("Erro na conversão", e instanceof Error ? e.message : undefined);
+    } finally {
+      setConverting(null);
     }
   }
 
@@ -457,10 +503,20 @@ export function QuotesClient({
                       {q.status === "aprovado" && !hasOrder(Number(q.id)) && (
                         <button
                           onClick={() => convertToOrder(q)}
-                          className="focus-ring flex h-7 cursor-pointer items-center gap-1 rounded-md bg-proc-c-strong px-2.5 font-mono text-[10px] font-bold text-white uppercase transition-colors hover:bg-cyan-800"
+                          disabled={converting !== null}
+                          className="focus-ring flex h-7 cursor-pointer items-center gap-1 rounded-md bg-proc-c-strong px-2.5 font-mono text-[10px] font-bold text-white uppercase transition-colors hover:bg-cyan-800 disabled:cursor-not-allowed disabled:opacity-50"
                         >
-                          <Icon name="arrow-right" size={11} /> virar pedido
+                          <Icon name="arrow-right" size={11} />{" "}
+                          {converting === Number(q.id) ? "convertendo…" : "virar pedido"}
                         </button>
+                      )}
+                      {q.status === "aprovado" && !hasOrder(Number(q.id)) && (
+                        <IconButton
+                          size="sm"
+                          name="refresh"
+                          label="Reabrir para renegociação"
+                          onClick={() => reopenQuote(q)}
+                        />
                       )}
                       {hasOrder(Number(q.id)) && <Badge tone="green">pedido gerado</Badge>}
                       <IconButton
@@ -733,6 +789,7 @@ export function QuotesClient({
 
       {/* ── CADASTRO RÁPIDO DE CLIENTE (F8) ── */}
       <QuickCustomerModal
+        key={newCustomerOpen ? "customer-open" : "customer-closed"}
         open={newCustomerOpen}
         onClose={() => setNewCustomerOpen(false)}
         onCreated={(newCust) => {
@@ -788,15 +845,27 @@ export function QuotesClient({
                   </Button>
                 )}
                 {view.status === "aprovado" && !hasOrder(Number(view.id)) && (
-                  <Button
-                    icon="arrow-right"
-                    onClick={() => {
-                      convertToOrder(view);
-                      setViewId(null);
-                    }}
-                  >
-                    Converter em Pedido
-                  </Button>
+                  <>
+                    <Button
+                      variant="outline"
+                      icon="refresh"
+                      onClick={() => {
+                        reopenQuote(view);
+                        setViewId(null);
+                      }}
+                    >
+                      Reabrir
+                    </Button>
+                    <Button
+                      icon="arrow-right"
+                      onClick={() => {
+                        convertToOrder(view);
+                        setViewId(null);
+                      }}
+                    >
+                      Converter em Pedido
+                    </Button>
+                  </>
                 )}
               </div>
 
@@ -947,7 +1016,12 @@ function CommercialProposalA4({
   company: PosCompany;
   isPrint?: boolean;
 }) {
-  const createdAtFormatted = new Date(quote.createdAt || Date.now()).toLocaleDateString("pt-BR");
+  /* Sem `Date.now()` no render: ler o relógio durante a renderização é
+     impuro (o React 19 acusa) e ainda daria datas diferentes entre
+     servidor e cliente na proposta impressa. */
+  const createdAtFormatted = quote.createdAt
+    ? new Date(quote.createdAt).toLocaleDateString("pt-BR")
+    : "—";
   const subtotal = toNumber(quote.subtotal, 0);
   const discount = toNumber(quote.discount, 0);
   const shippingFee = toNumber(quote.shippingFee, 0);
@@ -1163,19 +1237,9 @@ function QuickCustomerModal({
   const [loading, setLoading] = useState(false);
   const [fetchingCep, setFetchingCep] = useState(false);
 
-  useEffect(() => {
-    if (open) {
-      setName("");
-      setDocument("");
-      setPhone("");
-      setCep("");
-      setStreet("");
-      setNumber("");
-      setDistrict("");
-      setCity("");
-      setState("");
-    }
-  }, [open]);
+  /* O reset dos campos é feito pelo `key` no componente pai: remontar é
+     mais barato (e mais correto no React 19) que zerar nove estados
+     dentro de um efeito. */
 
   const handleCepBlur = async () => {
     const cleanCep = cep.replace(/\D/g, "");
@@ -1213,6 +1277,9 @@ function QuickCustomerModal({
         city: city.trim() || null,
         state: state.trim() || null,
         status: "ativo",
+        /* Cadastro rápido no meio do atendimento: documento fica
+           opcional aqui (a tela de Clientes & CRM exige). */
+        quickEntry: true,
       };
 
       const res = await fetch("/api/crud/customers", {

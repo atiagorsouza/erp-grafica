@@ -13,6 +13,8 @@ import {
 } from "@/db/schema";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { nextDocumentNumber } from "@/lib/documents";
+import { upsertAutoTransaction } from "@/lib/finance";
+import { todayISO, toLocalISODate } from "@/lib/period";
 import { getPricingDefaults } from "@/lib/settings";
 import {
   applyDiscount,
@@ -32,7 +34,9 @@ const finiteNumber = z.coerce.number().finite();
 export const saleItemSchema = z.object({
   productId: z.coerce.number().int().positive().nullable().optional(),
   description: z.string().trim().min(1, "Descrição obrigatória").max(200),
-  quantity: finiteNumber.positive("Quantidade deve ser maior que zero").max(1_000_000),
+  quantity: finiteNumber
+    .min(0.001, "Quantidade deve ser de ao menos 0,001")
+    .max(1_000_000),
   unitPrice: finiteNumber.min(0, "Preço não pode ser negativo").max(10_000_000),
 });
 
@@ -48,6 +52,10 @@ export const saleInputSchema = z.object({
   items: z.array(saleItemSchema).min(1, "Carrinho vazio"),
   discount: finiteNumber.min(0).default(0),
   discountMode: z.enum(["value", "percent"]).default("value"),
+  /* frete cotado na SuperFrete (v3.12.0) */
+  shippingFee: finiteNumber.min(0).max(100_000).default(0),
+  shippingService: z.string().trim().max(80).nullable().optional(),
+  shippingServiceId: z.coerce.number().int().positive().nullable().optional(),
   paymentMethod: z.string().trim().max(40).nullable().optional(),
   payments: z.array(paymentSchema).optional(),
   receivedAmount: finiteNumber.min(0).optional(),
@@ -61,6 +69,14 @@ export const saleInputSchema = z.object({
 
 export type SaleInput = z.infer<typeof saleInputSchema>;
 export type SaleError = { error: string; status: number; details?: unknown };
+
+/** Estoque acabou entre a conferência e a gravação (corrida). */
+class StockConflict extends Error {
+  constructor(public shortages: { name: string; available: number; required: number }[]) {
+    super("Estoque insuficiente");
+    this.name = "StockConflict";
+  }
+}
 
 const CARD_METHODS = new Set(["Débito", "Crédito"]);
 const KNOWN_METHODS = new Set(["PIX", "Dinheiro", "Débito", "Crédito"]);
@@ -161,7 +177,10 @@ export async function createSale(raw: unknown) {
   /* ---------- 4. totais no servidor ---------- */
   const subtotal = round2(validLines.reduce((sum, l) => sum + l.total, 0));
   const discount = applyDiscount(subtotal, input.discount, input.discountMode);
-  const net = round2(subtotal - discount);
+  /* O frete entra no líquido: o cliente paga produto + entrega, e a taxa
+     de cartão incide sobre o valor realmente cobrado. */
+  const shippingFee = round2(toPositive(input.shippingFee));
+  const net = round2(subtotal - discount + shippingFee);
 
   const payments =
     input.payments && input.payments.length > 0
@@ -213,6 +232,19 @@ export async function createSale(raw: unknown) {
   }
 
   const total = round2(net + fee);
+
+  /* Venda de R$ 0,00 não é venda: polui o caixa, o ticket médio e o
+     Financeiro com lançamentos vazios. Antes da v3.14.0 um desconto
+     maior que o subtotal (ou quantidade 0,0001) gerava cupom zerado. */
+  if (total <= 0) {
+    return {
+      error:
+        discount >= subtotal && subtotal > 0
+          ? "Desconto não pode zerar a venda. Para brinde ou bonificação, use um lançamento próprio."
+          : "O total da venda precisa ser maior que zero",
+      status: 422,
+    } satisfies SaleError;
+  }
 
   /* imposto por dentro — apenas registro, não soma no total */
   const taxRate = toNumber(defaults.taxRate, 0);
@@ -285,6 +317,15 @@ export async function createSale(raw: unknown) {
 
   try {
     const row = await db.transaction(async (tx) => {
+      /* trava e reconfere: entre o check inicial e este ponto outra
+         venda pode ter consumido o saldo */
+      if (!allowOversell) {
+        const locked = await assertStockLocked(tx, validLines);
+        if (locked.length > 0) {
+          throw new StockConflict(locked);
+        }
+      }
+
       const [sale] = await tx
         .insert(sales)
         .values({
@@ -303,6 +344,9 @@ export async function createSale(raw: unknown) {
           discount: toDecimalString(discount),
           taxes: toDecimalString(taxes),
           cardFee: toDecimalString(fee),
+          shippingFee: toDecimalString(shippingFee),
+          shippingService: input.shippingService ?? null,
+          shippingServiceId: input.shippingServiceId ?? null,
           total: toDecimalString(total),
           paymentMethod: methods.join(" + "),
           payments: pricedPayments,
@@ -320,36 +364,40 @@ export async function createSale(raw: unknown) {
       await applyStockExit(tx, validLines, number);
 
       const onCredit = methods.includes("Crédito") && methods.every((m) => m === "Crédito");
-      const today = new Date().toISOString().slice(0, 10);
+      const today = todayISO();
       const settleDate = onCredit
-        ? new Date(Date.now() + 30 * 864e5).toISOString().slice(0, 10)
+        ? toLocalISODate(Date.now() + 30 * 864e5)
         : today;
 
       /* receita líquida da loja (sem taxa de adquirente) */
-      await tx.insert(transactions).values({
+      await upsertAutoTransaction(tx, {
         type: "receita",
         category: "venda",
         description: `Venda ${number}${input.customerId ? "" : " · consumidor final"}`,
-        amount: toDecimalString(net, 2),
+        amount: net,
         dueDate: settleDate,
         paidDate: onCredit ? null : today,
         status: onCredit ? "pendente" : "pago",
         method: methods.join(" + "),
         customerId: input.customerId ?? null,
+        saleId: sale.id,
+        cashSessionId,
       });
 
       /* taxa de cartão como despesa operacional (se houver) */
       if (fee > 0) {
-        await tx.insert(transactions).values({
+        await upsertAutoTransaction(tx, {
           type: "despesa",
           category: "taxa_cartao",
           description: `Taxa de cartão · venda ${number}`,
-          amount: toDecimalString(fee, 2),
+          amount: fee,
           dueDate: today,
           paidDate: today,
           status: "pago",
           method: methods.filter((m) => CARD_METHODS.has(m)).join(" + ") || "Cartão",
           customerId: input.customerId ?? null,
+          saleId: sale.id,
+          cashSessionId,
         });
       }
 
@@ -362,6 +410,15 @@ export async function createSale(raw: unknown) {
       warnings: shortages.length ? { shortages } : undefined,
     };
   } catch (e) {
+    if (e instanceof StockConflict) {
+      return {
+        error: `Estoque insuficiente: ${e.shortages
+          .map((x) => `${x.name} (tem ${x.available}, precisa de ${x.required})`)
+          .join("; ")}`,
+        status: 409,
+        details: { shortages: e.shortages, code: "STOCK_RACE" },
+      } satisfies SaleError;
+    }
     if (input.clientRef && String(e).toLowerCase().includes("client_ref")) {
       const [existing] = await db.select().from(sales).where(eq(sales.clientRef, input.clientRef));
       if (existing) return { ok: true as const, row: existing, duplicated: true };
@@ -445,6 +502,85 @@ async function checkStock(lines: Line[]) {
 }
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/**
+ * Reconfere o estoque DENTRO da transação, travando as linhas com
+ * `FOR UPDATE`.
+ *
+ * Bug corrigido na v3.14.0 (TOCTOU — time-of-check to time-of-use):
+ * `checkStock` rodava fora da transação, então duas vendas simultâneas
+ * liam o mesmo saldo e ambas passavam. Teste com estoque 10 e cinco
+ * vendas paralelas de 3 unidades: todas foram aceitas e o saldo
+ * terminou em -5, mesmo com `allowNegativeStock: false`.
+ *
+ * Com `FOR UPDATE` a segunda transação espera a primeira terminar e
+ * enxerga o saldo já debitado.
+ */
+async function assertStockLocked(tx: Tx, lines: Line[]) {
+  const needProduct = new Map<number, number>();
+  const needMaterial = new Map<number, number>();
+
+  for (const line of lines) {
+    const product = line.product;
+    if (!product) continue;
+    if (product.trackStock) {
+      needProduct.set(product.id, (needProduct.get(product.id) || 0) + line.quantity);
+    }
+    if (product.baseMaterialId) {
+      const used = toNumber(product.baseMaterialQty, 0) * line.quantity;
+      if (used > 0) {
+        needMaterial.set(
+          product.baseMaterialId,
+          (needMaterial.get(product.baseMaterialId) || 0) + used
+        );
+      }
+    }
+    const extras = await tx
+      .select()
+      .from(productMaterials)
+      .where(eq(productMaterials.productId, product.id));
+    for (const extra of extras) {
+      const used = toNumber(extra.quantity, 0) * line.quantity;
+      if (used > 0 && extra.materialId) {
+        needMaterial.set(extra.materialId, (needMaterial.get(extra.materialId) || 0) + used);
+      }
+    }
+  }
+
+  const shortages: { name: string; available: number; required: number }[] = [];
+
+  for (const [id, required] of needProduct) {
+    const locked = await tx.execute(
+      sql`select name, stock from products where id = ${id} for update`
+    );
+    const row = (locked as unknown as { rows?: { name?: string; stock?: string }[] }).rows?.[0];
+    const available = toNumber(row?.stock, 0);
+    if (available + 1e-9 < required) {
+      shortages.push({
+        name: String(row?.name || `Produto ${id}`),
+        available: round2(available),
+        required: round2(required),
+      });
+    }
+  }
+
+  for (const [id, required] of needMaterial) {
+    const locked = await tx.execute(
+      sql`select name, stock from materials where id = ${id} for update`
+    );
+    const row = (locked as unknown as { rows?: { name?: string; stock?: string }[] }).rows?.[0];
+    const available = toNumber(row?.stock, 0);
+    if (available + 1e-9 < required) {
+      shortages.push({
+        name: String(row?.name || `Material ${id}`),
+        available: round2(available),
+        required: round2(required),
+      });
+    }
+  }
+
+  return shortages;
+}
 
 async function applyStockExit(tx: Tx, lines: Line[], reference: string) {
   for (const line of lines) {
@@ -561,33 +697,37 @@ export async function cancelSale(saleId: number, reason: string) {
 
     const netRevenue = round2(toNumber(sale.total, 0) - toNumber(sale.cardFee, 0));
     const fee = toNumber(sale.cardFee, 0);
-    const today = new Date().toISOString().slice(0, 10);
+    const today = todayISO();
 
-    /* estorna a receita (despesa de estorno) */
-    await tx.insert(transactions).values({
+    /* estorna a receita (despesa de estorno), vinculada à venda */
+    await upsertAutoTransaction(tx, {
       type: "despesa",
       category: "estorno",
       description: `Cancelamento da venda ${sale.number} — ${cleanReason}`,
-      amount: toDecimalString(netRevenue, 2),
+      amount: netRevenue,
       dueDate: today,
       paidDate: today,
       status: "pago",
       method: sale.paymentMethod,
       customerId: sale.customerId,
+      saleId: sale.id,
+      cashSessionId: sale.cashSessionId,
     });
 
     /* se havia taxa de cartão lançada, estorna como receita (devolução da despesa) */
     if (fee > 0) {
-      await tx.insert(transactions).values({
+      await upsertAutoTransaction(tx, {
         type: "receita",
         category: "estorno_taxa",
         description: `Estorno taxa cartão · venda ${sale.number}`,
-        amount: toDecimalString(fee, 2),
+        amount: fee,
         dueDate: today,
         paidDate: today,
         status: "pago",
         method: sale.paymentMethod,
         customerId: sale.customerId,
+        saleId: sale.id,
+        cashSessionId: sale.cashSessionId,
       });
     }
 

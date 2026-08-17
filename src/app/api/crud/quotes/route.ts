@@ -5,8 +5,11 @@ export const dynamic = "force-dynamic";
 /**
  * POST /api/crud/quotes
  *   { op: "create", data }
- *   { op: "update", id, data }
+ *   { op: "update", id, data }   data.reopen=true reabre orçamento aprovado
  *   { op: "delete" | "archive", id, reason }
+ *
+ * A resposta de create/update pode trazer `warnings[]` com divergências
+ * entre o preço cobrado e o de tabela — a tela mostra, não bloqueia.
  */
 export async function POST(req: Request) {
   let body: Record<string, unknown>;
@@ -43,9 +46,11 @@ export async function POST(req: Request) {
 
     return Response.json({ error: "op inválido" }, { status: 400 });
   } catch (e) {
+    /* Mensagem genérica: o detalhe (inclusive SQL) fica no log do
+       servidor, nunca na resposta. */
     console.error("[quotes]", e);
     return Response.json(
-      { error: e instanceof Error ? e.message : "erro interno" },
+      { error: "Não foi possível concluir a operação no orçamento." },
       { status: 500 }
     );
   }

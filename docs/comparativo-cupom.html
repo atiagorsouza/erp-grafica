@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Bloco do cliente — antes e depois</title>
+<style>
+  body {
+    margin: 0; padding: 24px;
+    background: #eef0f3;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    color: #17181c;
+  }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  .sub { font-size: 13px; color: #5b6070; margin: 0 0 20px; max-width: 720px; line-height: 1.5; }
+  .wrap { display: flex; gap: 20px; flex-wrap: wrap; align-items: flex-start; }
+  .col { flex: 0 1 340px; }
+  .tag {
+    display: inline-block; font-size: 11px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: .08em;
+    padding: 3px 8px; border-radius: 4px; margin-bottom: 8px;
+  }
+  .bad  { background: #fde8e8; color: #a12626; }
+  .good { background: #e3f5e9; color: #1a6b3c; }
+
+  .paper {
+    background: #fff; padding: 12px 14px;
+    border: 1px solid #d6d9e0; border-radius: 3px;
+    box-shadow: 0 1px 3px rgba(0,0,0,.08);
+    font-family: "IBM Plex Mono", "Courier New", Courier, monospace;
+    font-size: 11px; line-height: 1.25; color: #000;
+    font-weight: 600;
+  }
+  .b { font-weight: 800; }
+  .divisor { border-bottom: 1px solid #000; margin: 6px 0; }
+  .row { display: flex; justify-content: space-between; gap: 8px; }
+  .hl { background: #fff3bf; }
+  .note { font-size: 12px; color: #5b6070; margin-top: 10px; line-height: 1.55; }
+  .case { margin-top: 22px; }
+  .case h2 { font-size: 13px; margin: 0 0 8px; color: #3a3f4b; }
+</style>
+</head>
+<body>
+
+<h1>Bloco do cliente — antes e depois</h1>
+<p class="sub">
+  O bairro dividia linha com o telefone, o que partia o endereço ao meio e
+  deixava o número solto na direita. Agora o endereço segue o padrão de
+  correspondência (logradouro → bairro/cidade → CEP) e os telefones vêm
+  rotulados, cada um na sua linha.
+</p>
+
+<div class="wrap">
+
+  <div class="col">
+    <span class="tag bad">antes</span>
+    <div class="paper">
+      <div class="b">CUPOM NAO FISCAL 20260002 13:12 17/08/2026</div>
+      <div class="divisor"></div>
+      <div class="b">PADARIA PÃO QUENTE LTDA</div>
+      <div>RUA LUZIA DE MACEDO DANTAS, 151</div>
+      <div>12.345.678/0001-95</div>
+      <div class="row hl"><span>BANGU</span><span>(21) 99999-1111</span></div>
+      <div>RIO DE JANEIRO - RJ CEP: 21863-030</div>
+      <div class="divisor"></div>
+      <div class="row"><span>DESCRICAO DO PRODUTO</span><span>UNI</span></div>
+    </div>
+    <p class="note">
+      O bairro ocupa metade da linha e o telefone a outra, sem rótulo. O CNPJ
+      aparece antes do bairro, quebrando a sequência do endereço, e não há
+      distinção entre telefone fixo e WhatsApp.
+    </p>
+  </div>
+
+  <div class="col">
+    <span class="tag good">depois</span>
+    <div class="paper">
+      <div class="b">CUPOM NAO FISCAL 20260002 13:12 17/08/2026</div>
+      <div class="divisor"></div>
+      <div class="b">PADARIA PÃO QUENTE LTDA</div>
+      <div>12.345.678/0001-95</div>
+      <div>RUA LUZIA DE MACEDO DANTAS, 151</div>
+      <div class="hl">BANGU - RIO DE JANEIRO/RJ</div>
+      <div>CEP: 21863-030</div>
+      <div class="hl">TEL: (21) 3000-0000</div>
+      <div class="hl">WHATSAPP: (21) 99999-1111</div>
+      <div class="divisor"></div>
+      <div class="row"><span>DESCRICAO DO PRODUTO</span><span>UNI</span></div>
+    </div>
+    <p class="note">
+      Documento logo abaixo do nome; endereço em sequência contínua; bairro,
+      cidade e UF numa linha só; telefones rotulados e separados.
+    </p>
+  </div>
+
+</div>
+
+<div class="case">
+  <h2>Quando telefone e WhatsApp são o mesmo número</h2>
+  <div class="wrap">
+    <div class="col">
+      <div class="paper">
+        <div class="b">PADARIA PÃO QUENTE LTDA</div>
+        <div>12.345.678/0001-95</div>
+        <div>RUA LUZIA DE MACEDO DANTAS, 151</div>
+        <div>BANGU - RIO DE JANEIRO/RJ</div>
+        <div>CEP: 21863-030</div>
+        <div class="hl">TEL/WHATSAPP: (21) 99999-1111</div>
+      </div>
+      <p class="note">
+        Funde numa linha só, em vez de imprimir o mesmo número duas vezes. A
+        comparação ignora a máscara: <code>(21) 99999-1111</code> e
+        <code>21999991111</code> são reconhecidos como iguais.
+      </p>
+    </div>
+
+    <div class="col">
+      <div class="paper">
+        <div class="b">JOÃO DA SILVA</div>
+        <div>RUA DAS FLORES, 42</div>
+        <div>CENTRO - NITERÓI/RJ</div>
+        <div class="hl">WHATSAPP: (21) 98888-2222</div>
+      </div>
+      <p class="note">
+        Cliente sem CNPJ, sem CEP e só com WhatsApp: cada linha ausente
+        simplesmente não é impressa — nada de rótulo vazio ou traço solto.
+      </p>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

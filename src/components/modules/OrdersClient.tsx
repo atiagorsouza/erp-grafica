@@ -23,12 +23,12 @@ import {
 import { Icon } from "@/components/icons";
 import { cn } from "@/lib/format";
 import { applyDiscount, formatBRL, round2, toNumber, toPositive } from "@/lib/money";
+import { todayISO } from "@/lib/period";
 
 /* ==================================================================
    TIPOS
    ================================================================== */
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Row = Record<string, any>;
 
 export type PosCompany = {
@@ -164,6 +164,27 @@ export function OrdersClient({
     [customersList]
   );
 
+  /* Prazo: o pedido exibia a data mas nunca a comparava com hoje —
+     nada sinalizava atraso numa gráfica, onde prazo é o que mais
+     importa. `todayISO` no fuso da aplicação, para não virar o dia
+     antes da hora. */
+  const todayStr = todayISO();
+
+  const dueInfo = useCallback(
+    (o: Row) => {
+      const encerrado = o.status === "cancelado" || o.productionStatus === "concluido";
+      const due = String(o.dueDate || "");
+      if (!due || encerrado) return { late: false, today: false, days: 0 };
+      const diff = Math.round(
+        (new Date(`${due}T12:00:00`).getTime() - new Date(`${todayStr}T12:00:00`).getTime()) / 86400000
+      );
+      return { late: diff < 0, today: diff === 0, days: diff };
+    },
+    [todayStr]
+  );
+
+  const lateCount = useMemo(() => orders.filter((o) => dueInfo(o).late).length, [orders, dueInfo]);
+
   /* Filtro + Busca global de pedidos */
   const filtered = useMemo(() => {
     const term = q.trim().toLowerCase();
@@ -180,11 +201,12 @@ export function OrdersClient({
         items.some((i: Row) => String(i.description || "").toLowerCase().includes(term));
 
       if (!matchTerm) return false;
+      if (filter === "atrasados") return dueInfo(o).late;
       if (filter === "ativos") return o.status !== "cancelado" && o.productionStatus !== "concluido";
       if (filter === "todos") return true;
       return o.productionStatus === filter || o.status === filter;
     });
-  }, [orders, q, filter, custName]);
+  }, [orders, q, filter, custName, dueInfo]);
 
   /* Atualização de pedido sem recarga brusca.
    A API centraliza Kanban, Entrega e Financeiro para evitar divergência. */
@@ -201,6 +223,9 @@ export function OrdersClient({
 
   /* Cancelar pedido */
   const [cancelOpen, setCancelOpen] = useState(false);
+  /* cobrança InfinitePay (v3.13.0) */
+  const [charging, setCharging] = useState(false);
+  const [chargeLink, setChargeLink] = useState<string | null>(null);
   const [cancelReason, setCancelReason] = useState("");
   const [cancelling, setCancelling] = useState(false);
 
@@ -244,6 +269,26 @@ export function OrdersClient({
   }
 
   /* Decidir Aprovação de Arte */
+  async function chargeOrder(id: number) {
+    setCharging(true);
+    try {
+      const res = await fetch("/api/payments", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ op: "create", orderId: id }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Falha ao gerar cobrança");
+      setChargeLink(json.row.checkoutUrl);
+      toast.success("Link de pagamento gerado");
+      router.refresh();
+    } catch (e) {
+      toast.error("Não foi possível cobrar", e instanceof Error ? e.message : undefined);
+    } finally {
+      setCharging(false);
+    }
+  }
+
   async function decideArt(a: Row, status: string) {
     await mutate(
       "art-approvals",
@@ -357,6 +402,7 @@ export function OrdersClient({
       label: "Em aberto",
       n: orders.filter((o) => o.status !== "cancelado" && o.productionStatus !== "concluido").length,
     },
+    { k: "atrasados", label: "Atrasados", n: lateCount },
     { k: "aguardando", label: "Aguardando", n: orders.filter((o) => o.productionStatus === "aguardando").length },
     { k: "em_producao", label: "Em produção", n: orders.filter((o) => o.productionStatus === "em_producao").length },
     { k: "concluido", label: "Concluídos", n: orders.filter((o) => o.productionStatus === "concluido").length },
@@ -545,10 +591,36 @@ export function OrdersClient({
 
                 <div className="mt-4 flex items-center justify-between border-t border-dashed border-paper-300 pt-2.5">
                   <div className="flex flex-col">
-                    <span className="flex items-center gap-1 font-mono text-[10px] text-ink-400 tnum">
-                      <Icon name="calendar" size={11} />
-                      {o.dueDate ? new Date(`${o.dueDate}T12:00:00`).toLocaleDateString("pt-BR") : "sem prazo"}
-                    </span>
+                    {(() => {
+                      const d = dueInfo(o);
+                      return (
+                        <span
+                          className={cn(
+                            "flex items-center gap-1 font-mono text-[10px] tnum",
+                            d.late
+                              ? "font-semibold text-red-600"
+                              : d.today
+                                ? "font-semibold text-amber-600"
+                                : "text-ink-400"
+                          )}
+                        >
+                          <Icon name={d.late ? "alert" : "calendar"} size={11} />
+                          {o.dueDate
+                            ? new Date(`${o.dueDate}T12:00:00`).toLocaleDateString("pt-BR")
+                            : "sem prazo"}
+                          {d.late && (
+                            <span className="rounded bg-red-100 px-1 text-[9px] font-bold uppercase">
+                              {Math.abs(d.days)}d atraso
+                            </span>
+                          )}
+                          {d.today && (
+                            <span className="rounded bg-amber-100 px-1 text-[9px] font-bold uppercase">
+                              hoje
+                            </span>
+                          )}
+                        </span>
+                      );
+                    })()}
                     <span className="font-mono text-[9.5px] text-ink-500 uppercase">
                       {o.paymentMethod || "A definir"}
                     </span>
@@ -605,6 +677,16 @@ export function OrdersClient({
                 >
                   Imprimir OS (A4)
                 </Button>
+                {order.status !== "cancelado" && order.financialStatus !== "pago" && (
+                  <Button
+                    variant="ink"
+                    icon="wallet"
+                    loading={charging}
+                    onClick={() => chargeOrder(Number(order.id))}
+                  >
+                    Cobrar via InfinitePay
+                  </Button>
+                )}
                 {order.status !== "cancelado" && (
                   <Button
                     variant="danger"
@@ -1132,6 +1214,7 @@ export function OrdersClient({
 
       {/* ── MODAL CADASTRO RÁPIDO CLIENTE (F8) ── */}
       <QuickCustomerModal
+        key={newCustomerOpen ? "customer-open" : "customer-closed"}
         open={newCustomerOpen}
         onClose={() => setNewCustomerOpen(false)}
         onCreated={(newCust) => {
@@ -1225,6 +1308,61 @@ export function OrdersClient({
         )}
       </Drawer>
 
+      {/* ── MODAL LINK DE COBRANÇA (InfinitePay) ── */}
+      <Modal
+        open={!!chargeLink}
+        onClose={() => setChargeLink(null)}
+        title="Link de pagamento gerado"
+        width="max-w-md"
+        footer={<Button icon="check" onClick={() => setChargeLink(null)}>Fechar</Button>}
+      >
+        <p className="text-[13px] text-ink-600">
+          Envie ao cliente. Quando ele pagar, o pedido é quitado e a receita entra no Financeiro
+          automaticamente.
+        </p>
+        <div className="mt-3 rounded-lg border border-paper-200 bg-paper-50 p-3">
+          <p className="break-all font-mono text-[11.5px] text-proc-c-strong">{chargeLink}</p>
+        </div>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <Button
+            size="sm"
+            icon="copy"
+            onClick={async () => {
+              try {
+                await navigator.clipboard.writeText(String(chargeLink));
+                toast.success("Link copiado");
+              } catch {
+                toast.error("Não foi possível copiar");
+              }
+            }}
+          >
+            Copiar
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            icon="whatsapp"
+            onClick={() =>
+              window.open(
+                `https://wa.me/?text=${encodeURIComponent(`Segue o link para pagamento: ${chargeLink}`)}`,
+                "_blank",
+                "noopener"
+              )
+            }
+          >
+            WhatsApp
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            icon="external"
+            onClick={() => window.open(String(chargeLink), "_blank", "noopener")}
+          >
+            Abrir
+          </Button>
+        </div>
+      </Modal>
+
       {/* ── MODAL CANCELAR PEDIDO ── */}
       <Modal
         open={cancelOpen}
@@ -1299,7 +1437,11 @@ function ProductionOrderA4({
   isPrint?: boolean;
 }) {
   const items = Array.isArray(order.items) ? order.items : [];
-  const createdAtFormatted = new Date(order.createdAt || Date.now()).toLocaleDateString("pt-BR");
+  /* Sem `Date.now()` no render: ler o relógio durante a renderização é
+     impuro e daria datas diferentes entre servidor e cliente na OS. */
+  const createdAtFormatted = order.createdAt
+    ? new Date(order.createdAt).toLocaleDateString("pt-BR")
+    : "—";
   const subtotal = toNumber(order.subtotal, 0);
   const discount = toNumber(order.discount, 0);
   const shippingFee = toNumber(order.shippingFee, 0);
@@ -1553,7 +1695,10 @@ function ThermalOrderReceipt({
   isPrint?: boolean;
 }) {
   const items = Array.isArray(order.items) ? order.items : [];
-  const createdAtFormatted = new Date(order.createdAt || Date.now()).toLocaleDateString("pt-BR");
+  /* idem: relógio fora do render */
+  const createdAtFormatted = order.createdAt
+    ? new Date(order.createdAt).toLocaleDateString("pt-BR")
+    : "—";
 
   return (
     <div
@@ -1631,19 +1776,8 @@ function QuickCustomerModal({
   const [loading, setLoading] = useState(false);
   const [fetchingCep, setFetchingCep] = useState(false);
 
-  useEffect(() => {
-    if (open) {
-      setName("");
-      setDocument("");
-      setPhone("");
-      setCep("");
-      setStreet("");
-      setNumber("");
-      setDistrict("");
-      setCity("");
-      setState("");
-    }
-  }, [open]);
+  /* Reset por `key` no pai: remontar é mais barato (e correto no
+     React 19) que zerar nove estados dentro de um efeito. */
 
   const handleCepBlur = async () => {
     const cleanCep = cep.replace(/\D/g, "");
@@ -1681,6 +1815,9 @@ function QuickCustomerModal({
         city: city.trim() || null,
         state: state.trim() || null,
         status: "ativo",
+        /* Cadastro rápido no meio do atendimento: documento fica
+           opcional aqui (a tela de Clientes & CRM exige). */
+        quickEntry: true,
       };
 
       const res = await fetch("/api/crud/customers", {

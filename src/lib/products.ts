@@ -67,6 +67,11 @@ const productSchema = z.object({
   trackStock: z.boolean().default(false),
   stock: finite.min(-1_000_000).max(1_000_000).default(0),
   minStock: finite.min(0).max(1_000_000).default(0),
+  /* logística — usados na cotação de frete (v3.12.0) */
+  shipWeight: finite.min(0).max(1000).default(0),
+  shipHeight: finite.min(0).max(200).default(0),
+  shipWidth: finite.min(0).max(200).default(0),
+  shipLength: finite.min(0).max(200).default(0),
   finishings: z.array(componentSchema).optional().default([]),
   materials: z.array(componentSchema).optional().default([]),
 });
@@ -262,6 +267,10 @@ function baseProductData(data: ProductPayload, calc: Awaited<ReturnType<typeof b
     trackStock: data.trackStock,
     stock: toDecimalString(data.stock, 3),
     minStock: toDecimalString(data.minStock, 3),
+    shipWeight: toDecimalString(data.shipWeight, 3),
+    shipHeight: toDecimalString(data.shipHeight, 2),
+    shipWidth: toDecimalString(data.shipWidth, 2),
+    shipLength: toDecimalString(data.shipLength, 2),
   };
 }
 

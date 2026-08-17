@@ -156,6 +156,9 @@ migrate_schema() {
 
   c_info "Reparando Estoque & Compras..."
   node scripts/repair-stock.mjs
+  node scripts/repair-finance.mjs
+  node scripts/repair-shipping.mjs
+  node scripts/repair-payments.mjs
   c_ok "Estoque & Compras reparado"
 }
 

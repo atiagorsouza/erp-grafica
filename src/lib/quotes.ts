@@ -2,11 +2,12 @@ import "server-only";
 
 import { z } from "zod";
 import { db } from "@/db";
-import { customers, kanbanCards, orders, quoteItems, quotes, settings } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { customers, kanbanCards, orders, products, quoteItems, quotes, settings } from "@/db/schema";
+import { and, eq, inArray, isNotNull, lt } from "drizzle-orm";
 import { nextDocumentNumber } from "@/lib/documents";
 import { getPricingDefaults } from "@/lib/settings";
 import { applyDiscount, round2, toDecimalString, toNumber, toPositive } from "@/lib/money";
+import { toLocalISODate } from "@/lib/period";
 
 export type QuoteError = { error: string; status: number; details?: unknown };
 
@@ -27,7 +28,12 @@ const quotePayload = z.object({
   validUntil: z.string().trim().nullable().optional(),
   items: z.array(itemSchema).optional(),
   discount: finiteNumber.min(0).optional(),
+  /* Percentual acima de 100 zerava (ou invertia) a proposta. O teto é
+     validado depois do parse, porque depende do modo escolhido. */
   discountMode: z.enum(["value", "percent"]).optional().default("value"),
+  /* Reabrir um orçamento aprovado para renegociação exige intenção
+     explícita — ver `assertEditable`. */
+  reopen: z.boolean().optional(),
   shippingFee: finiteNumber.min(0).optional(),
   taxes: finiteNumber.min(0).optional(),
   paymentMethod: z.string().trim().max(120).optional(),
@@ -163,6 +169,112 @@ async function syncKanbanForQuote(tx: Tx, quote: typeof quotes.$inferSelect, ite
   else await tx.insert(kanbanCards).values(data);
 }
 
+/** Data de hoje no fuso da aplicação, em ISO curto. */
+function todayLocalISO() {
+  return toLocalISODate(new Date());
+}
+
+/**
+ * Regras de valor comuns a criação e edição.
+ *
+ * Antes da v3.16.0 nada disso era checado: desconto de 500% ou maior
+ * que o subtotal zerava a proposta, que virava pedido e receita de
+ * R$ 0,00 marcada como paga no Financeiro.
+ */
+function assertTotals(
+  totals: { subtotal: number; discount: number; total: number },
+  discountRaw: unknown,
+  mode: "value" | "percent"
+): QuoteError | null {
+  if (mode === "percent" && toNumber(discountRaw, 0) > 100) {
+    return { error: "Desconto percentual não pode passar de 100%", status: 422 };
+  }
+  if (totals.discount > totals.subtotal) {
+    return {
+      error: `Desconto (${totals.discount.toFixed(2)}) não pode ser maior que o subtotal (${totals.subtotal.toFixed(2)})`,
+      status: 422,
+    };
+  }
+  if (totals.total <= 0) {
+    return {
+      error:
+        totals.discount >= totals.subtotal && totals.subtotal > 0
+          ? "Desconto não pode zerar o orçamento. Para cortesia, registre um lançamento próprio."
+          : "O total do orçamento precisa ser maior que zero",
+      status: 422,
+    };
+  }
+  return null;
+}
+
+/** Validade no passado gerava proposta nascida vencida, sem aviso. */
+function assertValidity(validUntil: string | null | undefined): QuoteError | null {
+  if (!validUntil) return null;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(validUntil)) {
+    return { error: "Data de validade inválida", status: 422 };
+  }
+  if (validUntil < todayLocalISO()) {
+    return { error: "A validade do orçamento não pode ser uma data passada", status: 422 };
+  }
+  return null;
+}
+
+/**
+ * Um orçamento aprovado é um acordo comercial: mudar valor por baixo
+ * apagava o que o cliente aceitou. Alterar exige reabrir (`reopen`),
+ * o que devolve a proposta para `rascunho` e registra a mudança.
+ */
+function assertEditable(
+  current: typeof quotes.$inferSelect,
+  d: QuotePayload,
+  touchesMoney: boolean
+): QuoteError | null {
+  if (!touchesMoney) return null;
+  if (current.status !== "aprovado") return null;
+  if (d.reopen) return null;
+  return {
+    error:
+      "Orçamento aprovado não pode ter valores alterados. Reabra para renegociação antes de editar.",
+    status: 409,
+    details: { code: "QUOTE_APPROVED_LOCKED" },
+  };
+}
+
+/**
+ * Confere o preço informado contra o catálogo e devolve os avisos.
+ *
+ * Diferente do PDV (onde o servidor sobrescreve o preço), aqui o valor
+ * do vendedor é respeitado — orçamento é negociação e desconto de linha
+ * é legítimo. O que faltava era o registro: agora a divergência fica
+ * anotada em `notes` e volta na resposta para a tela mostrar.
+ */
+async function priceWarnings(items: QuoteItem[]): Promise<string[]> {
+  const ids = [...new Set(items.map((i) => i.productId).filter((x): x is number => !!x))];
+  if (ids.length === 0) return [];
+
+  const rows = await db
+    .select({ id: products.id, name: products.name, finalPrice: products.finalPrice })
+    .from(products)
+    .where(inArray(products.id, ids));
+  const table = new Map(rows.map((r) => [r.id, r]));
+
+  const warnings: string[] = [];
+  for (const it of items) {
+    if (!it.productId) continue;
+    const ref = table.get(it.productId);
+    if (!ref) continue;
+    const listed = toNumber(ref.finalPrice, 0);
+    if (listed <= 0) continue;
+    /* 1 centavo de folga evita ruído de arredondamento */
+    if (Math.abs(it.unitPrice - listed) < 0.01) continue;
+    const pct = ((it.unitPrice - listed) / listed) * 100;
+    warnings.push(
+      `${ref.name}: ${it.unitPrice.toFixed(2)} vs ${listed.toFixed(2)} de tabela (${pct > 0 ? "+" : ""}${pct.toFixed(1)}%)`
+    );
+  }
+  return warnings;
+}
+
 export async function createQuote(raw: unknown) {
   const parsed = parse(raw);
   if ("error" in parsed) return parsed;
@@ -173,6 +285,15 @@ export async function createQuote(raw: unknown) {
   if (items.length === 0) return { error: "Adicione ao menos um item ao orçamento", status: 422 } satisfies QuoteError;
 
   const totals = calcTotals(items, d.discount ?? 0, d.discountMode || "value", d.shippingFee ?? 0, d.taxes ?? 0);
+
+  const totalsError = assertTotals(totals, d.discount ?? 0, d.discountMode || "value");
+  if (totalsError) return totalsError;
+
+  const validityError = assertValidity(d.validUntil);
+  if (validityError) return validityError;
+
+  const warnings = await priceWarnings(items);
+
   const number = await nextDocumentNumber("quote");
   const validUntil = d.validUntil || new Date(Date.now() + quoteDefaults.validityDays * 86400000).toISOString().slice(0, 10);
 
@@ -200,7 +321,7 @@ export async function createQuote(raw: unknown) {
     return quote;
   });
 
-  return { ok: true as const, row };
+  return { ok: true as const, row, warnings };
 }
 
 export async function updateQuote(id: number, raw: unknown) {
@@ -221,6 +342,14 @@ export async function updateQuote(id: number, raw: unknown) {
   if (hasItemsPatch && items.length === 0) return { error: "Orçamento precisa ter ao menos um item", status: 422 } satisfies QuoteError;
 
   const shouldRecalc = hasItemsPatch || d.discount !== undefined || d.shippingFee !== undefined || d.taxes !== undefined;
+
+  /* Acordo fechado não muda de valor sem reabertura explícita. */
+  const editError = assertEditable(current, d, shouldRecalc);
+  if (editError) return editError;
+
+  const validityError = assertValidity(d.validUntil);
+  if (validityError) return validityError;
+
   const totals = shouldRecalc
     ? calcTotals(
         items,
@@ -231,10 +360,31 @@ export async function updateQuote(id: number, raw: unknown) {
       )
     : null;
 
+  if (totals) {
+    const totalsError = assertTotals(
+      totals,
+      d.discount !== undefined ? d.discount : current.discount,
+      d.discountMode || "value"
+    );
+    if (totalsError) return totalsError;
+  }
+
+  const warnings = shouldRecalc ? await priceWarnings(items) : [];
+
   const row = await db.transaction(async (tx) => {
     const patch: Partial<typeof quotes.$inferInsert> = {};
     if (d.customerId !== undefined) patch.customerId = d.customerId || null;
     if (d.status !== undefined) patch.status = d.status;
+
+    /* Reabertura: volta para rascunho e deixa o rastro na proposta, para
+       que ninguém precise adivinhar por que o valor aceito mudou. */
+    if (d.reopen && current.status === "aprovado" && d.status === undefined) {
+      patch.status = "rascunho";
+      const stamp = new Date().toLocaleString("pt-BR");
+      const trail = `REABERTO em ${stamp}: valor anterior R$ ${toNumber(current.total, 0).toFixed(2)}`;
+      patch.notes = [d.notes ?? current.notes, trail].filter(Boolean).join("\n");
+    }
+
     if (d.validUntil !== undefined) patch.validUntil = d.validUntil || null;
     if (d.paymentMethod !== undefined) patch.paymentMethod = d.paymentMethod || "PIX";
     if (d.channel !== undefined) patch.channel = d.channel || "Atendimento";
@@ -254,7 +404,7 @@ export async function updateQuote(id: number, raw: unknown) {
     return quote;
   });
 
-  return { ok: true as const, row };
+  return { ok: true as const, row, warnings };
 }
 
 export async function archiveQuote(id: number, reason = "Arquivado") {
@@ -266,15 +416,45 @@ export async function archiveQuote(id: number, reason = "Arquivado") {
   return updateQuote(id, { status: "recusado", notes });
 }
 
+/**
+ * Marca como expirados os orçamentos enviados cuja validade já passou.
+ *
+ * Antes rodava só no `install.sh`/`update.sh`: entre dois deploys, uma
+ * proposta vencida continuava exibida como "enviado" e inflava o funil
+ * dos Relatórios. Agora a página `/orcamentos` chama isto a cada carga.
+ *
+ * Um UPDATE em lote (em vez de um `updateQuote` por linha) porque isto
+ * roda a cada visita à página — e porque a mudança é só de status, sem
+ * recálculo de valores.
+ */
+export async function expireStaleQuotes(): Promise<number> {
+  const today = todayLocalISO();
+
+  const stale = await db
+    .update(quotes)
+    .set({ status: "expirado" })
+    .where(
+      and(eq(quotes.status, "enviado"), isNotNull(quotes.validUntil), lt(quotes.validUntil, today))
+    )
+    .returning({ id: quotes.id });
+
+  if (stale.length === 0) return 0;
+
+  /* Card do Kanban acompanha: proposta vencida sai do fluxo ativo. */
+  await db
+    .update(kanbanCards)
+    .set({ column: "cancelado", updatedAt: new Date() })
+    .where(
+      inArray(
+        kanbanCards.quoteId,
+        stale.map((q) => q.id)
+      )
+    );
+
+  return stale.length;
+}
+
+/** Mantido para compatibilidade com `scripts/repair-quotes.mjs`. */
 export async function repairExpiredQuotes() {
-  const today = new Date().toISOString().slice(0, 10);
-  const rows = await db.select().from(quotes).where(eq(quotes.status, "enviado"));
-  let count = 0;
-  for (const q of rows) {
-    if (q.validUntil && q.validUntil < today) {
-      await updateQuote(q.id, { status: "expirado" });
-      count++;
-    }
-  }
-  return count;
+  return expireStaleQuotes();
 }

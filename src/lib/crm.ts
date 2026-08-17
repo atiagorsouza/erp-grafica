@@ -14,6 +14,7 @@ import {
   isValidEmail,
   onlyDigits,
 } from "@/lib/validators";
+import { todayISO } from "@/lib/period";
 
 export type CrmError = { error: string; status: number; details?: unknown };
 
@@ -37,16 +38,27 @@ const customerSchema = z.object({
   city: z.string().trim().max(120).nullable().optional(),
   state: z.string().trim().max(2).nullable().optional(),
   rg: z.string().trim().max(40).nullable().optional(),
+  rgIssuer: z.string().trim().max(40).nullable().optional(),
   birthDate: z.string().trim().nullable().optional(),
   gender: z.string().trim().max(40).nullable().optional(),
+  maritalStatus: z.string().trim().max(40).nullable().optional(),
   stateRegistration: z.string().trim().max(60).nullable().optional(),
   municipalRegistration: z.string().trim().max(60).nullable().optional(),
   legalNature: z.string().trim().max(100).nullable().optional(),
   taxRegime: z.string().trim().max(100).nullable().optional(),
+  companySize: z.string().trim().max(40).nullable().optional(),
+  foundedAt: z.string().trim().nullable().optional(),
+  origin: z.string().trim().max(60).nullable().optional(),
+  whatsappOptOut: z.coerce.boolean().optional(),
   status: z.enum(["lead", "ativo", "inativo", "bloqueado"]).default("lead"),
   creditLimit: z.coerce.number().finite().min(0).max(999999999).optional(),
   tags: z.string().trim().max(300).nullable().optional(),
   notes: z.string().trim().max(1500).nullable().optional(),
+  /* Cadastro rápido do PDV (F8) grava só nome e telefone no meio da
+     venda: exigir documento ali travaria a fila do balcão. A tela de
+     Clientes & CRM não envia esta flag, então lá o documento é
+     obrigatório. */
+  quickEntry: z.coerce.boolean().optional(),
 });
 
 const leadSchema = z.object({
@@ -118,12 +130,18 @@ function normalizeCustomer(data: z.infer<typeof customerSchema>) {
     city: nullable(data.city),
     state: data.state ? data.state.trim().toUpperCase().slice(0, 2) : null,
     rg: nullable(data.rg),
+    rgIssuer: nullable(data.rgIssuer),
     birthDate: nullable(data.birthDate),
     gender: nullable(data.gender),
+    maritalStatus: nullable(data.maritalStatus),
     stateRegistration: nullable(data.stateRegistration),
     municipalRegistration: nullable(data.municipalRegistration),
     legalNature: nullable(data.legalNature),
     taxRegime: nullable(data.taxRegime),
+    companySize: nullable(data.companySize),
+    foundedAt: nullable(data.foundedAt),
+    origin: nullable(data.origin),
+    whatsappOptOut: data.whatsappOptOut ?? false,
     status: data.status,
     creditLimit: String(data.creditLimit ?? 0),
     tags: nullable(data.tags),
@@ -133,11 +151,48 @@ function normalizeCustomer(data: z.infer<typeof customerSchema>) {
 }
 
 async function validateCustomer(data: z.infer<typeof customerSchema>, ignoreId?: number) {
+  /* O tipo (pf/pj) tem default "pf". Um CNPJ correto enviado sem marcar
+     PJ era validado como CPF e recusado com "CPF inválido" — mensagem
+     que não ajuda quem digitou o documento certo. A contagem de dígitos
+     é uma evidência melhor que o seletor: 14 = CNPJ, 11 = CPF. */
+  if (data.document) {
+    const len = onlyDigits(data.document).length;
+    if (len === 14 && data.type !== "pj") data.type = "pj";
+    else if (len === 11 && data.type !== "pf") data.type = "pf";
+  }
+
+  /* Documento obrigatório no cadastro completo. O cadastro rápido do
+     PDV (quickEntry) segue liberado: exigir CPF no balcão travaria a
+     venda. Clientes antigos sem documento continuam válidos — a regra
+     só vale para o que passa por aqui. */
+  if (!data.quickEntry && !onlyDigits(data.document || "")) {
+    return {
+      error: data.type === "pj" ? "CNPJ é obrigatório" : "CPF é obrigatório",
+      status: 422,
+    } satisfies CrmError;
+  }
+
   if (data.document && !isValidDocument(data.document, data.type)) {
     return { error: data.type === "pj" ? "CNPJ inválido" : "CPF inválido", status: 422 } satisfies CrmError;
   }
   if (data.email && !isValidEmail(data.email)) {
     return { error: "E-mail inválido", status: 422 } satisfies CrmError;
+  }
+  /* Datas em branco chegam como "" e o Postgres recusa: normalizamos
+     para null. Também barramos nascimento/fundação no futuro. */
+  for (const [campo, rotulo] of [
+    ["birthDate", "Data de nascimento"],
+    ["foundedAt", "Data de fundação"],
+  ] as const) {
+    const v = (data as Record<string, unknown>)[campo];
+    if (typeof v === "string" && v.trim()) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(v.trim())) {
+        return { error: `${rotulo} inválida`, status: 422 } satisfies CrmError;
+      }
+      if (v.trim() > todayISO()) {
+        return { error: `${rotulo} não pode ser no futuro`, status: 422 } satisfies CrmError;
+      }
+    }
   }
   if (data.cep && onlyDigits(data.cep).length > 0 && !isValidCEP(data.cep)) {
     return { error: "CEP inválido", status: 422 } satisfies CrmError;

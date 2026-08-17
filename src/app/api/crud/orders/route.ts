@@ -45,9 +45,10 @@ export async function POST(req: Request) {
 
     return Response.json({ error: "op inválido" }, { status: 400 });
   } catch (e) {
+    /* Mensagem genérica: o detalhe (inclusive SQL) fica no log. */
     console.error("[orders]", e);
     return Response.json(
-      { error: e instanceof Error ? e.message : "erro interno" },
+      { error: "Não foi possível concluir a operação no pedido." },
       { status: 500 }
     );
   }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { useRouter } from "next/navigation";
 import { mutate } from "@/lib/mutate";
 import { Button, Field, IconButton, Input, Modal, PageHeader, Select, Textarea, toast } from "@/components/ui";
@@ -8,7 +8,6 @@ import { Icon } from "@/components/icons";
 import { cn } from "@/lib/format";
 import { formatBRL, toNumber } from "@/lib/money";
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Row = Record<string, any>;
 
 const COLS = [
@@ -35,6 +34,8 @@ export function KanbanClient({ cards }: { cards: Row[] }) {
   const refresh = () => router.refresh();
   const [dragId, setDragId] = useState<number | null>(null);
   const [overCol, setOverCol] = useState<string | null>(null);
+  /* card sob o cursor: mostra onde a peça vai entrar na fila */
+  const [overCard, setOverCard] = useState<number | null>(null);
   const [modal, setModal] = useState<null | { edit?: Row; column?: string }>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<Row | null>(null);
   const [form, setForm] = useState<Record<string, string>>({});
@@ -42,14 +43,78 @@ export function KanbanClient({ cards }: { cards: Row[] }) {
   const [deleting, setDeleting] = useState(false);
   const set = (k: string) => (e: { target: { value: string } }) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
+  /** Cards de uma coluna, na ordem salva (empate → mais antigo primeiro). */
+  const cardsOf = useCallback(
+    (col: string) =>
+      cards
+        .filter((c: Row) => c.column === col)
+        .sort(
+          (a: Row, b: Row) =>
+            toNumber(a.order, 0) - toNumber(b.order, 0) || Number(a.id) - Number(b.id)
+        ),
+    [cards]
+  );
+
+  /** Solta no vazio da coluna: vai para o fim da fila. */
   async function drop(col: string) {
     if (dragId === null) return;
+    const card = cards.find((c: Row) => Number(c.id) === dragId);
+    if (!card) return;
+    if (card.column === col) {
+      await reorderInto(col, dragId, null);
+      return;
+    }
     try {
       await mutate("kanban", "update", { column: col }, dragId);
       toast.success("Card movido", "Pedidos vinculados foram sincronizados automaticamente.");
       refresh();
     } catch (e) {
       toast.error("Não foi possível mover", e instanceof Error ? e.message : undefined);
+    } finally {
+      setDragId(null);
+      setOverCol(null);
+    }
+  }
+
+  /**
+   * Reordena a coluna colocando `id` antes de `beforeId` (ou no fim
+   * quando `beforeId` é nulo).
+   *
+   * A fila de produção não tinha como ser priorizada: o campo `order`
+   * existia no banco e a API também, mas a tela nunca os usava — todos
+   * os cards ficavam com ordem 0. `allowMove` avisa o servidor quando o
+   * card vem de outra coluna, para que ele sincronize o Pedido.
+   */
+  async function reorderInto(col: string, id: number, beforeId: number | null) {
+    const atual = cardsOf(col).map((c) => Number(c.id));
+    const veioDeFora = !atual.includes(id);
+    const semEle = atual.filter((x: number) => x !== id);
+    const alvo = beforeId !== null ? semEle.indexOf(beforeId) : -1;
+    const ordem =
+      alvo >= 0
+        ? [...semEle.slice(0, alvo), id, ...semEle.slice(alvo)]
+        : [...semEle, id];
+
+    /* nada mudou: evita ida ao servidor a cada clique sem arrasto */
+    if (!veioDeFora && ordem.join(",") === atual.join(",")) {
+      setDragId(null);
+      setOverCol(null);
+      return;
+    }
+
+    try {
+      await mutate("kanban", "reorder", undefined, undefined, {
+        column: col,
+        ids: ordem,
+        allowMove: veioDeFora,
+      });
+      toast.success(
+        veioDeFora ? "Card movido" : "Ordem atualizada",
+        veioDeFora ? "Pedidos vinculados foram sincronizados." : undefined
+      );
+      refresh();
+    } catch (e) {
+      toast.error("Não foi possível reordenar", e instanceof Error ? e.message : undefined);
     } finally {
       setDragId(null);
       setOverCol(null);
@@ -115,7 +180,7 @@ export function KanbanClient({ cards }: { cards: Row[] }) {
 
       <div className="reveal grid grid-cols-1 gap-3 md:grid-cols-3 xl:grid-cols-5">
         {COLS.map((col) => {
-          const colCards = cards.filter((c) => c.column === col.id);
+          const colCards = cardsOf(col.id);
           return (
             <div
               key={col.id}
@@ -123,7 +188,10 @@ export function KanbanClient({ cards }: { cards: Row[] }) {
                 e.preventDefault();
                 setOverCol(col.id);
               }}
-              onDragLeave={() => setOverCol((v) => (v === col.id ? null : v))}
+              onDragLeave={() => {
+                setOverCol((v) => (v === col.id ? null : v));
+                setOverCard(null);
+              }}
               onDrop={() => drop(col.id)}
               className={cn(
                 "flex min-h-[420px] flex-col rounded-xl border bg-paper-200/40 p-2.5 transition-all duration-150",
@@ -146,9 +214,26 @@ export function KanbanClient({ cards }: { cards: Row[] }) {
                     onDragEnd={() => {
                       setDragId(null);
                       setOverCol(null);
+                      setOverCard(null);
+                    }}
+                    /* Soltar SOBRE um card insere antes dele — é o que
+                       permite priorizar a fila, não só trocar de etapa. */
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setOverCol(col.id);
+                      if (dragId !== null && dragId !== Number(c.id)) setOverCard(Number(c.id));
+                    }}
+                    onDrop={(e) => {
+                      e.stopPropagation();
+                      if (dragId === null) return;
+                      void reorderInto(col.id, dragId, Number(c.id));
                     }}
                     className={cn(
-                      "group cursor-grab rounded-lg border border-paper-200 bg-paper-50 p-3 shadow-card transition-all select-none active:cursor-grabbing",
+                      "group cursor-grab rounded-lg border bg-paper-50 p-3 shadow-card transition-all select-none active:cursor-grabbing",
+                      overCard === Number(c.id) && dragId !== null
+                        ? "border-proc-c border-t-2 border-t-proc-c"
+                        : "border-paper-200",
                       dragId === Number(c.id) ? "rotate-2 opacity-50" : "hover:-translate-y-0.5 hover:shadow-pop"
                     )}
                   >
@@ -262,7 +347,7 @@ export function KanbanClient({ cards }: { cards: Row[] }) {
         }
       >
         <p className="text-[13px] text-ink-700">
-          O card <strong>"{deleteConfirm?.title}"</strong> será removido permanentemente do quadro.
+          O card <strong>&ldquo;{deleteConfirm?.title}&rdquo;</strong> será removido permanentemente do quadro.
         </p>
         <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-[11.5px] text-amber-800">
           Esta ação não pode ser desfeita.

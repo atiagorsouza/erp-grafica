@@ -1,5 +1,5 @@
 {
-  "version": "3.10.0",
+  "version": "3.21.0",
   "groups": [
     {
       "id": "empresa",
@@ -90,6 +90,82 @@
           "label": "CEP",
           "mono": true,
           "defaultValue": ""
+        },
+        {
+          "key": "company_ie",
+          "label": "Inscrição estadual",
+          "mono": true,
+          "hint": "ou ISENTO",
+          "defaultValue": ""
+        },
+        {
+          "key": "company_im",
+          "label": "Inscrição municipal",
+          "mono": true,
+          "defaultValue": ""
+        },
+        {
+          "key": "company_tax_regime",
+          "label": "Regime tributário",
+          "type": "select",
+          "defaultValue": "simples",
+          "options": [
+            {
+              "value": "simples",
+              "label": "Simples Nacional"
+            },
+            {
+              "value": "presumido",
+              "label": "Lucro Presumido"
+            },
+            {
+              "value": "real",
+              "label": "Lucro Real"
+            },
+            {
+              "value": "mei",
+              "label": "MEI"
+            }
+          ]
+        },
+        {
+          "key": "company_cnae",
+          "label": "CNAE principal",
+          "mono": true,
+          "hint": "atividade principal (NF-e)",
+          "defaultValue": ""
+        },
+        {
+          "key": "company_city_code",
+          "label": "Código IBGE do município",
+          "mono": true,
+          "hint": "7 dígitos — exigido na NF-e",
+          "defaultValue": ""
+        },
+        {
+          "key": "company_complement",
+          "label": "Complemento do endereço",
+          "defaultValue": ""
+        },
+        {
+          "key": "company_crt",
+          "label": "Código de regime tributário (CRT)",
+          "type": "select",
+          "defaultValue": "1",
+          "options": [
+            {
+              "value": "1",
+              "label": "1 — Simples Nacional"
+            },
+            {
+              "value": "2",
+              "label": "2 — Simples, excesso de receita"
+            },
+            {
+              "value": "3",
+              "label": "3 — Regime normal"
+            }
+          ]
         }
       ]
     },
@@ -281,6 +357,31 @@
           "span2": true,
           "hint": "Aparece no final do cupom impresso e no texto do WhatsApp",
           "defaultValue": "Agradecemos a preferência! Volte sempre."
+        },
+        {
+          "key": "pdv_receipt_boldness",
+          "label": "Intensidade da impressão térmica",
+          "type": "select",
+          "defaultValue": "600",
+          "hint": "Se o cupom sair claro, aumente. Se os caracteres empastarem, reduza.",
+          "options": [
+            {
+              "value": "400",
+              "label": "Normal (padrão do navegador)"
+            },
+            {
+              "value": "600",
+              "label": "Reforçado (recomendado)"
+            },
+            {
+              "value": "700",
+              "label": "Escuro"
+            },
+            {
+              "value": "800",
+              "label": "Muito escuro (cabeça gasta)"
+            }
+          ]
         }
       ]
     },
@@ -537,6 +638,254 @@
               "label": "Não"
             }
           ]
+        }
+      ]
+    },
+    {
+      "id": "pagamentos",
+      "title": "Pagamentos · InfinitePay",
+      "desc": "Link de checkout com Pix e cartão em até 12x. A baixa no Financeiro é automática.",
+      "icon": "wallet",
+      "color": "text-proc-c",
+      "fields": [
+        {
+          "key": "infinitepay_handle",
+          "label": "InfiniteTag (handle)",
+          "mono": true,
+          "hint": "Seu usuário no app InfinitePay, SEM o $ e sem @. Ex.: minhagrafica",
+          "defaultValue": ""
+        },
+        {
+          "key": "app_base_url",
+          "label": "URL pública do sistema",
+          "span2": true,
+          "hint": "Ex.: https://erp.suagrafica.com.br — usada no retorno do cliente e no webhook.",
+          "defaultValue": ""
+        },
+        {
+          "key": "infinitepay_methods",
+          "label": "Formas aceitas",
+          "type": "select",
+          "options": [
+            {
+              "value": "pix,credit_card",
+              "label": "Pix e cartão de crédito"
+            },
+            {
+              "value": "pix",
+              "label": "Somente Pix"
+            },
+            {
+              "value": "credit_card",
+              "label": "Somente cartão"
+            }
+          ],
+          "defaultValue": "pix,credit_card"
+        },
+        {
+          "key": "infinitepay_auto_settle",
+          "label": "Baixa automática",
+          "type": "select",
+          "options": [
+            {
+              "value": "true",
+              "label": "Sim — quita o pedido e lança a receita"
+            },
+            {
+              "value": "false",
+              "label": "Não — apenas registra o pagamento"
+            }
+          ],
+          "defaultValue": "true"
+        },
+        {
+          "key": "infinitepay_expires_hours",
+          "label": "Validade do link",
+          "type": "number",
+          "suffix": "horas",
+          "hint": "Depois disso a cobrança é marcada como expirada.",
+          "defaultValue": "72"
+        },
+        {
+          "key": "infinitepay_redirect_url",
+          "label": "URL de retorno (opcional)",
+          "span2": true,
+          "hint": "Vazio usa <URL pública>/pagamento/retorno",
+          "defaultValue": ""
+        },
+        {
+          "key": "infinitepay_webhook_url",
+          "label": "URL de webhook (opcional)",
+          "span2": true,
+          "hint": "Vazio usa <URL pública>/api/payments/webhook",
+          "defaultValue": ""
+        },
+        {
+          "key": "infinitepay_fee_pix",
+          "label": "Taxa InfinitePay — Pix",
+          "type": "number",
+          "suffix": "%",
+          "hint": "Pix costuma ser 0% na InfinitePay.",
+          "defaultValue": "0"
+        },
+        {
+          "key": "infinitepay_fee_credit",
+          "label": "Taxa InfinitePay — Crédito à vista",
+          "type": "number",
+          "suffix": "%",
+          "hint": "Taxa do link de checkout — é DIFERENTE da maquininha física.",
+          "defaultValue": "4.20"
+        },
+        {
+          "key": "infinitepay_fee_installment",
+          "label": "Taxa InfinitePay — Crédito parcelado",
+          "type": "number",
+          "suffix": "%",
+          "hint": "Aplicada quando o cliente parcela em 2x ou mais.",
+          "defaultValue": "5.99"
+        },
+        {
+          "key": "infinitepay_fee_mode",
+          "label": "Quem paga a taxa do link",
+          "type": "select",
+          "options": [
+            {
+              "value": "absorve",
+              "label": "A loja absorve (cobra o valor cheio do documento)"
+            },
+            {
+              "value": "repassa",
+              "label": "Repassa ao cliente (soma a taxa no link)"
+            }
+          ],
+          "hint": "Independe da taxa da maquininha do PDV.",
+          "defaultValue": "absorve"
+        }
+      ]
+    },
+    {
+      "id": "envios",
+      "title": "Envios & Frete",
+      "desc": "Integração SuperFrete: cotação de frete, etiqueta dos Correios e rastreio.",
+      "icon": "truck",
+      "color": "text-proc-y",
+      "fields": [
+        {
+          "key": "superfrete_token",
+          "label": "Token da API SuperFrete",
+          "span2": true,
+          "mono": true,
+          "hint": "Gere em superfrete.com → Integrações → Token. Pode usar a variável SUPERFRETE_TOKEN.",
+          "defaultValue": ""
+        },
+        {
+          "key": "superfrete_sandbox",
+          "label": "Ambiente",
+          "type": "select",
+          "options": [
+            {
+              "value": "false",
+              "label": "Produção (etiqueta real, consome saldo)"
+            },
+            {
+              "value": "true",
+              "label": "Sandbox (testes, não gera etiqueta válida)"
+            }
+          ],
+          "hint": "Sandbox e produção usam tokens diferentes.",
+          "defaultValue": "false"
+        },
+        {
+          "key": "superfrete_cep_origem",
+          "label": "CEP de origem",
+          "mono": true,
+          "hint": "Vazio usa o CEP da empresa (Identidade).",
+          "defaultValue": ""
+        },
+        {
+          "key": "superfrete_services",
+          "label": "Serviços cotados",
+          "mono": true,
+          "hint": "1=PAC · 2=SEDEX · 17=Mini Envios · 3=LOGGI",
+          "defaultValue": "1,2,17"
+        },
+        {
+          "key": "superfrete_auto_charge",
+          "label": "Repassar frete ao cliente",
+          "type": "select",
+          "options": [
+            {
+              "value": "true",
+              "label": "Sim — soma no total do pedido"
+            },
+            {
+              "value": "false",
+              "label": "Não — a loja absorve o custo"
+            }
+          ],
+          "defaultValue": "true"
+        },
+        {
+          "key": "superfrete_post_expense",
+          "label": "Lançar etiqueta como despesa",
+          "type": "select",
+          "options": [
+            {
+              "value": "true",
+              "label": "Sim — vira despesa no Financeiro"
+            },
+            {
+              "value": "false",
+              "label": "Não"
+            }
+          ],
+          "hint": "Mantém o custo real do frete no resultado.",
+          "defaultValue": "true"
+        },
+        {
+          "key": "superfrete_insurance",
+          "label": "Valor declarado (seguro)",
+          "type": "select",
+          "options": [
+            {
+              "value": "false",
+              "label": "Não declarar"
+            },
+            {
+              "value": "true",
+              "label": "Declarar o valor do pedido"
+            }
+          ],
+          "defaultValue": "false"
+        },
+        {
+          "key": "superfrete_pkg_weight",
+          "label": "Pacote padrão · peso",
+          "type": "number",
+          "suffix": "kg",
+          "hint": "Usado quando o produto não tem peso cadastrado.",
+          "defaultValue": "0.3"
+        },
+        {
+          "key": "superfrete_pkg_height",
+          "label": "Pacote padrão · altura",
+          "type": "number",
+          "suffix": "cm",
+          "defaultValue": "4"
+        },
+        {
+          "key": "superfrete_pkg_width",
+          "label": "Pacote padrão · largura",
+          "type": "number",
+          "suffix": "cm",
+          "defaultValue": "12"
+        },
+        {
+          "key": "superfrete_pkg_length",
+          "label": "Pacote padrão · comprimento",
+          "type": "number",
+          "suffix": "cm",
+          "defaultValue": "17"
         }
       ]
     },

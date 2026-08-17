@@ -35,6 +35,8 @@ const NAV: NavGroup[] = [
     label: "Gestão",
     accent: "var(--color-proc-y)",
     items: [
+      { href: "/cobrancas", label: "Cobranças", icon: "wallet" },
+      { href: "/envios", label: "Envios & Frete", icon: "truck" },
       { href: "/financeiro", label: "Financeiro", icon: "wallet" },
       { href: "/relatorios", label: "Relatórios", icon: "chart" },
       { href: "/configuracoes", label: "Painel de Controle", icon: "gear" },

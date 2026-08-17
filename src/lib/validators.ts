@@ -74,6 +74,25 @@ export function isValidDocument(raw: string, type: "pf" | "pj"): boolean {
   return type === "pj" ? isValidCNPJ(raw) : isValidCPF(raw);
 }
 
+/**
+ * Máscara de documento enquanto o operador digita, escolhendo o formato
+ * pela quantidade de dígitos — até 11 vira CPF, acima disso CNPJ.
+ *
+ * Usada nos campos de digitação livre (importação, cadastro rápido),
+ * onde o tipo ainda não foi definido pelo seletor PF/PJ.
+ */
+export function formatDocumentAuto(raw: string): string {
+  const d = onlyDigits(raw).slice(0, 14);
+  return d.length > 11 ? formatCNPJ(d) : formatCPF(d);
+}
+
+/** Inscrição Estadual: dígitos e o literal "ISENTO". */
+export function formatStateRegistration(raw: string): string {
+  const t = String(raw || "").trim();
+  if (/^isent/i.test(t)) return "ISENTO";
+  return onlyDigits(t).slice(0, 14);
+}
+
 /* ─────────────── E-mail ─────────────── */
 export function isValidEmail(raw: string): boolean {
   if (!raw) return true; // vazio permitido

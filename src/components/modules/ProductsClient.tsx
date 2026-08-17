@@ -224,6 +224,10 @@ export function ProductsClient({
       margin: String(num(p.margin, 0.4) * 100),
       stock: String(p.stock ?? 0),
       minStock: String(p.minStock ?? 0),
+      shipWeight: String(p.shipWeight ?? 0),
+      shipHeight: String(p.shipHeight ?? 0),
+      shipWidth: String(p.shipWidth ?? 0),
+      shipLength: String(p.shipLength ?? 0),
       active: String(p.active ?? true),
       trackStock: String(p.trackStock ?? false),
     });
@@ -265,6 +269,10 @@ export function ProductsClient({
         trackStock: form.trackStock === "true",
         stock: form.stock || 0,
         minStock: form.minStock || 0,
+        shipWeight: form.shipWeight || 0,
+        shipHeight: form.shipHeight || 0,
+        shipWidth: form.shipWidth || 0,
+        shipLength: form.shipLength || 0,
         finishings: compFinishings.filter((f) => f.id).map((f) => ({ id: Number(f.id), quantity: num(f.quantity, 1), chargeMode: f.chargeMode, batchSize: num(f.batchSize, 1) })),
         materials: compMaterials.filter((m) => m.id).map((m) => ({ id: Number(m.id), quantity: num(m.quantity, 1) })),
       };
@@ -631,6 +639,31 @@ export function ProductsClient({
                   <option value="false">Inativo</option>
                 </Select>
               </Field>
+            </section>
+
+            {/* Logística — alimenta a cotação de frete (SuperFrete) */}
+            <section>
+              <p className="mb-2 flex items-center gap-1.5 font-mono text-[10px] font-semibold tracking-[0.14em] text-ink-500 uppercase">
+                <Icon name="truck" size={12} />
+                Logística · frete
+                <span className="ml-1 normal-case tracking-normal text-ink-400">
+                  deixe zerado para usar o pacote padrão
+                </span>
+              </p>
+              <div className="grid grid-cols-2 gap-3.5 sm:grid-cols-4">
+                <Field label="Peso" hint="kg">
+                  <Input mono inputMode="decimal" value={form.shipWeight || ""} onChange={set("shipWeight")} placeholder="0,000" />
+                </Field>
+                <Field label="Altura" hint="cm">
+                  <Input mono inputMode="decimal" value={form.shipHeight || ""} onChange={set("shipHeight")} placeholder="0" />
+                </Field>
+                <Field label="Largura" hint="cm">
+                  <Input mono inputMode="decimal" value={form.shipWidth || ""} onChange={set("shipWidth")} placeholder="0" />
+                </Field>
+                <Field label="Comprimento" hint="cm">
+                  <Input mono inputMode="decimal" value={form.shipLength || ""} onChange={set("shipLength")} placeholder="0" />
+                </Field>
+              </div>
             </section>
           </div>
 

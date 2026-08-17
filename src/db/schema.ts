@@ -11,6 +11,7 @@ import {
   date,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 /* ------------------------------------------------------------------ */
 /*  CONTROL PANEL / SETTINGS                                          */
@@ -111,21 +112,39 @@ export const customers = pgTable("customers", {
   state: text("state"),
   // PF
   rg: text("rg"),
+  /* órgão emissor do RG (DETRAN-RJ, SSP-SP...) — pedido na ficha de cliente */
+  rgIssuer: text("rg_issuer"),
   birthDate: date("birth_date", { mode: "string" }),
   gender: text("gender"),
+  maritalStatus: text("marital_status"), // solteiro, casado, divorciado, viuvo, uniao_estavel
   // PJ
   stateRegistration: text("state_registration"), // inscricao estadual
   municipalRegistration: text("municipal_registration"), // inscricao municipal
   legalNature: text("legal_nature"), // natureza juridica
   taxRegime: text("tax_regime"), // regime tributario
+  companySize: text("company_size"), // MEI, ME, EPP, demais
+  foundedAt: date("founded_at", { mode: "string" }), // data de fundação
   // comercial
+  /* de onde veio o cliente: whatsapp, indicacao, instagram, balcao... */
+  origin: text("origin"),
+  /* LGPD: cliente que pediu para não receber mensagem automática */
+  whatsappOptOut: boolean("whatsapp_opt_out").default(false).notNull(),
   status: customerStatusEnum("status").default("lead").notNull(),
   creditLimit: numeric("credit_limit", { precision: 12, scale: 2 }).default("0"),
   tags: text("tags"),
   notes: text("notes"),
   createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
-});
+}, (table) => [
+  /* Um documento, um cliente. A checagem de duplicata em `lib/crm.ts`
+     é um SELECT seguido de INSERT — mesmo TOCTOU que duplicou pedidos
+     na v3.16.0. Com a importação de PDF em lote o risco cresce.
+     Índice sobre os dígitos, para que "034.460.327-03" e "03446032703"
+     colidam. Parcial: documento é opcional e vazios não colidem. */
+  uniqueIndex("customers_document_unique_idx")
+    .on(table.document)
+    .where(sql`coalesce(document, '') <> ''`),
+]);
 
 /* ------------------------------------------------------------------ */
 /*  CRM COMERCIAL — PIPELINE, LEADS E HISTÓRICO DE RELACIONAMENTO      */
@@ -474,6 +493,15 @@ export const products = pgTable("products", {
   trackStock: boolean("track_stock").default(false),
   stock: numeric("stock", { precision: 12, scale: 3 }).default("0"),
   minStock: numeric("min_stock", { precision: 12, scale: 3 }).default("0"),
+  /* --------------------------------------------------------------
+   * LOGÍSTICA (v3.12.0) — usados na cotação de frete.
+   * Quando zerados, o motor cai no pacote padrão do Painel de
+   * Controle, então o cadastro legado continua funcionando.
+   * ------------------------------------------------------------- */
+  shipWeight: numeric("ship_weight", { precision: 10, scale: 3 }).default("0"), // kg
+  shipHeight: numeric("ship_height", { precision: 10, scale: 2 }).default("0"), // cm
+  shipWidth: numeric("ship_width", { precision: 10, scale: 2 }).default("0"), // cm
+  shipLength: numeric("ship_length", { precision: 10, scale: 2 }).default("0"), // cm
   createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
 });
 
@@ -586,7 +614,17 @@ export const orders = pgTable("orders", {
   notes: text("notes"),
   createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
-});
+}, (table) => [
+  /* Um orçamento gera NO MÁXIMO um pedido.
+     A rota de conversão conferia com um SELECT e inseria em seguida —
+     duplo-clique no botão "Converter em Pedido" criava duas OS para a
+     mesma proposta (reproduzido na auditoria da v3.15.0: 5 chamadas
+     paralelas geraram 3 pedidos). Parcial porque quote_id é nulo em
+     pedido avulso, e NULL não colide em índice único. */
+  uniqueIndex("orders_one_per_quote_idx")
+    .on(table.quoteId)
+    .where(sql`quote_id is not null`),
+]);
 
 export const artApprovals = pgTable("art_approvals", {
   id: serial("id").primaryKey(),
@@ -621,7 +659,15 @@ export const cashSessions = pgTable("cash_sessions", {
   notes: text("notes"),
   openedAt: timestamp("opened_at", { mode: "date" }).defaultNow().notNull(),
   closedAt: timestamp("closed_at", { mode: "date" }),
-});
+}, (table) => [
+  /* Só pode existir UMA sessão aberta por vez.
+     Sem esta trava, três requisições simultâneas de "abrir caixa"
+     criavam três sessões e a conferência de gaveta ficava sem sentido
+     (reproduzido em teste na v3.13.1). */
+  uniqueIndex("cash_sessions_one_open_idx")
+    .on(table.status)
+    .where(sql`status = 'aberto'`),
+]);
 
 /* Sangrias e suprimentos de gaveta. */
 export const cashMovements = pgTable("cash_movements", {
@@ -647,6 +693,10 @@ export const sales = pgTable("sales", {
   discount: numeric("discount", { precision: 12, scale: 4 }).default("0"),
   taxes: numeric("taxes", { precision: 12, scale: 4 }).default("0"),
   cardFee: numeric("card_fee", { precision: 12, scale: 4 }).default("0"),
+  /* frete cotado no PDV (SuperFrete) — soma no total (v3.12.0) */
+  shippingFee: numeric("shipping_fee", { precision: 12, scale: 4 }).default("0"),
+  shippingService: text("shipping_service"),
+  shippingServiceId: integer("shipping_service_id"),
   total: numeric("total", { precision: 12, scale: 4 }).default("0"),
   paymentMethod: text("payment_method"),
   status: text("status").default("concluida").notNull(),
@@ -683,7 +733,12 @@ export const kanbanCards = pgTable("kanban_cards", {
   orderId: integer("order_id").references(() => orders.id, {
     onDelete: "cascade",
   }),
-  quoteId: integer("quote_id"),
+  /* `orderId` e `customerId` sempre tiveram FK; `quoteId` era um
+     integer solto — orçamento removido deixava o card apontando para
+     um id inexistente. */
+  quoteId: integer("quote_id").references(() => quotes.id, {
+    onDelete: "set null",
+  }),
   productId: integer("product_id").references(() => products.id, {
     onDelete: "set null",
   }),
@@ -757,6 +812,25 @@ export const transactions = pgTable("transactions", {
   customerId: integer("customer_id").references(() => customers.id, {
     onDelete: "set null",
   }),
+  /* --------------------------------------------------------------
+   * VÍNCULO COM O DOCUMENTO DE ORIGEM (v3.11.0)
+   *
+   * Antes o Financeiro se ligava aos outros módulos por TEXTO da
+   * descrição (ilike "Pedido PED-2026-001%"), o que casava pedido
+   * errado a partir do nº 10 e impedia reconciliação/estorno seguro.
+   * ------------------------------------------------------------- */
+  saleId: integer("sale_id").references(() => sales.id, { onDelete: "set null" }),
+  orderId: integer("order_id").references(() => orders.id, { onDelete: "set null" }),
+  purchaseId: integer("purchase_id").references(() => purchases.id, { onDelete: "set null" }),
+  cashSessionId: integer("cash_session_id").references(() => cashSessions.id, {
+    onDelete: "set null",
+  }),
+  /* lançado por rotina do sistema (PDV, pedido, compra, caixa) — não editável na mão */
+  automatic: boolean("automatic").default(false).notNull(),
+  /* arquivamento não-destrutivo, no padrão dos demais módulos */
+  archivedAt: timestamp("archived_at", { mode: "date" }),
+  archiveReason: text("archive_reason"),
+  notes: text("notes"),
   createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
 });
 
@@ -849,3 +923,152 @@ export const commemorativeDateAudit = pgTable("commemorative_date_audit", {
 });
 
 export type CommemorativeDate = typeof commemorativeDates.$inferSelect;
+
+/* ------------------------------------------------------------------ */
+/*  SUPERFRETE · ENVIOS (v3.12.0)                                     */
+/*                                                                    */
+/*  Ciclo real da API:                                                */
+/*    cotação → carrinho (/cart) → checkout (paga) → etiqueta         */
+/*    (/tag/print) → rastreio (/tag/tracking)                         */
+/*                                                                    */
+/*  Guardamos cada etapa para nunca perder o dinheiro já gasto: se o  */
+/*  checkout deu certo mas a impressão falhou, o orderId da           */
+/*  SuperFrete continua aqui e a etiqueta pode ser reimpressa.        */
+/* ------------------------------------------------------------------ */
+export const shipmentStatusEnum = pgEnum("shipment_status", [
+  "cotado",
+  "no_carrinho",
+  "pago",
+  "postado",
+  "em_transito",
+  "entregue",
+  "cancelado",
+  "erro",
+]);
+
+export const shipments = pgTable("shipments", {
+  id: serial("id").primaryKey(),
+  orderId: integer("order_id").references(() => orders.id, { onDelete: "set null" }),
+  saleId: integer("sale_id").references(() => sales.id, { onDelete: "set null" }),
+  deliveryId: integer("delivery_id").references(() => deliveries.id, { onDelete: "set null" }),
+  customerId: integer("customer_id").references(() => customers.id, { onDelete: "set null" }),
+
+  status: shipmentStatusEnum("status").default("cotado").notNull(),
+
+  /* identificadores do lado da SuperFrete */
+  superfreteOrderId: text("superfrete_order_id").unique(),
+  protocol: text("protocol"),
+  serviceId: integer("service_id"),
+  serviceName: text("service_name"),
+  carrier: text("carrier"),
+
+  /* valores */
+  price: numeric("price", { precision: 12, scale: 2 }).default("0"),
+  discount: numeric("discount", { precision: 12, scale: 2 }).default("0"),
+  insuranceValue: numeric("insurance_value", { precision: 12, scale: 2 }).default("0"),
+  deliveryMin: integer("delivery_min"),
+  deliveryMax: integer("delivery_max"),
+
+  /* pacote cotado */
+  weight: numeric("weight", { precision: 10, scale: 3 }).default("0"),
+  height: numeric("height", { precision: 10, scale: 2 }).default("0"),
+  width: numeric("width", { precision: 10, scale: 2 }).default("0"),
+  length: numeric("length", { precision: 10, scale: 2 }).default("0"),
+
+  cepOrigin: text("cep_origin"),
+  cepDestination: text("cep_destination"),
+  addressSnapshot: text("address_snapshot"),
+
+  /* pós-compra */
+  trackingCode: text("tracking_code"),
+  labelUrl: text("label_url"),
+  trackingStatus: text("tracking_status"),
+  paidAt: timestamp("paid_at", { mode: "date" }),
+  postedAt: timestamp("posted_at", { mode: "date" }),
+  deliveredAt: timestamp("delivered_at", { mode: "date" }),
+
+  /* ambiente em que foi gerado — sandbox e produção não se misturam */
+  environment: text("environment").default("production").notNull(),
+  /* resposta crua da API, para auditoria e suporte */
+  payload: jsonb("payload"),
+  lastError: text("last_error"),
+
+  createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
+});
+
+export type Shipment = typeof shipments.$inferSelect;
+
+/* ------------------------------------------------------------------ */
+/*  INFINITEPAY · COBRANÇAS (v3.13.0)                                 */
+/*                                                                    */
+/*  Ciclo real da API:                                                */
+/*    POST /links          → cria o link de checkout                  */
+/*    cliente paga (Pix ou cartão em até 12x)                         */
+/*    webhook_url          → InfinitePay avisa que pagou              */
+/*    POST /payment_check  → confirmação ativa (fallback + double     */
+/*                            check de segurança)                     */
+/*                                                                    */
+/*  O webhook é uma URL pública SEM assinatura HMAC: qualquer um      */
+/*  poderia forjar um "pagamento aprovado". Por isso todo webhook é   */
+/*  reconferido com payment_check antes de dar baixa no Financeiro.   */
+/* ------------------------------------------------------------------ */
+export const paymentStatusEnum = pgEnum("payment_status", [
+  "pendente",
+  "pago",
+  "expirado",
+  "cancelado",
+  "erro",
+]);
+
+export const paymentLinks = pgTable("payment_links", {
+  id: serial("id").primaryKey(),
+  /** identificador enviado à InfinitePay e devolvido no webhook */
+  orderNsu: text("order_nsu").notNull().unique(),
+
+  orderId: integer("order_id").references(() => orders.id, { onDelete: "set null" }),
+  saleId: integer("sale_id").references(() => sales.id, { onDelete: "set null" }),
+  quoteId: integer("quote_id").references(() => quotes.id, { onDelete: "set null" }),
+  customerId: integer("customer_id").references(() => customers.id, { onDelete: "set null" }),
+  transactionId: integer("transaction_id").references(() => transactions.id, {
+    onDelete: "set null",
+  }),
+
+  status: paymentStatusEnum("status").default("pendente").notNull(),
+  description: text("description").notNull(),
+
+  /** valor cobrado e valor efetivamente pago (podem diferir: juros de parcelamento) */
+  amount: numeric("amount", { precision: 12, scale: 2 }).default("0").notNull(),
+  paidAmount: numeric("paid_amount", { precision: 12, scale: 2 }),
+
+  checkoutUrl: text("checkout_url"),
+  handle: text("handle"),
+
+  /* devolvidos após o pagamento */
+  invoiceSlug: text("invoice_slug"),
+  transactionNsu: text("transaction_nsu"),
+  captureMethod: text("capture_method"), // pix | credit_card
+  installments: integer("installments"),
+  receiptUrl: text("receipt_url"),
+
+  items: jsonb("items"),
+  paidAt: timestamp("paid_at", { mode: "date" }),
+  expiresAt: timestamp("expires_at", { mode: "date" }),
+
+  /** tarifa do checkout repassada ao cliente (0 quando a loja absorve) */
+  passedFee: numeric("passed_fee", { precision: 12, scale: 2 }).default("0"),
+  /** tarifa efetivamente retida pela InfinitePay, calculada na confirmação */
+  providerFee: numeric("provider_fee", { precision: 12, scale: 2 }).default("0"),
+  /** como a confirmação chegou: webhook | payment_check | manual */
+  confirmedBy: text("confirmed_by"),
+  webhookReceivedAt: timestamp("webhook_received_at", { mode: "date" }),
+  checkAttempts: integer("check_attempts").default(0).notNull(),
+
+  payload: jsonb("payload"),
+  lastError: text("last_error"),
+
+  createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
+});
+
+export type PaymentLink = typeof paymentLinks.$inferSelect;
