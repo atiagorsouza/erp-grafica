@@ -599,7 +599,9 @@ export async function addToCart(raw: unknown) {
       number: customer!.number || "",
       complement: customer!.complement || "",
       email: customer!.email || "",
-      phone: String(customer!.phone || "").replace(/\D/g, ""),
+      /* O entregador liga para este número: quem só cadastrou WhatsApp
+         não pode ir para a transportadora sem telefone. */
+      phone: String(customer!.phone || customer!.whatsapp || "").replace(/\D/g, ""),
       document: String(customer!.document || "").replace(/\D/g, ""),
     },
     service: input.serviceId,

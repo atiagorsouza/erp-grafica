@@ -44,6 +44,7 @@ export default async function PedidosPage() {
         cep: defaults.company_cep,
         website: defaults.company_website,
         pixKey: defaults.pix_key,
+        stateRegistration: defaults.company_ie,
       }}
     />
   );

@@ -111,3 +111,94 @@ a ligação seria interpretar além do que o cliente pediu.
 - Verificado no servidor: busca por `86123456` (IE), `998877` (IM) e
   `Maria` (contato) retorna o cliente; `sem zap` e o filtro de origens
   aparecem no HTML da lista
+
+---
+
+# Segunda passada — módulos restantes e campos da empresa (v3.23.0)
+
+A primeira passada cobriu os campos do **cliente**. Faltavam os módulos
+Envios, Cobranças, Kanban e Relatórios, e — principalmente — os **7
+campos fiscais da empresa** adicionados ao painel na v3.21.0, que nunca
+foram verificados do lado do consumo.
+
+## Placar dos campos da empresa
+
+| Campo | Quem lê | Situação |
+|---|---|---|
+| `company_ie` | só `settings.ts` | ❌ não sai em nenhum documento |
+| `company_im` | só `settings.ts` | ❌ idem |
+| `company_cnae` | só `settings.ts` | ⚠️ esperado (uso futuro na NF-e) |
+| `company_city_code` | só `settings.ts` | ⚠️ esperado (uso futuro na NF-e) |
+| `company_crt` | só `settings.ts` | ⚠️ esperado (uso futuro na NF-e) |
+| `company_tax_regime` | só `settings.ts` | ⚠️ esperado (uso futuro na NF-e) |
+| `company_complement` | `settings.ts` + `superfrete.ts` | ✅ em uso |
+
+### Achado 6 — a IE da empresa não sai em documento nenhum
+
+Os três documentos imprimem apenas o CNPJ do emitente:
+
+- cupom 80 mm (`PosClient.tsx:1853`)
+- OS / A4 (`PrintDocument.tsx:135`)
+- orçamento A4 (`QuotesClient.tsx:1053`)
+
+Uma gráfica com inscrição estadual precisa dela impressa. Já exigimos a
+IE **do cliente** no A4 desde a v3.21.0 — pedir do cliente e omitir a
+própria é incoerente.
+
+CNAE, código IBGE, CRT e regime seguem sem consumo **por enquanto** —
+existem para a emissão de NF-e, que ainda não foi implementada. Ficam
+registrados aqui para não parecerem esquecimento.
+
+## Módulos verificados — sem problemas
+
+| Módulo | Resultado |
+|---|---|
+| **Envios / SuperFrete** | ✅ destinatário completo: nome, documento, CEP, **número e complemento**, e-mail e telefone. Remetente usa `company_complement` |
+| **Cobranças / InfinitePay** | ✅ envia `customer` (nome, e-mail, telefone) e `address` com número e complemento |
+| **Kanban** | ✅ usa `customerName` como texto livre — correto, cards podem ser trabalho interno sem cliente cadastrado |
+| **Relatórios** | ✅ agrupa por `coalesce(tradeName, name)` — a fantasia aparece corretamente no ranking |
+| **`company_address`** | ✅ pendência antiga resolvida: `settings.ts:166` cai em `structuredAddress` antes do valor legado |
+
+### Achado 7 — Envios ignora o WhatsApp do cliente
+
+`superfrete.ts:602` monta o telefone do destinatário só com
+`customer.phone`. Quem cadastrou apenas WhatsApp vai para a
+transportadora sem telefone de contato, e é por ele que o entregador liga.
+
+### Achado 8 — `PrintDocument.tsx` é código morto (e eu caí nele)
+
+Nenhum arquivo importa `PrintDocument`. Os documentos que realmente
+saem na impressora são outros:
+
+| Documento | Componente real |
+|---|---|
+| OS A4 | `ProductionOrderA4` — `OrdersClient.tsx` |
+| OS 80 mm | `ThermalOrderReceipt` — `OrdersClient.tsx` |
+| Orçamento A4 | `#quote-print-a4` — `QuotesClient.tsx` |
+| Cupom PDV | `ThermalReceipt` — `PosClient.tsx` |
+
+**Consequência direta:** o bloco fiscal PJ que a v3.21.0 registrou como
+"adicionado à OS" foi para o arquivo órfão. **A OS real nunca teve esse
+bloco** — nem o complemento no endereço. A correção da v3.21.0 para o
+`mobilePhone` também era inócua: o arquivo não roda.
+
+O arquivo recebeu um cabeçalho de aviso apontando os componentes certos,
+em vez de ser excluído: serve de referência de layout e a remoção seria
+uma mudança maior do que esta auditoria comporta.
+
+## Correções aplicadas (v3.23.0)
+
+| # | Achado | Correção |
+|---|---|---|
+| 6 | IE da empresa não saía em documento nenhum | cabeçalho do **cupom PDV**, da **OS A4**, do **cupom da OS** e do **orçamento A4**; `stateRegistration` no tipo `PosCompany` (que é **declarado duas vezes** — em `PosClient` e em `OrdersClient`) e repassado pelas 3 páginas |
+| 7 | Etiqueta ia sem telefone para quem só tem WhatsApp | `superfrete.ts` usa `phone \|\| whatsapp` no destinatário |
+| 8 | Bloco fiscal PJ da v3.21.0 foi para arquivo morto | aplicado na **OS real** (`ProductionOrderA4`): razão social, IE, IM, A/C e endereço com complemento e CEP. Cupom da OS ganhou CPF/CNPJ e A/C |
+
+### Validação
+
+- `typecheck`, `build`, `eslint` (8 arquivos) — limpos
+- `e2e:smoke` — **121 checks** (eram 118). Os 3 novos gravam uma IE
+  temporária, conferem que ela chega ao HTML de `/pdv`, `/pedidos` e
+  `/orcamentos`, e **restauram o valor anterior**
+- O typecheck foi quem revelou o `PosCompany` duplicado — sem ele, a IE
+  apareceria no PDV e sumiria em Pedidos

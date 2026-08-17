@@ -50,6 +50,8 @@ export type PosCompany = {
   cep: string;
   website: string;
   pixKey: string;
+  /* IE do emitente (v3.23.0) */
+  stateRegistration?: string;
 };
 
 type Item = {
@@ -1050,7 +1052,10 @@ function CommercialProposalA4({
           <p>{company.address}</p>
           <p>{company.phone} · {company.phone2}</p>
           <p>{company.email}</p>
-          <p className="font-mono">CNPJ {company.document}</p>
+          <p className="font-mono">
+            CNPJ {company.document}
+            {company.stateRegistration ? ` · IE ${company.stateRegistration}` : ""}
+          </p>
         </div>
       </div>
 

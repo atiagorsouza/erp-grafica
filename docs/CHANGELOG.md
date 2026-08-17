@@ -5,6 +5,57 @@ Versionamento: [SemVer](https://semver.org/lang/pt-BR/).
 
 ---
 
+## [3.23.0] — 2026-08-17
+
+Segunda passada da auditoria de propagação: módulos restantes e os campos
+fiscais **da empresa**. Documentado em `docs/AUDIT-PROPAGACAO-CAMPOS.md`.
+
+### Corrigido — o bloco fiscal da v3.21.0 tinha ido para código morto
+
+`PrintDocument.tsx` **não é importado por ninguém**. A OS que sai na
+impressora é `ProductionOrderA4`, dentro de `OrdersClient.tsx`. O bloco
+com razão social, IE, IM e A/C que a v3.21.0 deu como entregue nunca
+apareceu num papel — e a correção do `mobilePhone` era igualmente inócua.
+
+Agora aplicado na OS real, junto do endereço com complemento e CEP. O
+cupom 80 mm da OS ganhou CPF/CNPJ e A/C. O arquivo órfão recebeu um
+cabeçalho apontando os componentes que de fato imprimem.
+
+### Adicionado — inscrição estadual do emitente nos documentos
+
+`company_ie` era editável no painel desde a v3.21.0 e não saía em lugar
+nenhum: os quatro documentos mostravam só o CNPJ. Exigir a IE do cliente
+no A4 e omitir a própria era incoerente.
+
+Incluída no cupom do PDV, na OS A4, no cupom da OS e no orçamento A4.
+O tipo `PosCompany` está **declarado duas vezes** — em `PosClient.tsx` e
+em `OrdersClient.tsx` — e o typecheck foi quem pegou: sem a segunda
+declaração, a IE apareceria no PDV e sumiria em Pedidos.
+
+CNAE, código IBGE, CRT e regime tributário seguem sem consumo por ora —
+existem para a emissão de NF-e, ainda não implementada.
+
+### Corrigido — etiqueta de envio sem telefone
+
+`superfrete.ts` montava o destinatário só com `customer.phone`. Quem
+cadastrou apenas WhatsApp ia para a transportadora sem número de contato,
+que é justamente por onde o entregador liga. Passou a usar
+`phone || whatsapp`.
+
+### Verificado sem alteração
+
+Envios (destinatário completo, com número e complemento), Cobranças
+(`customer` + `address` na InfinitePay), Kanban (`customerName` como
+texto livre, correto para trabalho interno) e Relatórios (agrupam por
+`coalesce(tradeName, name)`). A pendência antiga de `company_address`
+está resolvida por `structuredAddress`.
+
+### Testes
+
+`e2e:smoke` foi de 118 para **121 checks**.
+
+---
+
 ## [3.22.0] — 2026-08-17
 
 Auditoria de propagação: os campos criados na v3.21.0 apareciam no

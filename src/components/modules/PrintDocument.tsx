@@ -1,3 +1,17 @@
+/**
+ * ⚠️ COMPONENTE ÓRFÃO — NÃO ESTÁ EM USO (verificado em v3.23.0)
+ *
+ * Nenhum arquivo importa `PrintDocument`. Os documentos que realmente
+ * saem na impressora são renderizados por:
+ *   · OS A4 ............ `ProductionOrderA4`   em OrdersClient.tsx
+ *   · OS 80mm .......... `ThermalOrderReceipt` em OrdersClient.tsx
+ *   · Orçamento A4 ..... bloco `#quote-print-a4` em QuotesClient.tsx
+ *   · Cupom PDV 80mm ... `ThermalReceipt`      em PosClient.tsx
+ *
+ * Mantido por ora como referência de layout. Ao alterar impressão,
+ * edite os componentes acima — mexer aqui não muda nada no sistema.
+ */
+
 "use client";
 
 import { formatMoney } from "@/lib/pricing";
@@ -133,6 +147,8 @@ tbody td.num{text-align:center}
               {co.company_phone && <div>{co.company_phone} ·</div>}
               {co.company_email && <div>{co.company_email} ·</div>}
               {co.company_document && <div>CNPJ {co.company_document}</div>}
+              {/* IE do emitente (v3.23.0) */}
+              {co.company_ie && <div>IE {co.company_ie}</div>}
             </div>
           </div>
 

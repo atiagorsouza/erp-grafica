@@ -90,6 +90,8 @@ export type PosCompany = {
   website: string;
   pixKey: string;
   receiptFooter?: string;
+  /* IE do emitente — obrigatória no cupom de quem tem inscrição (v3.23.0) */
+  stateRegistration?: string;
 };
 
 export type PdvConfig = {
@@ -1851,6 +1853,14 @@ function ThermalReceipt({
         <div className="flex justify-between items-baseline text-[11px] uppercase">
           <span>{cityState}</span>
           <span>{company.document}</span>
+        </div>
+      )}
+
+      {/* Inscrição estadual do emitente: exigimos a do cliente no A4,
+          omitir a própria seria incoerente. */}
+      {company.stateRegistration && (
+        <div className="text-left text-[11px] uppercase">
+          IE {company.stateRegistration}
         </div>
       )}
 

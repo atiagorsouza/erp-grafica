@@ -84,6 +84,7 @@ export default async function PdvPage() {
         website: defaults.company_website,
         pixKey: defaults.pix_key,
         receiptFooter: defaults.pdv_receipt_footer,
+        stateRegistration: defaults.company_ie,
       }}
       cardFeeDebit={defaults.cardFeeRate}
       cardFeeCredit={defaults.cardFeeCreditRate}

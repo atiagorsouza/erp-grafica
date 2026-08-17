@@ -49,6 +49,8 @@ export type PosCompany = {
   cep: string;
   website: string;
   pixKey: string;
+  /* IE do emitente — sai no cabeçalho da OS e do cupom (v3.23.0) */
+  stateRegistration?: string;
 };
 
 type OrderItem = {
@@ -1481,7 +1483,10 @@ function ProductionOrderA4({
           <p>{company.address}</p>
           <p>{company.phone} · {company.phone2}</p>
           <p>{company.email}</p>
-          <p className="font-mono">CNPJ {company.document}</p>
+          <p className="font-mono">
+            CNPJ {company.document}
+            {company.stateRegistration ? ` · IE ${company.stateRegistration}` : ""}
+          </p>
         </div>
       </div>
 
@@ -1528,11 +1533,41 @@ function ProductionOrderA4({
             <span className="truncate block">{customer?.email || "—"}</span>
           </div>
         </div>
+        {/* PJ: dados fiscais do destinatário, iguais aos do orçamento. */}
+        {customer?.type === "pj" && (
+          <div className="mt-2 grid grid-cols-4 gap-2 text-[11.5px]">
+            <div>
+              <span className="block font-mono text-[9px] text-ink-400 uppercase">RAZÃO SOCIAL</span>
+              <span>{String(customer?.name || "—")}</span>
+            </div>
+            <div>
+              <span className="block font-mono text-[9px] text-ink-400 uppercase">INSC. ESTADUAL</span>
+              <span className="font-mono">{String(customer?.stateRegistration || "ISENTO")}</span>
+            </div>
+            <div>
+              <span className="block font-mono text-[9px] text-ink-400 uppercase">INSC. MUNICIPAL</span>
+              <span className="font-mono">{String(customer?.municipalRegistration || "—")}</span>
+            </div>
+            <div>
+              <span className="block font-mono text-[9px] text-ink-400 uppercase">A/C</span>
+              <span>{String(customer?.contactName || "—")}</span>
+            </div>
+          </div>
+        )}
+
         <div className="mt-2 text-[11.5px]">
           <span className="block font-mono text-[9px] text-ink-400 uppercase">ENDEREÇO</span>
           <span>
             {customer && (customer.street || customer.district)
-              ? [customer.street, customer.number, customer.district, customer.city, customer.state, customer.cep]
+              ? [
+                  customer.street,
+                  customer.number,
+                  customer.complement,
+                  customer.district,
+                  customer.city,
+                  customer.state,
+                  customer.cep ? `CEP ${customer.cep}` : null,
+                ]
                   .filter(Boolean)
                   .join(", ")
               : "—"}
@@ -1722,6 +1757,9 @@ function ThermalOrderReceipt({
       <div className="text-left font-bold text-[12px] uppercase">{company.name}</div>
       <div className="text-left text-[11px] uppercase">{company.address}</div>
       <div className="text-left text-[11px] uppercase">Tel: {company.phone} / CNPJ: {company.document}</div>
+      {company.stateRegistration && (
+        <div className="text-left text-[11px] uppercase">IE: {company.stateRegistration}</div>
+      )}
       <div className="my-1.5 border-b border-dashed border-black" />
 
       <div className="font-bold text-[12px]">ORDEM DE PRODUÇÃO {order.number}</div>
@@ -1731,6 +1769,10 @@ function ThermalOrderReceipt({
       {customer && (
         <>
           <div className="font-bold uppercase">CLIENTE: {customer.name}</div>
+          {/* documento e contato PJ: a via de produção também serve de
+              comprovante de entrega (v3.23.0) */}
+          {customer.document ? <div>CPF/CNPJ: {String(customer.document)}</div> : null}
+          {customer.contactName ? <div className="uppercase">A/C: {String(customer.contactName)}</div> : null}
           {customer.phone && <div>TEL: {customer.phone}</div>}
           <div className="my-1.5 border-b border-dashed border-black" />
         </>

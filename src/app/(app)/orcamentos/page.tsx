@@ -52,6 +52,7 @@ export default async function OrcamentosPage() {
         cep: defaults.company_cep,
         website: defaults.company_website,
         pixKey: defaults.pix_key,
+        stateRegistration: defaults.company_ie,
       }}
     />
   );

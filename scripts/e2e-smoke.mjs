@@ -659,6 +659,26 @@ async function main() {
   );
   assert(achouTodos, "busca global encontra cliente por IE, IM e contato");
 
+  /* 11g) Identidade fiscal do emitente — v3.23.0
+     A IE da empresa precisa chegar às telas que imprimem documento.
+     Sem isso o campo do painel vira decoração. */
+  const ieAntes = (await sql("select value from settings where key = 'company_ie'"))[0]?.value || "";
+  const ieTeste = `SMOKE-IE-${stamp}`;
+  await req("/api/crud/settings", { op: "save", data: { key: "company_ie", value: ieTeste, category: "empresa" } });
+
+  const paginasFiscais = await Promise.all(
+    ["/pdv", "/pedidos", "/orcamentos"].map(async (path) => {
+      const html = await fetch(`${BASE_URL}${path}`).then((r) => r.text());
+      return { path, ok: html.includes(ieTeste) };
+    })
+  );
+  for (const p of paginasFiscais) {
+    assert(p.ok, `IE do emitente chega em ${p.path}`);
+  }
+
+  /* devolve o valor original para não sujar a configuração real */
+  await req("/api/crud/settings", { op: "save", data: { key: "company_ie", value: ieAntes, category: "empresa" } });
+
   await sql("delete from customers where name like 'SMOKE %'");
 
   /* importador de PDF: rejeita arquivo que não é ficha do legado */
