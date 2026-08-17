@@ -24,6 +24,7 @@ import { Icon } from "@/components/icons";
 import { cn } from "@/lib/format";
 import { applyDiscount, formatBRL, round2, toNumber, toPositive } from "@/lib/money";
 import { todayISO } from "@/lib/period";
+import { isWhatsAppBlocked, whatsappNumber } from "@/lib/validators";
 
 /* ==================================================================
    TIPOS
@@ -1260,8 +1261,18 @@ export function OrdersClient({
                   const o = printDoc.order;
                   const c = custName(o.customerId);
                   const text = `*${company.name}*\n*ORDEM DE PRODUÇÃO ${o.number}*\nStatus: ${o.status}\nCliente: ${c ? c.name : "Consumidor final"}\nTotal: ${formatBRL(Number(o.total || 0))}\nPrazo: ${o.dueDate || "A definir"}`;
-                  const phone = c?.whatsapp || c?.phone || "";
-                  const cleanPhone = phone.replace(/\D/g, "");
+
+                  /* O cliente pode ter pedido para não receber WhatsApp.
+                     Não preenchemos o destinatário: a mensagem abre em
+                     branco e o operador decide. */
+                  if (isWhatsAppBlocked(c)) {
+                    toast.info(
+                      "Cliente não aceita WhatsApp",
+                      "O texto abrirá sem destinatário — escolha outro canal se possível."
+                    );
+                  }
+
+                  const cleanPhone = whatsappNumber(c);
                   const url = cleanPhone
                     ? `https://wa.me/55${cleanPhone}?text=${encodeURIComponent(text)}`
                     : `https://wa.me/?text=${encodeURIComponent(text)}`;

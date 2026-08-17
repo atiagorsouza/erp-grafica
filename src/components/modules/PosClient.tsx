@@ -25,6 +25,7 @@ import {
   toNumber,
   toPositive,
 } from "@/lib/money";
+import { isWhatsAppBlocked, whatsappNumber } from "@/lib/validators";
 
 /* ==================================================================
    TIPOS DA APLICAÇÃO
@@ -67,6 +68,8 @@ export type PosCustomer = {
   cep: string | null;
   /* PJ: quem recebe a nota/entrega no cliente (v3.21.0) */
   contactName?: string | null;
+  /* cliente pediu para não receber WhatsApp (v3.22.0) */
+  whatsappOptOut?: boolean | null;
 };
 
 export type PosCompany = {
@@ -1689,8 +1692,17 @@ export function PosClient({
                 onClick={() => {
                   if (!receipt) return;
                   const text = buildTextReceipt(receipt, company);
-                  const phone = receipt.customer?.whatsapp || receipt.customer?.phone || "";
-                  const cleanPhone = phone.replace(/\D/g, "");
+
+                  /* Respeita o "não enviar WhatsApp" do cadastro: sem
+                     destinatário, o operador decide no app. */
+                  if (isWhatsAppBlocked(receipt.customer)) {
+                    toast.info(
+                      "Cliente não aceita WhatsApp",
+                      "O cupom abrirá sem destinatário — confirme outro canal."
+                    );
+                  }
+
+                  const cleanPhone = whatsappNumber(receipt.customer);
                   const url = cleanPhone
                     ? `https://wa.me/55${cleanPhone}?text=${encodeURIComponent(text)}`
                     : `https://wa.me/?text=${encodeURIComponent(text)}`;

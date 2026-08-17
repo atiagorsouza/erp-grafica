@@ -1097,6 +1097,48 @@ function CommercialProposalA4({
             <span className="truncate block">{customer?.email || "—"}</span>
           </div>
         </div>
+
+        {/* PJ: mesmos dados fiscais que a OS já imprime, para os dois
+            documentos não saírem divergentes da mesma gráfica. */}
+        {customer?.type === "pj" && (
+          <div className="mt-2 grid grid-cols-4 gap-2 text-[11.5px]">
+            <div>
+              <span className="block font-mono text-[9px] text-ink-400 uppercase">RAZÃO SOCIAL</span>
+              <span>{String(customer?.name || "—")}</span>
+            </div>
+            <div>
+              <span className="block font-mono text-[9px] text-ink-400 uppercase">INSC. ESTADUAL</span>
+              <span className="font-mono">{String(customer?.stateRegistration || "ISENTO")}</span>
+            </div>
+            <div>
+              <span className="block font-mono text-[9px] text-ink-400 uppercase">INSC. MUNICIPAL</span>
+              <span className="font-mono">{String(customer?.municipalRegistration || "—")}</span>
+            </div>
+            <div>
+              <span className="block font-mono text-[9px] text-ink-400 uppercase">A/C</span>
+              <span>{String(customer?.contactName || "—")}</span>
+            </div>
+          </div>
+        )}
+
+        {(customer?.street || customer?.city) && (
+          <div className="mt-2 text-[11.5px]">
+            <span className="block font-mono text-[9px] text-ink-400 uppercase">ENDEREÇO</span>
+            <span>
+              {[
+                customer?.street,
+                customer?.number,
+                customer?.complement,
+                customer?.district,
+                customer?.city,
+                customer?.state,
+                customer?.cep ? `CEP ${customer.cep}` : null,
+              ]
+                .filter(Boolean)
+                .join(", ")}
+            </span>
+          </div>
+        )}
       </div>
 
       {/* ── CONDIÇÕES DA PROPOSTA ── */}

@@ -553,7 +553,7 @@ async function main() {
 
   // 11d) Clientes & CRM — v3.18.0
   const cnpjSmoke = "11444777000161";
-  await sql("delete from customers where name like 'SMOKE CRM%'");
+  await sql("delete from customers where name like 'SMOKE %'");
 
   /* CNPJ enviado sem marcar PJ deve ser reconhecido pelos 14 dígitos */
   const autoType = await fetch(`${BASE_URL}/api/crud/customers`, {
@@ -588,7 +588,7 @@ async function main() {
     "erro de documento duplicado não vaza SQL"
   );
 
-  await sql("delete from customers where name like 'SMOKE CRM%'");
+  await sql("delete from customers where name like 'SMOKE %'");
 
   /* 11e) Cadastro estruturado PF/PJ — v3.21.0 */
   const post = (data) =>
@@ -631,7 +631,35 @@ async function main() {
   assert(pf.status === 200, "PF com documentos pessoais é aceito");
   assert(pf.body.row?.rgIssuer === "DETRAN-RJ" && pf.body.row?.maritalStatus === "casado", "órgão emissor e estado civil são persistidos");
 
-  await sql("delete from customers where name like 'SMOKE CRM%'");
+  /* 11f) Propagação dos campos novos — v3.22.0 */
+
+  /* Regra única de opt-out: PDV e Pedidos consomem estes helpers. Se
+     alguém trocar por leitura direta de `whatsapp`, isto quebra. */
+  const blocked = (c) => c?.whatsappOptOut === true;
+  const waNumber = (c) => (!c || blocked(c) ? "" : String(c.whatsapp || c.phone || "").replace(/\D/g, ""));
+  assert(waNumber({ whatsapp: "(21) 99999-1111" }) === "21999991111", "WhatsApp normal resolve o número");
+  assert(waNumber({ whatsapp: "(21) 99999-1111", whatsappOptOut: true }) === "", "opt-out impede o disparo de WhatsApp");
+  assert(waNumber({ phone: "(21) 3000-0000" }) === "2130000000", "sem WhatsApp, usa o telefone fixo");
+  assert(waNumber(null) === "", "consumidor final não tem destinatário");
+
+  /* Busca global precisa alcançar IE, IM e contato PJ */
+  const buscavel = await post({
+    type: "pj", name: "SMOKE Busca Fiscal LTDA", tradeName: "SMOKE Busca", document: "11444777000161",
+    stateRegistration: "86123456", municipalRegistration: "998877", contactName: "SMOKE Contato Fiscal",
+  });
+  assert(buscavel.status === 200, "cliente de busca criado");
+
+  const buscas = await Promise.all(
+    ["86123456", "998877", "SMOKE Contato"].map((t) =>
+      fetch(`${BASE_URL}/api/search?q=${encodeURIComponent(t)}`).then((r) => r.json())
+    )
+  );
+  const achouTodos = buscas.every((b) =>
+    (b.results || []).some((x) => x.type === "cliente" && String(x.label).includes("SMOKE Busca"))
+  );
+  assert(achouTodos, "busca global encontra cliente por IE, IM e contato");
+
+  await sql("delete from customers where name like 'SMOKE %'");
 
   /* importador de PDF: rejeita arquivo que não é ficha do legado */
   const bogus = new FormData();

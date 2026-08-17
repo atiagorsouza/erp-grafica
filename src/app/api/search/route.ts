@@ -12,7 +12,17 @@ export async function GET(req: Request) {
     const [customerRows, productRows, orderRows, quoteRows] = await Promise.all([
       db.select({ id: customers.id, name: customers.name, tradeName: customers.tradeName, document: customers.document })
         .from(customers)
-        .where(or(ilike(customers.name, term), ilike(customers.tradeName, term), ilike(customers.document, term)))
+        .where(or(
+          ilike(customers.name, term),
+          ilike(customers.tradeName, term),
+          ilike(customers.document, term),
+          /* IE e contato PJ: o cliente que liga nem sempre tem o CNPJ
+             à mão, mas tem a inscrição na nota ou o nome de quem
+             fez o pedido. */
+          ilike(customers.stateRegistration, term),
+          ilike(customers.municipalRegistration, term),
+          ilike(customers.contactName, term),
+        ))
         .limit(5),
       db.select({ id: products.id, name: products.name, sku: products.sku, finalPrice: products.finalPrice })
         .from(products)

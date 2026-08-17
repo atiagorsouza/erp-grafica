@@ -61,6 +61,10 @@ export default async function PdvPage() {
         city: c.city,
         state: c.state,
         cep: c.cep,
+        /* PJ imprime "A/C" no cupom; o opt-out bloqueia o envio por
+           WhatsApp na tela de venda concluída (v3.22.0). */
+        contactName: c.contactName,
+        whatsappOptOut: c.whatsappOptOut,
       }))}
       company={{
         name: defaults.company_trade_name || defaults.company_name,

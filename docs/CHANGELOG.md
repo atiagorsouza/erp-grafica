@@ -5,6 +5,56 @@ Versionamento: [SemVer](https://semver.org/lang/pt-BR/).
 
 ---
 
+## [3.22.0] — 2026-08-17
+
+Auditoria de propagação: os campos criados na v3.21.0 apareciam no
+formulário e sumiam no resto do sistema. Documentado em
+`docs/AUDIT-PROPAGACAO-CAMPOS.md`.
+
+### Corrigido — "não enviar WhatsApp" era coletado e ignorado (crítico)
+
+O checkbox gravava no banco e os dois botões de envio — OS em Pedidos e
+cupom no PDV — mandavam a mensagem assim mesmo. Uma preferência que o
+sistema registra e desrespeita é pior do que campo nenhum.
+
+`isWhatsAppBlocked` e `whatsappNumber` em `lib/validators.ts` passam a
+ser a **regra única**. Com opt-out, o link abre sem destinatário e um
+toast explica o motivo ao operador. A ligação telefônica continua
+liberada: o cliente recusou mensagens, não contato.
+
+A página do PDV projetava o cliente coluna a coluna e recortava
+`contactName` e `whatsappOptOut` antes de chegar à tela — ambos incluídos.
+
+### Adicionado — ficha 360° mostra o que o cadastro coleta
+
+Bloco **Dados cadastrais**, condicional por tipo: PF exibe RG com órgão
+emissor, nascimento **com idade calculada** e estado civil; PJ exibe IE,
+IM, regime, porte, fundação e contato. Origem e limite de crédito para
+ambos. Só rende linha o que está preenchido.
+
+Selos no cabeçalho: **"Não enviar WhatsApp"** e **"Aniversário hoje"**.
+Na lista, a coluna Contato ganhou a marca **"sem zap"**.
+
+### Adicionado — busca e filtro alcançam os campos novos
+
+Filtro da carteira procura também em WhatsApp, IE, IM, RG e contato PJ.
+A **busca global** (`/api/search`) passou a cobrir IE, IM e contato — é
+o que o cliente tem à mão quando liga sem saber o CNPJ.
+
+Novo **filtro por origem**, listando apenas as origens em uso, com
+contagem e ordenadas por frequência.
+
+### Corrigido — orçamento em A4 saía com menos dados que a OS
+
+`QuotesClient` ganhou o bloco fiscal PJ (razão social, IE, IM, A/C) e o
+endereço com complemento e CEP, que a OS já imprimia desde a v3.21.0.
+
+### Testes
+
+`e2e:smoke` foi de 112 para **118 checks**.
+
+---
+
 ## [3.21.0] — 2026-08-17
 
 Reestruturação do cadastro de Clientes conforme as telas PF/PJ enviadas

@@ -183,3 +183,33 @@ export const CUSTOMER_SEGMENTS = [
   "Escola/Instituição",
   "Outro",
 ];
+
+/* ------------------------------------------------------------------
+ * Preferência de contato por WhatsApp
+ *
+ * O cadastro tem um "não enviar WhatsApp" que o cliente pediu. Regra
+ * única para todos os pontos de envio (PDV, Pedidos, Orçamentos), para
+ * que nenhuma tela decida por conta própria.
+ * ------------------------------------------------------------------ */
+
+export type WhatsAppTarget = {
+  whatsapp?: string | null;
+  phone?: string | null;
+  whatsappOptOut?: boolean | null;
+};
+
+/** Cliente recusou mensagens? Ausência do campo = não recusou. */
+export function isWhatsAppBlocked(c?: WhatsAppTarget | null): boolean {
+  return c?.whatsappOptOut === true;
+}
+
+/**
+ * Número para wa.me, já com DDI 55 e só dígitos.
+ * Devolve "" quando não há número OU quando o cliente pediu para não
+ * receber — nesse caso o chamador abre o WhatsApp sem destinatário, e o
+ * operador escolhe manualmente o que fazer.
+ */
+export function whatsappNumber(c?: WhatsAppTarget | null): string {
+  if (!c || isWhatsAppBlocked(c)) return "";
+  return String(c.whatsapp || c.phone || "").replace(/\D/g, "");
+}

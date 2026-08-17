@@ -33,6 +33,52 @@ import { formatCEP, formatCNPJ, formatCPF, formatPhone, formatStateRegistration 
 type Row = Record<string, any>;
 
 const COLUMNS = ["novo", "qualificacao", "orcamento", "negociacao", "ganho", "perdido"];
+/* Rótulos legíveis dos campos estruturados do cadastro (v3.22.0).
+   O banco guarda a chave; a ficha mostra o texto. */
+const ORIGIN_LABEL: Record<string, string> = {
+  balcao: "Balcão",
+  whatsapp: "WhatsApp",
+  indicacao: "Indicação",
+  instagram: "Instagram",
+  site: "Site",
+  google: "Google",
+  marketplace: "Marketplace",
+  importacao: "Importação",
+  outro: "Outro",
+};
+const MARITAL_LABEL: Record<string, string> = {
+  solteiro: "Solteiro(a)",
+  casado: "Casado(a)",
+  divorciado: "Divorciado(a)",
+  viuvo: "Viúvo(a)",
+  uniao_estavel: "União estável",
+};
+
+/* Data ISO -> dd/mm/aaaa, sem passar por Date (evita fuso). */
+function brDate(v: unknown): string {
+  const m = String(v || "").match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : "";
+}
+
+/* Idade em anos completos, para a ficha e o aviso de aniversário. */
+function ageFrom(v: unknown): number | null {
+  const m = String(v || "").match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return null;
+  const today = new Date();
+  let age = today.getFullYear() - Number(m[1]);
+  const md = (today.getMonth() + 1) * 100 + today.getDate();
+  if (md < Number(m[2]) * 100 + Number(m[3])) age -= 1;
+  return age >= 0 && age < 130 ? age : null;
+}
+
+/* Aniversário hoje? Compara só dia e mês. */
+function isBirthdayToday(v: unknown): boolean {
+  const m = String(v || "").match(/^\d{4}-(\d{2})-(\d{2})/);
+  if (!m) return false;
+  const today = new Date();
+  return Number(m[1]) === today.getMonth() + 1 && Number(m[2]) === today.getDate();
+}
+
 const COL_LABEL: Record<string, string> = {
   novo: "Novo",
   qualificacao: "Qualificação",
@@ -66,6 +112,7 @@ export function ClientsClient({ customers, leads, activities, quotes, orders, sa
   const [tab, setTab] = useState<"carteira" | "pipeline">("carteira");
   const [q, setQ] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [originFilter, setOriginFilter] = useState("all");
 
   const [importOpen, setImportOpen] = useState(false);
   const [custModal, setCustModal] = useState<null | { edit?: Row }>(null);
@@ -106,11 +153,26 @@ export function ClientsClient({ customers, leads, activities, quotes, orders, sa
 
   /* Filtro de clientes */
   const filtered = useMemo(() => customers.filter((c) => {
-    const mq = !q || [c.name, c.tradeName, c.document, c.email, c.phone]
-      .some((v) => String(v || "").toLowerCase().includes(q.toLowerCase()));
+    /* Busca também por IE, RG, WhatsApp e contato PJ: são os números
+       que o cliente informa ao telefone quando não lembra o CNPJ. */
+    const mq = !q || [
+      c.name, c.tradeName, c.document, c.email, c.phone,
+      c.whatsapp, c.stateRegistration, c.municipalRegistration, c.rg, c.contactName,
+    ].some((v) => String(v || "").toLowerCase().includes(q.toLowerCase()));
     const ms = statusFilter === "all" || c.status === statusFilter;
-    return mq && ms;
-  }), [customers, q, statusFilter]);
+    const mo = originFilter === "all" || String(c.origin || "") === originFilter;
+    return mq && ms && mo;
+  }), [customers, q, statusFilter, originFilter]);
+
+  /* Origens presentes na carteira, da mais comum para a menos comum. */
+  const originsInUse = useMemo(() => {
+    const acc = new Map<string, number>();
+    for (const c of customers) {
+      const k = String(c.origin || "").trim();
+      if (k) acc.set(k, (acc.get(k) || 0) + 1);
+    }
+    return [...acc.entries()].sort((a, b) => b[1] - a[1]);
+  }, [customers]);
 
   /* Autopreenchimento ViaCEP */
   const handleCepBlur = useCallback(async () => {
@@ -312,7 +374,7 @@ export function ClientsClient({ customers, leads, activities, quotes, orders, sa
           <>
             <div className="relative w-full max-w-60">
               <Icon name="search" size={14} className="absolute top-1/2 left-3 -translate-y-1/2 text-ink-400" />
-              <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Nome, documento, contato…" className="pl-8.5" />
+              <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Nome, documento, IE, contato…" className="pl-8.5" />
             </div>
             <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="w-auto">
               <option value="all">Todos os status</option>
@@ -321,6 +383,18 @@ export function ClientsClient({ customers, leads, activities, quotes, orders, sa
               <option value="inativo">Inativos</option>
               <option value="bloqueado">Bloqueados</option>
             </Select>
+            {/* "De onde vêm meus clientes?" — só lista as origens que
+                realmente aparecem na carteira. */}
+            {originsInUse.length > 0 && (
+              <Select value={originFilter} onChange={(e) => setOriginFilter(e.target.value)} className="w-auto">
+                <option value="all">Todas as origens</option>
+                {originsInUse.map(([key, count]) => (
+                  <option key={key} value={key}>
+                    {(ORIGIN_LABEL[key] || key) + ` (${count})`}
+                  </option>
+                ))}
+              </Select>
+            )}
           </>
         )}
       </div>
@@ -360,7 +434,16 @@ export function ClientsClient({ customers, leads, activities, quotes, orders, sa
                   </Td>
                   <Td mono>{String(c.document || "—")}</Td>
                   <Td>
-                    <p className="text-[12px]">{String(c.phone || "—")}</p>
+                    <p className="flex items-center gap-1.5 text-[12px]">
+                      {String(c.phone || "—")}
+                      {/* aviso na própria lista: evita o disparo antes
+                          mesmo de abrir a ficha */}
+                      {c.whatsappOptOut === true && (
+                        <span title="Cliente não aceita WhatsApp" className="font-mono text-[9px] tracking-wide text-amber-700 uppercase">
+                          sem zap
+                        </span>
+                      )}
+                    </p>
                     <p className="truncate text-[11px] text-ink-400">{String(c.email || "")}</p>
                   </Td>
                   <Td right mono className="font-semibold text-ink-900">{formatMoney(ltv.get(Number(c.id)) || 0)}</Td>
@@ -791,6 +874,10 @@ export function ClientsClient({ customers, leads, activities, quotes, orders, sa
               <Badge tone={drawer.type === "pj" ? "magenta" : "cyan"}>{drawer.type === "pj" ? "PJ" : "PF"}</Badge>
               <span className="font-mono">{String(drawer.document || "")}</span>
               <StatusBadge value={String(drawer.status)} />
+              {/* A recusa de WhatsApp precisa ser visível antes de
+                  qualquer tentativa de contato, não escondida no form. */}
+              {drawer.whatsappOptOut === true && <Badge tone="amber">Não enviar WhatsApp</Badge>}
+              {isBirthdayToday(drawer.birthDate) && <Badge tone="green">Aniversário hoje</Badge>}
             </span>
           )
         }
@@ -922,6 +1009,71 @@ export function ClientsClient({ customers, leads, activities, quotes, orders, sa
                 </Card>
               </section>
             )}
+
+            {/* Dados cadastrais — o que o formulário coleta e a ficha
+                antes não devolvia. Só rende linha o que está preenchido,
+                para PF e PJ não carregarem campos um do outro. */}
+            {(() => {
+              const isPJ = drawer.type === "pj";
+              const rows: { k: string; v: string }[] = [];
+
+              if (isPJ) {
+                if (drawer.stateRegistration) rows.push({ k: "Inscrição estadual", v: String(drawer.stateRegistration) });
+                if (drawer.municipalRegistration) rows.push({ k: "Inscrição municipal", v: String(drawer.municipalRegistration) });
+                if (drawer.taxRegime) rows.push({ k: "Regime tributário", v: String(drawer.taxRegime) });
+                if (drawer.companySize) rows.push({ k: "Porte", v: String(drawer.companySize) });
+                if (drawer.foundedAt) rows.push({ k: "Fundação", v: brDate(drawer.foundedAt) });
+                if (drawer.contactName) rows.push({ k: "Contato", v: String(drawer.contactName) });
+              } else {
+                if (drawer.rg) {
+                  rows.push({
+                    k: "RG",
+                    v: [drawer.rg, drawer.rgIssuer].filter(Boolean).join(" · "),
+                  });
+                }
+                if (drawer.birthDate) {
+                  const age = ageFrom(drawer.birthDate);
+                  rows.push({
+                    k: "Nascimento",
+                    v: brDate(drawer.birthDate) + (age !== null ? ` · ${age} anos` : ""),
+                  });
+                }
+                if (drawer.maritalStatus) {
+                  rows.push({
+                    k: "Estado civil",
+                    v: MARITAL_LABEL[String(drawer.maritalStatus)] || String(drawer.maritalStatus),
+                  });
+                }
+              }
+
+              if (drawer.origin) {
+                rows.push({
+                  k: "Origem",
+                  v: ORIGIN_LABEL[String(drawer.origin)] || String(drawer.origin),
+                });
+              }
+              if (Number(drawer.creditLimit || 0) > 0) {
+                rows.push({ k: "Limite de crédito", v: formatMoney(Number(drawer.creditLimit)) });
+              }
+
+              if (rows.length === 0) return null;
+
+              return (
+                <section>
+                  <h4 className="mb-2 font-mono text-[10px] font-semibold tracking-[0.16em] text-ink-500 uppercase">
+                    Dados cadastrais
+                  </h4>
+                  <Card className="divide-y divide-paper-200 py-0 text-[12.5px]">
+                    {rows.map((r) => (
+                      <div key={r.k} className="flex items-center justify-between gap-3 py-2">
+                        <span className="text-ink-500">{r.k}</span>
+                        <span className="text-right font-medium text-ink-800">{r.v}</span>
+                      </div>
+                    ))}
+                  </Card>
+                </section>
+              );
+            })()}
 
             {/* Linha do tempo de atividades */}
             <section>
