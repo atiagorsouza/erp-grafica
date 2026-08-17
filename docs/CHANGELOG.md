@@ -5,6 +5,74 @@ Versionamento: [SemVer](https://semver.org/lang/pt-BR/).
 
 ---
 
+## [3.24.0] — 2026-08-17
+
+Primeira auditoria do módulo de Estoque, Compras & Produtos. 7 bugs
+encontrados e corrigidos, todos reproduzidos no servidor antes e depois.
+Documentado em `docs/AUDIT-ESTOQUE.md`.
+
+### Corrigido — saída simultânea furava o estoque (crítico)
+
+`createStockMovement` validava o saldo com um `select` comum e só depois
+gravava. Duas requisições liam o mesmo saldo e ambas passavam: material
+com 10 un aceitava 5 saídas de 4 e terminava em **−10**. O PDV já havia
+resolvido isso com `FOR UPDATE`; o Estoque tinha ficado de fora.
+
+A leitura agora trava a linha, e a recusa informa quanto há disponível.
+
+### Corrigido — receber a mesma compra 3× triplicava o estoque (crítico)
+
+`receivePurchase` conferia o status **fora** da transação. Três
+recebimentos concorrentes de uma compra de 100 un deixavam **300** no
+saldo e 3 movimentos. A despesa nunca duplicou — `upsertAutoTransaction`
+é idempotente — mas o estoque não tinha defesa equivalente.
+
+A compra passou a ser lida com `FOR UPDATE` e o status reconferido dentro
+da transação, o que finalmente faz o retorno `alreadyReceived` funcionar.
+
+### Alterado — "Ajuste" define o saldo, não soma mais
+
+O cálculo tratava `ajuste` como entrada: saldo 10 + ajuste 3 virava 13.
+Quem fez a contagem física e digitou 3 esperava 3 — e a tela reforçava a
+leitura errada, mostrando sinal em "Entrada (+)" e "Saída (−)" e nenhum
+em "Ajuste manual".
+
+Agora o delta é `contado − atual`, a opção se chama **"Ajuste — definir
+saldo (=)"** e o campo vira **"Saldo contado"**, exibindo o saldo atual.
+Zero passou a ser aceito em ajuste (a contagem não encontrou o item);
+entrada e saída seguem exigindo valor positivo.
+
+### Corrigido — excluir movimento deixava saldo negativo
+
+Entrada de 50, saída de 50, excluir a entrada: saldo ia a **−50** em
+silêncio. A exclusão agora é recusada (409) quando a reversão deixaria o
+saldo negativo, sugerindo registrar um novo movimento.
+
+### Corrigido — produto sem controle de estoque era movimentável
+
+Produto com `trackStock = false` (sob demanda, o padrão da casa) aceitava
+movimentação e passava a exibir saldo fantasma. Agora responde 422
+explicando como ativar o controle.
+
+### Corrigido — `automatic` podia ser forjado pelo cliente
+
+A flag marca o que o sistema gerou e bloqueia exclusão manual. Vinha do
+corpo da requisição, então dava para criar um movimento manual
+impossível de apagar pela tela. Só é aceita internamente agora.
+
+### Corrigido — `/api/purchases` sem validação vazava SQL
+
+Sem `purchaseId`, a query rodava com `NaN` e o catch devolvia o SQL
+inteiro ao navegador. A rota valida o id (aceita `purchaseId` ou `id`) e
+o catch devolve mensagem genérica.
+
+### Testes
+
+`e2e:smoke` foi de 121 para **135 checks**. Os 14 novos disparam as
+chamadas em paralelo: sem as travas, falham.
+
+---
+
 ## [3.23.0] — 2026-08-17
 
 Segunda passada da auditoria de propagação: módulos restantes e os campos

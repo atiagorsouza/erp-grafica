@@ -12,6 +12,25 @@ import { todayISO } from "@/lib/period";
 
 export type StockError = { error: string; status: number; details?: unknown };
 
+/**
+ * Erro de regra de negócio lançado de dentro de uma transação.
+ * Precisa ser uma exceção para abortar o `db.transaction`, mas carrega
+ * status HTTP para virar resposta tratada — e não um 500 com SQL.
+ */
+class StockRuleError extends Error {
+  status: number;
+  constructor(message: string, status = 422) {
+    super(message);
+    this.name = "StockRuleError";
+    this.status = status;
+  }
+}
+
+/** Quantidades de estoque são numeric(12,3): evita 0.30000000000000004. */
+function round3(n: number): number {
+  return Math.round(n * 1000) / 1000;
+}
+
 const finite = z.coerce.number().finite();
 const materialSchema = z.object({
   name: z.string().trim().min(2, "Nome obrigatório").max(180),
@@ -52,12 +71,22 @@ const movementSchema = z.object({
   targetId: z.coerce.number().int().positive().optional(),
   materialId: z.coerce.number().int().positive().nullable().optional(),
   productId: z.coerce.number().int().positive().nullable().optional(),
-  quantity: finite.positive("Quantidade deve ser maior que zero").max(999999999),
+  /* Zero só faz sentido em `ajuste` (a contagem não encontrou o item);
+     entrada e saída exigem quantidade positiva — validado no superRefine. */
+  quantity: finite.min(0).max(999999999),
   unitCost: finite.min(0).max(999999999).default(0),
   reason: z.string().trim().max(80).default("ajuste"),
   reference: z.string().trim().max(120).nullable().optional(),
   notes: z.string().trim().max(1000).nullable().optional(),
   automatic: z.boolean().default(false),
+}).superRefine((v, ctx) => {
+  if (v.kind !== "ajuste" && v.quantity <= 0) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["quantity"],
+      message: "Quantidade deve ser maior que zero",
+    });
+  }
 });
 
 const purchaseItemSchema = z.object({
@@ -138,44 +167,172 @@ export async function archiveSupplier(id: number) {
   return { ok: true as const, row };
 }
 
-export async function createStockMovement(raw: unknown) {
+/**
+ * Registra movimentação de estoque.
+ *
+ * A leitura do saldo usa `FOR UPDATE`: sem a trava, duas saídas
+ * simultâneas liam o mesmo saldo e ambas passavam na validação — 5
+ * saídas de 4 un sobre um saldo de 10 deixavam o material em -10.
+ * Mesma estratégia que o PDV já usa em `assertStockLocked`.
+ *
+ * `ajuste` DEFINE o saldo (contagem física): o delta é a diferença
+ * entre o valor contado e o saldo atual, e pode ser negativo.
+ */
+export async function createStockMovement(raw: unknown, opts?: { allowAutomatic?: boolean }) {
   const parsed = parse(movementSchema, raw);
   if ("error" in parsed) return parsed;
   const d = parsed.data;
   const targetId = d.targetId || (d.targetType === "material" ? d.materialId : d.productId);
   if (!targetId) return { error: "Informe o item do estoque", status: 422 } satisfies StockError;
 
-  const delta = d.kind === "saida" ? -d.quantity : d.quantity;
-  const row = await db.transaction(async (tx) => {
-    if (d.targetType === "material") {
-      const [target] = await tx.select().from(materials).where(eq(materials.id, targetId)).limit(1);
-      if (!target) throw new Error("Material não encontrado");
-      if (d.kind === "saida" && toNumber(target.stock, 0) < d.quantity) throw new Error("Saldo insuficiente para saída");
-      await tx.update(materials).set({ stock: sql`${materials.stock} + ${delta}` }).where(eq(materials.id, targetId));
-    } else {
-      const [target] = await tx.select().from(products).where(eq(products.id, targetId)).limit(1);
-      if (!target) throw new Error("Produto não encontrado");
-      if (d.kind === "saida" && toNumber(target.stock, 0) < d.quantity) throw new Error("Saldo insuficiente para saída");
-      await tx.update(products).set({ stock: sql`${products.stock} + ${delta}` }).where(eq(products.id, targetId));
+  /* `automatic` marca o que o sistema gerou (venda, produção, compra) e
+     bloqueia a exclusão manual. Aceitar a flag do cliente permitia criar
+     um movimento manual impossível de apagar pela tela. */
+  const automatic = opts?.allowAutomatic === true ? d.automatic : false;
+
+  try {
+    const row = await db.transaction(async (tx) => {
+      const table = d.targetType === "material" ? materials : products;
+
+      const [target] = await tx
+        .select()
+        .from(table)
+        .where(eq(table.id, targetId))
+        .limit(1)
+        .for("update");
+
+      if (!target) {
+        throw new StockRuleError(
+          d.targetType === "material" ? "Material não encontrado" : "Produto não encontrado",
+          404
+        );
+      }
+
+      /* Produto sob demanda não tem saldo para movimentar: gravar aqui
+         criava um estoque fantasma que nenhuma tela leva a sério. */
+      if (d.targetType === "product" && (target as typeof products.$inferSelect).trackStock !== true) {
+        throw new StockRuleError(
+          "Produto não controla estoque. Ative “Controlar estoque” no cadastro para movimentá-lo.",
+          422
+        );
+      }
+
+      const current = toNumber(target.stock, 0);
+
+      let delta: number;
+      if (d.kind === "saida") {
+        if (current < d.quantity) {
+          throw new StockRuleError(
+            `Saldo insuficiente para saída. Disponível: ${current}`,
+            409
+          );
+        }
+        delta = -d.quantity;
+      } else if (d.kind === "ajuste") {
+        delta = round3(d.quantity - current);
+      } else {
+        delta = d.quantity;
+      }
+
+      await tx
+        .update(table)
+        .set({ stock: sql`${table.stock} + ${delta}` })
+        .where(eq(table.id, targetId));
+
+      const [mv] = await tx
+        .insert(stockMovements)
+        .values({
+          kind: d.kind,
+          targetType: d.targetType,
+          materialId: d.targetType === "material" ? targetId : null,
+          productId: d.targetType === "product" ? targetId : null,
+          /* no ajuste, guardamos o movimento real aplicado ao saldo */
+          quantity: toDecimalString(d.kind === "ajuste" ? Math.abs(delta) : d.quantity, 3),
+          unitCost: toDecimalString(d.unitCost, 4),
+          reason: d.reason,
+          reference: nullable(d.reference),
+          notes: nullable(d.notes),
+          automatic,
+        })
+        .returning();
+      return mv;
+    });
+    return { ok: true as const, row };
+  } catch (e) {
+    if (e instanceof StockRuleError) {
+      return { error: e.message, status: e.status } satisfies StockError;
     }
-    const [mv] = await tx.insert(stockMovements).values({ kind: d.kind, targetType: d.targetType, materialId: d.targetType === "material" ? targetId : null, productId: d.targetType === "product" ? targetId : null, quantity: toDecimalString(d.quantity, 3), unitCost: toDecimalString(d.unitCost, 4), reason: d.reason, reference: nullable(d.reference), notes: nullable(d.notes), automatic: d.automatic }).returning();
-    return mv;
-  });
-  return { ok: true as const, row };
+    throw e;
+  }
 }
 
+/**
+ * Exclui uma movimentação manual, revertendo o efeito no saldo.
+ *
+ * A reversão é recusada quando deixaria o saldo negativo: apagar uma
+ * entrada de 50 que já foi consumida por uma saída de 50 levava o
+ * material a -50 silenciosamente. Nesse caso o certo é registrar um
+ * novo movimento, não apagar o histórico.
+ */
 export async function deleteStockMovement(id: number) {
-  const [mv] = await db.select().from(stockMovements).where(eq(stockMovements.id, id)).limit(1);
-  if (!mv) return { error: "Movimentação não encontrada", status: 404 } satisfies StockError;
-  if (mv.automatic) return { error: "Movimentação automática não pode ser excluída manualmente", status: 409 } satisfies StockError;
-  const qty = toNumber(mv.quantity, 0);
-  const revert = mv.kind === "saida" ? qty : -qty;
-  await db.transaction(async (tx) => {
-    if (mv.targetType === "material" && mv.materialId) await tx.update(materials).set({ stock: sql`${materials.stock} + ${revert}` }).where(eq(materials.id, mv.materialId));
-    if (mv.targetType === "product" && mv.productId) await tx.update(products).set({ stock: sql`${products.stock} + ${revert}` }).where(eq(products.id, mv.productId));
-    await tx.delete(stockMovements).where(eq(stockMovements.id, id));
-  });
-  return { ok: true as const };
+  if (!Number.isFinite(id) || id <= 0) {
+    return { error: "Movimentação inválida", status: 422 } satisfies StockError;
+  }
+
+  try {
+    await db.transaction(async (tx) => {
+      const [mv] = await tx
+        .select()
+        .from(stockMovements)
+        .where(eq(stockMovements.id, id))
+        .limit(1)
+        .for("update");
+
+      if (!mv) throw new StockRuleError("Movimentação não encontrada", 404);
+      if (mv.automatic) {
+        throw new StockRuleError(
+          "Movimentação automática não pode ser excluída manualmente",
+          409
+        );
+      }
+
+      const qty = toNumber(mv.quantity, 0);
+      const revert = mv.kind === "saida" ? qty : -qty;
+      const table = mv.targetType === "material" ? materials : products;
+      const targetId = mv.targetType === "material" ? mv.materialId : mv.productId;
+
+      if (targetId) {
+        const [target] = await tx
+          .select()
+          .from(table)
+          .where(eq(table.id, targetId))
+          .limit(1)
+          .for("update");
+
+        if (target) {
+          const resulting = round3(toNumber(target.stock, 0) + revert);
+          if (resulting < 0) {
+            throw new StockRuleError(
+              `Excluir deixaria o saldo em ${resulting}. A quantidade já foi consumida — registre um novo movimento para corrigir.`,
+              409
+            );
+          }
+          await tx
+            .update(table)
+            .set({ stock: sql`${table.stock} + ${revert}` })
+            .where(eq(table.id, targetId));
+        }
+      }
+
+      await tx.delete(stockMovements).where(eq(stockMovements.id, id));
+    });
+    return { ok: true as const };
+  } catch (e) {
+    if (e instanceof StockRuleError) {
+      return { error: e.message, status: e.status } satisfies StockError;
+    }
+    throw e;
+  }
 }
 
 export async function createPurchase(raw: unknown) {
@@ -189,13 +346,60 @@ export async function createPurchase(raw: unknown) {
   return { ok: true as const, row };
 }
 
+/**
+ * Recebe a compra e dá entrada no estoque.
+ *
+ * O status é conferido DENTRO da transação, sobre a linha travada com
+ * `FOR UPDATE`. Antes a conferência acontecia fora: três recebimentos
+ * simultâneos passavam juntos e davam entrada 3× (100 un viravam 300).
+ * A despesa nunca duplicou porque `upsertAutoTransaction` é idempotente
+ * — o estoque é que não tinha defesa.
+ */
 export async function receivePurchase(purchaseId: number) {
-  const [purchase] = await db.select().from(purchases).where(eq(purchases.id, purchaseId)).limit(1);
-  if (!purchase) return { error: "Compra não encontrada", status: 404 } satisfies StockError;
-  if (purchase.status === "recebido") return { ok: true as const, row: purchase, alreadyReceived: true };
-  if (purchase.status === "cancelado") return { error: "Compra cancelada não pode ser recebida", status: 409 } satisfies StockError;
+  if (!Number.isFinite(purchaseId) || purchaseId <= 0) {
+    return { error: "Compra inválida", status: 422 } satisfies StockError;
+  }
+
+  try {
+    const result = await db.transaction(async (tx) => {
+      const [purchase] = await tx
+        .select()
+        .from(purchases)
+        .where(eq(purchases.id, purchaseId))
+        .limit(1)
+        .for("update");
+
+      if (!purchase) throw new StockRuleError("Compra não encontrada", 404);
+      if (purchase.status === "cancelado") {
+        throw new StockRuleError("Compra cancelada não pode ser recebida", 409);
+      }
+      /* Segundo recebimento concorrente encontra o status já gravado. */
+      if (purchase.status === "recebido") {
+        return { row: purchase, alreadyReceived: true as const };
+      }
+
+      const row = await receivePurchaseLocked(tx, purchase);
+      return { row, alreadyReceived: false as const };
+    });
+
+    return { ok: true as const, row: result.row, alreadyReceived: result.alreadyReceived };
+  } catch (e) {
+    if (e instanceof StockRuleError) {
+      return { error: e.message, status: e.status } satisfies StockError;
+    }
+    throw e;
+  }
+}
+
+type PurchaseRow = typeof purchases.$inferSelect;
+
+async function receivePurchaseLocked(
+  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+  purchase: PurchaseRow
+) {
   const items = (purchase.items || []) as { materialId: number; quantity: number; unitCost: number; label?: string }[];
-  const row = await db.transaction(async (tx) => {
+  const purchaseId = purchase.id;
+  {
     for (const item of items) {
       const quantity = toNumber(item.quantity, 0);
       const unitCost = toNumber(item.unitCost, 0);
@@ -234,6 +438,5 @@ export async function receivePurchase(purchaseId: number) {
     }
 
     return updated;
-  });
-  return { ok: true as const, row };
+  }
 }

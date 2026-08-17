@@ -681,6 +681,123 @@ async function main() {
 
   await sql("delete from customers where name like 'SMOKE %'");
 
+  /* 11h) Estoque, Compras & Produtos — v3.24.0
+     Concorrência de verdade: as chamadas saem em paralelo, como dois
+     operadores no balcão. */
+  await sql("delete from stock_movements where material_id in (select id from materials where name like 'SMOKE MAT%')");
+  await sql("delete from materials where name like 'SMOKE MAT%'");
+  await sql("insert into materials (name, unit, unit_cost, stock, min_stock) values ('SMOKE MAT ESTOQUE','un',5,10,0)");
+  const [smokeMat] = await sql("select id from materials where name = 'SMOKE MAT ESTOQUE'");
+  const matId = Number(smokeMat.id);
+
+  const movePost = (data) =>
+    fetch(`${BASE_URL}/api/crud/stock-movements`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ op: "create", data }),
+    }).then(async (r) => ({ status: r.status, body: await r.json() }));
+
+  /* 5 saídas de 4 sobre saldo 10: só 2 cabem */
+  const saidas = await Promise.all(
+    [1, 2, 3, 4, 5].map(() =>
+      movePost({ kind: "saida", targetType: "material", materialId: matId, quantity: 4 })
+    )
+  );
+  const aceitas = saidas.filter((r) => r.status === 200).length;
+  const [saldoSaida] = await sql("select stock from materials where id = $1", [matId]);
+  assert(aceitas === 2, `saída concorrente respeita o saldo (${aceitas} aceitas de 5)`);
+  assert(Number(saldoSaida.stock) === 2, `saldo não fica negativo (${saldoSaida.stock})`);
+  assert(
+    saidas.some((r) => String(r.body.error || "").includes("Disponível")),
+    "recusa de saída informa o saldo disponível"
+  );
+
+  /* ajuste DEFINE o saldo, não soma */
+  await movePost({ kind: "ajuste", targetType: "material", materialId: matId, quantity: 7 });
+  const [saldoAjuste] = await sql("select stock from materials where id = $1", [matId]);
+  assert(Number(saldoAjuste.stock) === 7, `ajuste define o saldo contado (${saldoAjuste.stock})`);
+
+  const ajusteZero = await movePost({ kind: "ajuste", targetType: "material", materialId: matId, quantity: 0 });
+  assert(ajusteZero.status === 200, "ajuste aceita zero (contagem não encontrou o item)");
+  const entradaZero = await movePost({ kind: "entrada", targetType: "material", materialId: matId, quantity: 0 });
+  assert(entradaZero.status !== 200, "entrada com zero continua recusada");
+
+  /* automatic forjado pelo cliente é ignorado */
+  await movePost({ kind: "entrada", targetType: "material", materialId: matId, quantity: 5, automatic: true });
+  const [forjado] = await sql(
+    "select id, automatic from stock_movements where material_id = $1 order by id desc limit 1",
+    [matId]
+  );
+  assert(forjado.automatic === false, "flag automatic não é aceita do cliente");
+
+  /* excluir entrada já consumida é recusado */
+  const [entradaMov] = await sql(
+    "select id from stock_movements where material_id = $1 and kind = 'entrada' order by id desc limit 1",
+    [matId]
+  );
+  await movePost({ kind: "saida", targetType: "material", materialId: matId, quantity: 5 });
+  const delRes = await fetch(`${BASE_URL}/api/crud/stock-movements`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ op: "delete", id: Number(entradaMov.id) }),
+  }).then(async (r) => ({ status: r.status, body: await r.json() }));
+  assert(delRes.status === 409, "excluir movimento não deixa saldo negativo");
+
+  /* produto sem controle de estoque não é movimentável */
+  await sql("delete from products where sku = 'SMOKE-STK'");
+  await sql("insert into products (name, sku, track_stock, stock, final_price, active) values ('SMOKE Produto Estoque','SMOKE-STK',false,0,10,true)");
+  const [smokeProd] = await sql("select id from products where sku = 'SMOKE-STK'");
+  const semControle = await movePost({
+    kind: "entrada", targetType: "product", productId: Number(smokeProd.id), quantity: 5,
+  });
+  assert(semControle.status === 422, "produto sem controle de estoque recusa movimentação");
+
+  /* recebimento concorrente da mesma compra não multiplica o estoque */
+  await sql("update materials set stock = 0 where id = $1", [matId]);
+  const compra = await req("/api/purchases", {
+    op: "create",
+    data: { items: [{ materialId: matId, quantity: 100, unitCost: 2 }], status: "pedido" },
+  });
+  const compraId = Number(compra.row.id);
+  const recebimentos = await Promise.all(
+    [1, 2, 3].map(() =>
+      fetch(`${BASE_URL}/api/purchases`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ op: "receive", purchaseId: compraId }),
+      }).then((r) => r.json())
+    )
+  );
+  const [saldoCompra] = await sql("select stock from materials where id = $1", [matId]);
+  const [movCompra] = await sql(
+    "select count(*)::int n from stock_movements where reference = $1 and reason = 'compra'",
+    [compra.row.number]
+  );
+  assert(Number(saldoCompra.stock) === 100, `recebimento concorrente dá entrada uma vez só (${saldoCompra.stock})`);
+  assert(Number(movCompra.n) === 1, `recebimento concorrente gera 1 movimento (${movCompra.n})`);
+  assert(
+    recebimentos.filter((r) => r.alreadyReceived === true).length === 2,
+    "recebimentos extras respondem alreadyReceived"
+  );
+
+  /* rota de compras: valida o id e não vaza SQL */
+  const semId = await fetch(`${BASE_URL}/api/purchases`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ op: "receive" }),
+  }).then(async (r) => ({ status: r.status, body: await r.json() }));
+  assert(semId.status === 422, "receber compra sem id devolve 422");
+  assert(
+    !String(semId.body.error || "").toLowerCase().includes("select"),
+    "erro de compra não vaza SQL"
+  );
+
+  await sql("delete from stock_movements where material_id = $1", [matId]);
+  await sql("delete from transactions where purchase_id = $1", [compraId]);
+  await sql("delete from purchases where id = $1", [compraId]);
+  await sql("delete from materials where id = $1", [matId]);
+  await sql("delete from products where sku = 'SMOKE-STK'");
+
   /* importador de PDF: rejeita arquivo que não é ficha do legado */
   const bogus = new FormData();
   bogus.append("file", new Blob(["nao sou um pdf"], { type: "application/pdf" }), "x.pdf");

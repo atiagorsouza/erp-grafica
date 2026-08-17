@@ -28,7 +28,7 @@ import {
 import { Icon } from "@/components/icons";
 import { cn } from "@/lib/format";
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 type Row = Record<string, any>;
 
 export function StockClient({ materials, suppliers, purchases, materialCats, movements }: {
@@ -94,8 +94,19 @@ export function StockClient({ materials, suppliers, purchases, materialCats, mov
     const mat = movModal?.material;
     if (!mat) return;
     const qty = Number(form.quantity || 0);
-    if (qty <= 0) return toast.error("Quantidade inválida");
     const kind = form.kind || "entrada";
+
+    /* No ajuste a quantidade é o saldo contado, então zero é um valor
+       legítimo (contagem encontrou o material acabado). Entrada e saída
+       continuam exigindo quantidade positiva. */
+    if (!Number.isFinite(qty) || qty < 0) return toast.error("Quantidade inválida");
+    if (kind !== "ajuste" && qty <= 0) return toast.error("Quantidade deve ser maior que zero");
+
+    const atual = Number(mat.stock || 0);
+    if (kind === "ajuste" && qty === atual) {
+      return toast.info("Saldo já está correto", `O estoque atual já é ${atual} ${String(mat.unit || "")}.`);
+    }
+
     await run(async () => {
       await mutate("stock-movements", "create", {
         kind,
@@ -107,7 +118,7 @@ export function StockClient({ materials, suppliers, purchases, materialCats, mov
         notes: form.notes || null,
       });
       setMovModal(null);
-    }, kind === "entrada" ? "Entrada registrada" : "Saída registrada");
+    }, kind === "entrada" ? "Entrada registrada" : kind === "saida" ? "Saída registrada" : `Saldo ajustado para ${qty}`);
   }
 
   const saveSup = (id?: number) =>
@@ -417,10 +428,19 @@ export function StockClient({ materials, suppliers, purchases, materialCats, mov
             <Select value={form.kind || "entrada"} onChange={set("kind")}>
               <option value="entrada">Entrada (+)</option>
               <option value="saida">Saída (−)</option>
-              <option value="ajuste">Ajuste manual</option>
+              <option value="ajuste">Ajuste — definir saldo (=)</option>
             </Select>
           </Field>
-          <Field label="Quantidade"><Input mono value={form.quantity || ""} onChange={set("quantity")} /></Field>
+          <Field
+            label={form.kind === "ajuste" ? "Saldo contado" : "Quantidade"}
+            hint={
+              form.kind === "ajuste"
+                ? `O estoque passa a valer exatamente este número (atual: ${Number(movModal?.material?.stock || 0).toLocaleString("pt-BR")})`
+                : undefined
+            }
+          >
+            <Input mono value={form.quantity || ""} onChange={set("quantity")} />
+          </Field>
           <Field label="Motivo">
             <Select value={form.reason || "ajuste"} onChange={set("reason")}>
               {["compra", "venda", "producao", "perda", "devolucao", "ajuste"].map((r) => <option key={r} value={r}>{r}</option>)}
