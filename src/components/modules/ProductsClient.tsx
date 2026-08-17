@@ -1,0 +1,727 @@
+"use client";
+
+import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { mutate } from "@/lib/mutate";
+import {
+  computeBatchProduct,
+  computeProduct,
+  formatMoney,
+  type ColorMode,
+  type FinishingLike,
+  type MaterialLike,
+  type ServiceLike,
+} from "@/lib/pricing";
+
+const asLike = <T,>(v: unknown): T | undefined => (v ?? undefined) as T | undefined;
+import {
+  Badge,
+  Button,
+  Card,
+  Combobox,
+  EmptyState,
+  Field,
+  IconButton,
+  Input,
+  Modal,
+  PageHeader,
+  Segmented,
+  Select,
+  TableWrap,
+  Td,
+  Textarea,
+  Th,
+  Tr,
+  Toggle,
+  toast,
+} from "@/components/ui";
+import { Icon } from "@/components/icons";
+import { cn } from "@/lib/format";
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Row = Record<string, any>;
+
+const num = (v: unknown, fallback = 0): number => {
+  if (v === null || v === undefined || v === "") return fallback;
+  const n = typeof v === "number" ? v : parseFloat(String(v));
+  return Number.isFinite(n) ? n : fallback;
+};
+
+export function ProductsClient({
+  catalog,
+  products,
+  finishings,
+  materials,
+  taxRate,
+  cardFeeRate,
+}: {
+  catalog: {
+    categories: Row[];
+    consumables: Row[];
+    printers: Row[];
+    materials: Row[];
+    finishings: Row[];
+    services: Row[];
+    pricingTables: Row[];
+    formats: Row[];
+    itemCategories?: Row[];
+  };
+  products: Row[];
+  finishings: Row[];
+  materials: Row[];
+  taxRate: number;
+  cardFeeRate: number;
+}) {
+  const router = useRouter();
+  const refresh = () => router.refresh();
+  const [q, setQ] = useState("");
+  const [catFilter, setCatFilter] = useState("all");
+
+  /* ── editor state ── */
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [editId, setEditId] = useState<number | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState<Record<string, string>>({});
+  const [calcMode, setCalcMode] = useState<"unit" | "batch">("unit");
+  const [colorMode, setColorMode] = useState<ColorMode>("color");
+  const [compFinishings, setCompFinishings] = useState<{ id: string; quantity: string; chargeMode: string; batchSize: string }[]>([]);
+  const [compMaterials, setCompMaterials] = useState<{ id: string; quantity: string }[]>([]);
+  const [simQty, setSimQty] = useState<string>("");
+
+  const set = (k: string) => (e: { target: { value: string } }) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  const productCats = catalog.itemCategories ?? [];
+
+  /* ── cálculo ao vivo ── */
+  const printer = catalog.printers.find((p) => String(p.id) === form.printerId);
+  const printerCat = catalog.categories.find((c) => String(c.id) === (form.printerCategoryId || String(printer?.categoryId || "")));
+  const consumables = catalog.consumables.filter((c) => String(c.categoryId) === String(printerCat?.id || ""));
+  const format = catalog.formats.find((f) => String(f.id) === form.printFormatId);
+  const baseMaterial = asLike<MaterialLike>(catalog.materials.find((m) => String(m.id) === form.baseMaterialId));
+  const service = asLike<ServiceLike>(catalog.services.find((s) => String(s.id) === form.baseServiceId));
+  const finLines = compFinishings
+    .map((f) => ({ finishing: asLike<FinishingLike>(catalog.finishings.find((x) => String(x.id) === f.id)), quantity: num(f.quantity, 1), chargeMode: f.chargeMode, batchSize: num(f.batchSize, 1) }));
+  const matLines = compMaterials
+    .map((m) => ({ material: asLike<MaterialLike>(catalog.materials.find((x) => String(x.id) === m.id)), quantity: num(m.quantity, 1) }));
+
+  const liveCalc = useMemo(() => {
+    if (!printerCat) return null;
+    if (calcMode === "batch") {
+      const qty = num(simQty || form.defaultQuantity, 1);
+      const r = computeBatchProduct({
+        printer,
+        category: printerCat,
+        consumables,
+        format,
+        colorMode,
+        requestedQuantity: qty,
+        piecesPerSheet: num(form.piecesPerSheet, 1),
+        printSides: num(form.printSides, 1),
+        wastePercent: num(form.wastePercent, 0) / 100,
+        setupSheets: num(form.setupSheets, 0),
+        materialSheetsPerPrintedSheet: num(form.baseMaterialQty, 1),
+        baseMaterial,
+        extraMaterials: matLines,
+        finishings: finLines,
+        service,
+        operationalRate: num(form.operationalRate, 0) / 100,
+        taxRate,
+        paymentRate: cardFeeRate,
+        profitRate: num(form.margin, 40) / 100,
+        roundingStep: num(form.roundingStep, 0.01),
+      });
+      return {
+        mode: "batch" as const,
+        qty,
+        lines: r.lines,
+        baseCost: r.directCost,
+        sellPrice: r.finalPrice,
+        finalPrice: r.finalPrice,
+        unitPrice: r.unitPrice,
+        finalSheets: r.finalSheets,
+        valid: r.valid,
+        error: r.error,
+        marginAmount: r.profitAmount,
+        taxAmount: r.taxAmount,
+        feeAmount: r.paymentAmount,
+        opAmount: r.operationalAmount,
+      };
+    }
+    const r = computeProduct({
+      category: printerCat,
+      consumables,
+      printer,
+      colorMode,
+      pagesPerUnit: num(form.pagesPerUnit, 1),
+      copies: num(form.copies, 1),
+      baseMaterial,
+      baseMaterialQty: num(form.baseMaterialQty, 1),
+      finishings: finLines,
+      extraMaterials: matLines,
+      service,
+      margin: num(form.margin, 40) / 100,
+      taxRate,
+      cardFeeRate,
+    });
+    return {
+      mode: "unit" as const,
+      qty: 1,
+      lines: r.lines,
+      baseCost: r.baseCost,
+      sellPrice: r.sellPrice,
+      finalPrice: r.finalPrice,
+      unitPrice: r.unitPrice,
+      valid: true,
+      marginAmount: r.marginAmount,
+      taxAmount: r.taxAmount,
+      feeAmount: r.cardFeeAmount,
+      opAmount: 0,
+    };
+  }, [printer, printerCat, consumables, format, baseMaterial, service, finLines, matLines, calcMode, colorMode, form, simQty, taxRate, cardFeeRate]);
+
+  /* ── abrir editor ── */
+  function openNew() {
+    setEditId(null);
+    setCalcMode("unit");
+    setColorMode("color");
+    setCompFinishings([]);
+    setCompMaterials([]);
+    setSimQty("");
+    setForm({ margin: "40", pagesPerUnit: "1", copies: "1", baseMaterialQty: "1", defaultQuantity: "100", piecesPerSheet: "1", printSides: "1", wastePercent: "5", setupSheets: "0", minOrderQty: "1", operationalRate: "15", roundingStep: "0.01" });
+    setEditorOpen(true);
+  }
+
+  function openEdit(p: Row) {
+    setEditId(Number(p.id));
+    setCalcMode(p.calculationMode === "batch" ? "batch" : "unit");
+    setColorMode((p.colorMode as ColorMode) || "color");
+    setSimQty("");
+    setCompFinishings(
+      finishings.filter((f) => Number(f.productId) === Number(p.id)).map((f) => ({ id: String(f.finishingId), quantity: String(f.quantity), chargeMode: String(f.chargeMode || "per_piece"), batchSize: String(f.batchSize || 1) }))
+    );
+    setCompMaterials(
+      materials.filter((m) => Number(m.productId) === Number(p.id)).map((m) => ({ id: String(m.materialId), quantity: String(m.quantity) }))
+    );
+    setForm({
+      name: String(p.name || ""),
+      description: String(p.description || ""),
+      productCategoryId: p.productCategoryId ? String(p.productCategoryId) : "",
+      printerId: p.printerId ? String(p.printerId) : "",
+      printFormatId: p.printFormatId ? String(p.printFormatId) : "",
+      pagesPerUnit: String(p.pagesPerUnit ?? 1),
+      copies: String(p.copies ?? 1),
+      baseMaterialId: p.baseMaterialId ? String(p.baseMaterialId) : "",
+      baseMaterialQty: String(p.baseMaterialQty ?? 1),
+      baseServiceId: p.baseServiceId ? String(p.baseServiceId) : "",
+      defaultQuantity: String(p.defaultQuantity ?? 1),
+      piecesPerSheet: String(p.piecesPerSheet ?? 1),
+      printSides: String(p.printSides ?? 1),
+      wastePercent: String(num(p.wastePercent) * 100),
+      setupSheets: String(p.setupSheets ?? 0),
+      minOrderQty: String(p.minOrderQty ?? 1),
+      operationalRate: String(num(p.operationalRate) * 100),
+      roundingStep: String(p.roundingStep ?? 0.01),
+      margin: String(num(p.margin, 0.4) * 100),
+      stock: String(p.stock ?? 0),
+      minStock: String(p.minStock ?? 0),
+      active: String(p.active ?? true),
+      trackStock: String(p.trackStock ?? false),
+    });
+    setEditorOpen(true);
+  }
+
+  async function save() {
+    if (!form.name?.trim()) return toast.error("Informe o nome do produto");
+    setSaving(true);
+    try {
+      const data = {
+        name: form.name,
+        description: form.description || null,
+        productCategoryId: form.productCategoryId || null,
+        printerId: form.printerId || null,
+        printerCategoryId: printerCat ? Number(printerCat.id) : null,
+        printFormatId: form.printFormatId || null,
+        colorMode,
+        pagesPerUnit: form.pagesPerUnit || 1,
+        copies: form.copies || 1,
+        calculationMode: calcMode,
+        defaultQuantity: form.defaultQuantity || 1,
+        piecesPerSheet: form.piecesPerSheet || 1,
+        printSides: Number(form.printSides || 1),
+        wastePercent: String(num(form.wastePercent, 0) / 100),
+        setupSheets: Number(form.setupSheets || 0),
+        minOrderQty: form.minOrderQty || 1,
+        operationalRate: String(num(form.operationalRate, 0) / 100),
+        roundingStep: form.roundingStep || 0.01,
+        baseMaterialId: form.baseMaterialId || null,
+        baseMaterialQty: form.baseMaterialQty || 1,
+        baseServiceId: form.baseServiceId || null,
+        margin: String(num(form.margin, 40) / 100),
+        costSnapshot: String(liveCalc?.baseCost ?? 0),
+        sellPrice: String(liveCalc?.sellPrice ?? 0),
+        finalPrice: String(liveCalc?.finalPrice ?? 0),
+        breakdown: liveCalc ? { lines: liveCalc.lines, finalSheets: "finalSheets" in liveCalc ? liveCalc.finalSheets : undefined } : null,
+        active: form.active !== "false",
+        trackStock: form.trackStock === "true",
+        stock: form.stock || 0,
+        minStock: form.minStock || 0,
+        finishings: compFinishings.filter((f) => f.id).map((f) => ({ id: Number(f.id), quantity: num(f.quantity, 1), chargeMode: f.chargeMode, batchSize: num(f.batchSize, 1) })),
+        materials: compMaterials.filter((m) => m.id).map((m) => ({ id: Number(m.id), quantity: num(m.quantity, 1) })),
+      };
+      if (editId) await mutate("products", "update", data, editId);
+      else await mutate("products", "create", data);
+      toast.success("Produto salvo", liveCalc ? `Preço final ${formatMoney(liveCalc.finalPrice)}` : undefined);
+      setEditorOpen(false);
+      refresh();
+    } catch (e) {
+      toast.error("Erro ao salvar", e instanceof Error ? e.message : undefined);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function del(id: number) {
+    if (!confirm("Arquivar produto? Produtos usados em orçamentos/vendas serão apenas desativados.")) return;
+    await mutate("products", "delete", { reason: "Arquivado pelo usuário" }, id);
+    toast.info("Produto arquivado/removido");
+    refresh();
+  }
+
+  const filtered = products.filter((p) => {
+    const matchQ = !q || String(p.name).toLowerCase().includes(q.toLowerCase()) || String(p.sku || "").toLowerCase().includes(q.toLowerCase());
+    const matchC = catFilter === "all" || String(p.productCategoryId) === catFilter;
+    return matchQ && matchC;
+  });
+
+  const catName = (id: unknown) => productCats.find((c) => Number(c.id) === Number(id))?.name;
+
+  return (
+    <div>
+      <PageHeader
+        eyebrow="Catálogo com calculadora ao vivo"
+        title="Produtos & Custos"
+        icon="tag"
+        description="Produto = Impressão + Material + Acabamento + Serviço. O custo é decomposto em tempo real pelo motor — margem, impostos e maquininha fecham o preço final."
+        actions={<Button icon="plus" onClick={openNew}>Novo produto</Button>}
+      />
+
+      {/* Filtros */}
+      <div className="reveal mb-4 flex flex-wrap items-center gap-2.5">
+        <div className="relative w-full max-w-xs">
+          <Icon name="search" size={14} className="absolute top-1/2 left-3 -translate-y-1/2 text-ink-400" />
+          <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar por nome ou SKU…" className="pl-8.5" />
+        </div>
+        <Select value={catFilter} onChange={(e) => setCatFilter(e.target.value)} className="w-auto">
+          <option value="all">Todas as categorias</option>
+          {productCats.map((c) => (
+            <option key={String(c.id)} value={String(c.id)}>
+              {String(c.icon)} {String(c.name)}
+            </option>
+          ))}
+        </Select>
+        <span className="ml-auto font-mono text-[11px] text-ink-400 tnum">
+          {filtered.length} de {products.length} produtos
+        </span>
+      </div>
+
+      {filtered.length === 0 ? (
+        <EmptyState
+          icon="tag"
+          title="Nenhum produto por aqui"
+          hint="Crie produtos com a calculadora ao vivo — o motor deprecia cada centavo de custo."
+          action={<Button icon="plus" onClick={openNew}>Criar primeiro produto</Button>}
+        />
+      ) : (
+        <TableWrap className="reveal reveal-1">
+          <thead>
+            <tr>
+              <Th>Produto</Th>
+              <Th>Categoria</Th>
+              <Th>Impressora</Th>
+              <Th right>Custo</Th>
+              <Th right>Margem</Th>
+              <Th right>Preço final</Th>
+              <Th>Status</Th>
+              <Th right>Ações</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map((p) => {
+              const cost = num(p.costSnapshot);
+              const price = num(p.finalPrice);
+              const marginPct = price > 0 ? ((price - cost) / price) * 100 : 0;
+              return (
+                <Tr key={String(p.id)} onClick={() => openEdit(p)}>
+                  <Td>
+                    <p className="font-semibold text-ink-900">{String(p.name)}</p>
+                    <p className="font-mono text-[10.5px] text-ink-400">
+                      {String(p.sku || "—")} · {p.calculationMode === "batch" ? `tiragem ${num(p.defaultQuantity)}un` : "unitário"}
+                    </p>
+                  </Td>
+                  <Td>
+                    {catName(p.productCategoryId) ? (
+                      <Badge tone="neutral">{catName(p.productCategoryId)}</Badge>
+                    ) : (
+                      <span className="text-ink-300">—</span>
+                    )}
+                  </Td>
+                  <Td>
+                    {catalog.printers.find((x) => Number(x.id) === Number(p.printerId))?.name ? (
+                      <span className="flex items-center gap-1.5 text-[12.5px]">
+                        <Icon name="printer" size={13} className="text-ink-400" />
+                        {catalog.printers.find((x) => Number(x.id) === Number(p.printerId))?.name}
+                      </span>
+                    ) : (
+                      <span className="text-ink-300">—</span>
+                    )}
+                  </Td>
+                  <Td right mono>{formatMoney(cost)}</Td>
+                  <Td right mono>
+                    <span className={cn(marginPct >= 40 ? "text-emerald-700" : marginPct >= 25 ? "text-amber-700" : "text-red-700")}>
+                      {marginPct.toFixed(0)}%
+                    </span>
+                  </Td>
+                  <Td right mono className="font-semibold text-ink-900">{formatMoney(price)}</Td>
+                  <Td>
+                    <Badge tone={p.active ? "green" : "neutral"} dot>
+                      {p.active ? "ativo" : "inativo"}
+                    </Badge>
+                  </Td>
+                  <Td right>
+                    <span className="flex justify-end gap-0.5" onClick={(e) => e.stopPropagation()}>
+                      <IconButton size="sm" name="pencil" label="Editar" onClick={() => openEdit(p)} />
+                      <IconButton size="sm" name="trash" label="Excluir" tone="danger" onClick={() => del(Number(p.id))} />
+                    </span>
+                  </Td>
+                </Tr>
+              );
+            })}
+          </tbody>
+        </TableWrap>
+      )}
+
+      {/* ── EDITOR ── */}
+      <Modal
+        open={editorOpen}
+        onClose={() => setEditorOpen(false)}
+        title={editId ? "Editar produto" : "Novo produto"}
+        subtitle="A calculadora roda ao vivo — cada ajuste reflete no breakdown de custo."
+        width="max-w-5xl"
+        footer={
+          <>
+            <div className="mr-auto flex items-center gap-3">
+              <span className="font-mono text-[10px] tracking-wider text-ink-400 uppercase">Preço final</span>
+              <span className="font-mono text-[20px] font-semibold text-proc-c-strong tnum">
+                {liveCalc ? formatMoney(liveCalc.finalPrice) : "—"}
+              </span>
+            </div>
+            <Button variant="ghost" onClick={() => setEditorOpen(false)}>Cancelar</Button>
+            <Button loading={saving} onClick={save} icon="check">Salvar produto</Button>
+          </>
+        }
+      >
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_340px]">
+          {/* Coluna de configuração */}
+          <div className="space-y-5">
+            <section className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <Field label="Nome" required className="sm:col-span-2">
+                <Input value={form.name || ""} onChange={set("name")} placeholder="Ex.: Cartão de Visita 4x4 (100un)" />
+              </Field>
+              <Field label="Descrição" className="sm:col-span-2">
+                <Textarea value={form.description || ""} onChange={set("description")} placeholder="Detalhes comerciais do produto…" className="min-h-[60px]" />
+              </Field>
+              <Field label="Categoria comercial">
+                <Select value={form.productCategoryId || ""} onChange={set("productCategoryId")}>
+                  <option value="">Sem categoria</option>
+                  {productCats.map((c) => (
+                    <option key={String(c.id)} value={String(c.id)}>
+                      {String(c.icon)} {String(c.name)}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              <Field label="Serviço agregado" hint="opcional">
+                <Combobox
+                  value={form.baseServiceId || ""}
+                  onChange={(v) => setForm((f) => ({ ...f, baseServiceId: v }))}
+                  placeholder="Nenhum"
+                  options={catalog.services.map((s) => ({ value: String(s.id), label: String(s.name), hint: formatMoney(num(s.baseCost)) }))}
+                />
+              </Field>
+            </section>
+
+            {/* Motor */}
+            <section className="rounded-xl border border-paper-200 bg-paper-100/50 p-4">
+              <div className="mb-3.5 flex flex-wrap items-center justify-between gap-2">
+                <h4 className="flex items-center gap-2 font-mono text-[10.5px] font-semibold tracking-[0.16em] text-ink-600 uppercase">
+                  <Icon name="printer" size={13} />
+                  Motor de impressão
+                </h4>
+                <Segmented
+                  value={calcMode}
+                  onChange={setCalcMode}
+                  options={[
+                    { value: "unit", label: "Unitário" },
+                    { value: "batch", label: "Por tiragem" },
+                  ]}
+                />
+              </div>
+              <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
+                <Field label="Impressora" hint="define a categoria de custo">
+                  <Combobox
+                    value={form.printerId || ""}
+                    onChange={(v) => setForm((f) => ({ ...f, printerId: v }))}
+                    placeholder="Usar categoria base"
+                    options={catalog.printers.map((p) => ({ value: String(p.id), label: String(p.name), hint: catalog.categories.find((c) => Number(c.id) === Number(p.categoryId))?.name }))}
+                  />
+                </Field>
+                <Field label="Formato">
+                  <Combobox
+                    value={form.printFormatId || ""}
+                    onChange={(v) => setForm((f) => ({ ...f, printFormatId: v }))}
+                    placeholder="Padrão da categoria"
+                    options={catalog.formats
+                      .filter((f) => !printerCat || Number(f.categoryId) === Number(printerCat.id))
+                      .map((f) => ({ value: String(f.id), label: String(f.name), hint: num(f.printCostOverride) > 0 ? formatMoney(num(f.printCostOverride)) : undefined }))}
+                  />
+                </Field>
+                <Field label="Cor">
+                  <Segmented
+                    value={colorMode}
+                    onChange={setColorMode}
+                    options={[
+                      { value: "mono", label: "P&B" },
+                      { value: "color", label: "Colorido" },
+                    ]}
+                  />
+                </Field>
+                {calcMode === "unit" ? (
+                  <>
+                    <Field label="Páginas por unidade">
+                      <Input mono value={form.pagesPerUnit || ""} onChange={set("pagesPerUnit")} />
+                    </Field>
+                    <Field label="Vias / cópias">
+                      <Input mono value={form.copies || ""} onChange={set("copies")} />
+                    </Field>
+                  </>
+                ) : (
+                  <>
+                    <Field label="Tiragem padrão (peças)">
+                      <Input mono value={form.defaultQuantity || ""} onChange={set("defaultQuantity")} />
+                    </Field>
+                    <Field label="Peças por folha">
+                      <Input mono value={form.piecesPerSheet || ""} onChange={set("piecesPerSheet")} />
+                    </Field>
+                    <Field label="Faces impressas">
+                      <Select value={form.printSides || "1"} onChange={set("printSides")}>
+                        <option value="1">1 face (frente)</option>
+                        <option value="2">2 faces (frente e verso)</option>
+                      </Select>
+                    </Field>
+                    <Field label="Perda técnica (%)">
+                      <Input mono value={form.wastePercent || ""} onChange={set("wastePercent")} />
+                    </Field>
+                    <Field label="Folhas de setup/prova">
+                      <Input mono value={form.setupSheets || ""} onChange={set("setupSheets")} />
+                    </Field>
+                    <Field label="Pedido mínimo">
+                      <Input mono value={form.minOrderQty || ""} onChange={set("minOrderQty")} />
+                    </Field>
+                    <Field label="Custo operacional (%)">
+                      <Input mono value={form.operationalRate || ""} onChange={set("operationalRate")} />
+                    </Field>
+                    <Field label="Arredondamento (R$)">
+                      <Input mono value={form.roundingStep || ""} onChange={set("roundingStep")} />
+                    </Field>
+                  </>
+                )}
+              </div>
+            </section>
+
+            {/* Material base + insumos */}
+            <section className="rounded-xl border border-paper-200 bg-paper-100/50 p-4">
+              <h4 className="mb-3.5 flex items-center gap-2 font-mono text-[10.5px] font-semibold tracking-[0.16em] text-ink-600 uppercase">
+                <Icon name="boxes" size={13} />
+                Materiais & insumos
+              </h4>
+              <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-[1fr_130px]">
+                <Field label="Material base">
+                  <Combobox
+                    value={form.baseMaterialId || ""}
+                    onChange={(v) => setForm((f) => ({ ...f, baseMaterialId: v }))}
+                    placeholder="Nenhum"
+                    options={catalog.materials.map((m) => ({ value: String(m.id), label: String(m.name), hint: `${formatMoney(num(m.unitCost))}/${m.unit}` }))}
+                  />
+                </Field>
+                <Field label={calcMode === "batch" ? "Folhas/impressão" : "Quantidade"}>
+                  <Input mono value={form.baseMaterialQty || ""} onChange={set("baseMaterialQty")} />
+                </Field>
+              </div>
+              <div className="mt-3.5 space-y-2">
+                {compMaterials.map((m, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <Combobox
+                      className="flex-1"
+                      value={m.id}
+                      onChange={(v) => setCompMaterials((arr) => arr.map((x, j) => (j === i ? { ...x, id: v } : x)))}
+                      placeholder="Insumo extra…"
+                      options={catalog.materials.map((x) => ({ value: String(x.id), label: String(x.name), hint: formatMoney(num(x.unitCost)) }))}
+                    />
+                    <Input mono value={m.quantity} onChange={(e) => setCompMaterials((arr) => arr.map((x, j) => (j === i ? { ...x, quantity: e.target.value } : x)))} className="w-24" placeholder="qtd" />
+                    <IconButton size="sm" name="trash" label="Remover" tone="danger" onClick={() => setCompMaterials((arr) => arr.filter((_, j) => j !== i))} />
+                  </div>
+                ))}
+                <Button size="xs" variant="outline" icon="plus" onClick={() => setCompMaterials((arr) => [...arr, { id: "", quantity: "1" }])}>
+                  Insumo extra
+                </Button>
+              </div>
+            </section>
+
+            {/* Acabamentos */}
+            <section className="rounded-xl border border-paper-200 bg-paper-100/50 p-4">
+              <h4 className="mb-3.5 flex items-center gap-2 font-mono text-[10.5px] font-semibold tracking-[0.16em] text-ink-600 uppercase">
+                <Icon name="scissors" size={13} />
+                Acabamentos
+              </h4>
+              <div className="space-y-2">
+                {compFinishings.map((f, i) => (
+                  <div key={i} className="grid grid-cols-[1fr_90px_130px_90px_32px] items-center gap-2">
+                    <Combobox
+                      value={f.id}
+                      onChange={(v) => setCompFinishings((arr) => arr.map((x, j) => (j === i ? { ...x, id: v } : x)))}
+                      placeholder="Acabamento…"
+                      options={catalog.finishings.map((x) => ({ value: String(x.id), label: String(x.name), hint: `${formatMoney(num(x.unitCost))}/${x.unit}` }))}
+                    />
+                    <Input mono value={f.quantity} onChange={(e) => setCompFinishings((arr) => arr.map((x, j) => (j === i ? { ...x, quantity: e.target.value } : x)))} placeholder="qtd" />
+                    <Select value={f.chargeMode} onChange={(e) => setCompFinishings((arr) => arr.map((x, j) => (j === i ? { ...x, chargeMode: e.target.value } : x)))}>
+                      <option value="per_piece">por peça</option>
+                      <option value="per_sheet">por folha</option>
+                      <option value="per_kit">por kit</option>
+                      <option value="fixed_lot">fixo/lote</option>
+                      <option value="per_meter">por metro</option>
+                      <option value="per_m2">por m²</option>
+                    </Select>
+                    <Input mono value={f.batchSize} onChange={(e) => setCompFinishings((arr) => arr.map((x, j) => (j === i ? { ...x, batchSize: e.target.value } : x)))} placeholder="kit" disabled={f.chargeMode !== "per_kit"} />
+                    <IconButton size="sm" name="trash" label="Remover" tone="danger" onClick={() => setCompFinishings((arr) => arr.filter((_, j) => j !== i))} />
+                  </div>
+                ))}
+                <Button size="xs" variant="outline" icon="plus" onClick={() => setCompFinishings((arr) => [...arr, { id: "", quantity: "1", chargeMode: "per_piece", batchSize: "1" }])}>
+                  Acabamento
+                </Button>
+              </div>
+            </section>
+
+            {/* Comercial */}
+            <section className="grid grid-cols-2 gap-3.5 sm:grid-cols-4">
+              <Field label={calcMode === "batch" ? "Lucro alvo (%)" : "Margem (%)"}>
+                <Input mono value={form.margin || ""} onChange={set("margin")} />
+              </Field>
+              <Field label="Rastreia estoque?">
+                <Select value={form.trackStock || "false"} onChange={set("trackStock")}>
+                  <option value="false">Não</option>
+                  <option value="true">Sim</option>
+                </Select>
+              </Field>
+              <Field label="Estoque atual">
+                <Input mono value={form.stock || "0"} onChange={set("stock")} disabled={form.trackStock !== "true"} />
+              </Field>
+              <Field label="Produto ativo?">
+                <Select value={form.active ?? "true"} onChange={set("active")}>
+                  <option value="true">Ativo</option>
+                  <option value="false">Inativo</option>
+                </Select>
+              </Field>
+            </section>
+          </div>
+
+          {/* Coluna do breakdown */}
+          <aside className="lg:sticky lg:top-0">
+            <div className="overflow-hidden rounded-xl border border-ink-800 bg-ink-900 shadow-pop">
+              <div className="halftone-light flex items-center justify-between border-b border-ink-800 px-4 py-3">
+                <p className="font-mono text-[10px] font-semibold tracking-[0.18em] text-cyan-300 uppercase">
+                  Ordem de custo · ao vivo
+                </p>
+                {calcMode === "batch" && (
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      value={simQty}
+                      onChange={(e) => setSimQty(e.target.value)}
+                      placeholder={form.defaultQuantity || "qtd"}
+                      className="focus-ring w-16 rounded-md border border-ink-700 bg-ink-850 px-2 py-1 text-right font-mono text-[11.5px] text-white placeholder:text-ink-500 tnum"
+                    />
+                    <span className="font-mono text-[9px] text-ink-400 uppercase">simular</span>
+                  </div>
+                )}
+              </div>
+              <div className="max-h-[430px] overflow-y-auto px-4 py-3">
+                {!liveCalc && <p className="py-8 text-center text-[12px] text-ink-400">Escolha uma categoria de impressora para calcular.</p>}
+                {liveCalc && (
+                  <>
+                    {"finalSheets" in liveCalc && calcMode === "batch" && (
+                      <div className="mb-3 grid grid-cols-3 gap-2">
+                        {[
+                          { k: "peças", v: String(liveCalc.qty) },
+                          { k: "folhas base", v: String(Math.ceil(liveCalc.qty / Math.max(num(form.piecesPerSheet, 1), 1))) },
+                          { k: "folhas finais", v: String(liveCalc.finalSheets) },
+                        ].map((x) => (
+                          <div key={x.k} className="rounded-lg bg-white/[0.05] px-2 py-2 text-center">
+                            <p className="font-mono text-[15px] leading-none font-semibold text-white tnum">{x.v}</p>
+                            <p className="mt-1 text-[8.5px] tracking-wider text-ink-400 uppercase">{x.k}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {liveCalc.lines.length === 0 && <p className="py-4 text-center text-[11.5px] text-ink-400">Nenhuma linha de custo — adicione impressão, material ou acabamento.</p>}
+                    <div className="divide-y divide-white/[0.06]">
+                      {liveCalc.lines.map((l, i) => (
+                        <div key={i} className="flex items-baseline justify-between gap-3 py-2">
+                          <div className="min-w-0">
+                            <p className="text-[11.5px] leading-tight font-semibold text-paper-50">{l.label}</p>
+                            {l.detail && <p className="truncate font-mono text-[9.5px] text-ink-400">{l.detail}</p>}
+                          </div>
+                          <span className="shrink-0 font-mono text-[11.5px] text-cyan-200 tnum">{formatMoney(l.amount)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+              {liveCalc && (
+                <div className="space-y-1 border-t border-ink-800 bg-ink-950/60 px-4 py-3.5">
+                  <div className="flex justify-between text-[11px] text-ink-300">
+                    <span>Custo direto</span>
+                    <span className="font-mono tnum">{formatMoney(liveCalc.baseCost)}</span>
+                  </div>
+                  <div className="flex justify-between text-[11px] text-ink-300">
+                    <span>{calcMode === "batch" ? "Lucro alvo" : "Margem"}</span>
+                    <span className="font-mono text-emerald-300 tnum">{formatMoney(liveCalc.marginAmount)}</span>
+                  </div>
+                  <div className="flex justify-between text-[11px] text-ink-300">
+                    <span>Impostos + maquininha</span>
+                    <span className="font-mono text-amber-300 tnum">{formatMoney(liveCalc.taxAmount + liveCalc.feeAmount)}</span>
+                  </div>
+                  <div className="mt-1.5 flex items-baseline justify-between border-t border-dashed border-ink-700 pt-2">
+                    <span className="font-mono text-[10px] tracking-[0.16em] text-ink-300 uppercase">
+                      {calcMode === "batch" ? "Total da tiragem" : "Preço final"}
+                    </span>
+                    <span className="font-mono text-[21px] leading-none font-semibold text-cyan-300 tnum">
+                      {formatMoney(liveCalc.finalPrice)}
+                    </span>
+                  </div>
+                  {calcMode === "batch" && (
+                    <p className="text-right font-mono text-[10.5px] text-ink-400 tnum">
+                      {formatMoney(liveCalc.unitPrice)} / peça
+                    </p>
+                  )}
+                  {liveCalc.valid === false && (
+                    <p className="mt-1.5 rounded-md bg-red-500/15 px-2.5 py-1.5 text-[10.5px] text-red-300">{liveCalc.error}</p>
+                  )}
+                </div>
+              )}
+            </div>
+          </aside>
+        </div>
+      </Modal>
+    </div>
+  );
+}

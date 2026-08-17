@@ -1,0 +1,262 @@
+@import "tailwindcss";
+
+@theme {
+  /* ── Tipografia ──────────────────────────────────────────────── */
+  --font-display: "Archivo", "Segoe UI", "Helvetica Neue", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "IBM Plex Sans", "Segoe UI", "Helvetica Neue", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", "SFMono-Regular", ui-monospace, Menlo, Consolas, monospace;
+
+  /* ── Tinta (superfícies escuras) ─────────────────────────────── */
+  --color-ink-950: #0a0e16;
+  --color-ink-900: #0e1420;
+  --color-ink-850: #131b2b;
+  --color-ink-800: #182236;
+  --color-ink-700: #223049;
+  --color-ink-600: #31425f;
+  --color-ink-500: #46587a;
+  --color-ink-400: #6b7c9c;
+  --color-ink-300: #9aa7bf;
+
+  /* ── Papel (superfícies claras) ──────────────────────────────── */
+  --color-paper-50: #fcfcfa;
+  --color-paper-100: #f4f5f1;
+  --color-paper-200: #e9ebe3;
+  --color-paper-300: #d9dcd0;
+  --color-paper-400: #b9bead;
+
+  /* ── CMYK de processo (acentos funcionais) ───────────────────── */
+  --color-proc-c: #0891b2;
+  --color-proc-c-strong: #0e7490;
+  --color-proc-c-soft: #e0f4f8;
+  --color-proc-m: #d6246e;
+  --color-proc-m-soft: #fce7f1;
+  --color-proc-y: #eab308;
+  --color-proc-y-soft: #fdf3d1;
+  --color-proc-k: #171b24;
+
+  /* ── Sombras ─────────────────────────────────────────────────── */
+  --shadow-card: 0 1px 2px rgb(14 20 32 / 0.05), 0 1px 1px rgb(14 20 32 / 0.03);
+  --shadow-pop: 0 12px 32px -8px rgb(14 20 32 / 0.22), 0 4px 10px -4px rgb(14 20 32 / 0.1);
+  --shadow-inset-line: inset 0 1px 0 rgb(255 255 255 / 0.06);
+
+  /* ── Animações ───────────────────────────────────────────────── */
+  --animate-fade-up: fade-up 0.4s cubic-bezier(0.21, 0.8, 0.35, 1) both;
+  --animate-pop-in: pop-in 0.22s cubic-bezier(0.2, 0.9, 0.3, 1.2) both;
+  --animate-slide-left: slide-left 0.28s cubic-bezier(0.25, 0.8, 0.3, 1) both;
+  --animate-slide-up: slide-up 0.3s cubic-bezier(0.25, 0.8, 0.3, 1) both;
+  --animate-pulse-soft: pulse-soft 2.2s ease-in-out infinite;
+
+  @keyframes fade-up {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes pop-in {
+    from { opacity: 0; transform: scale(0.96) translateY(6px); }
+    to { opacity: 1; transform: scale(1) translateY(0); }
+  }
+  @keyframes slide-left {
+    from { opacity: 0; transform: translateX(28px); }
+    to { opacity: 1; transform: translateX(0); }
+  }
+  @keyframes slide-up {
+    from { opacity: 0; transform: translateY(100%); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes pulse-soft {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.45; }
+  }
+}
+
+/* ═══ Base ═══════════════════════════════════════════════════════ */
+html {
+  scrollbar-gutter: stable;
+}
+
+body {
+  background-color: var(--color-paper-100);
+  color: var(--color-ink-800);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: var(--color-proc-c);
+  color: #fff;
+}
+
+/* Scrollbars discretos */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #c3c8ba transparent;
+}
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-thumb { background: #c3c8ba; border-radius: 8px; }
+*::-webkit-scrollbar-track { background: transparent; }
+
+.dark-scroll { scrollbar-color: #31425f transparent; }
+.dark-scroll::-webkit-scrollbar-thumb { background: #31425f; }
+
+/* ═══ Texturas de gráfica ════════════════════════════════════════ */
+/* Retícula (halftone) — assinatura visual da impressão */
+.halftone {
+  background-image: radial-gradient(rgb(14 20 32 / 0.13) 1px, transparent 1.3px);
+  background-size: 12px 12px;
+}
+.halftone-light {
+  background-image: radial-gradient(rgb(255 255 255 / 0.1) 1px, transparent 1.3px);
+  background-size: 14px 14px;
+}
+.halftone-cyan {
+  background-image: radial-gradient(rgb(8 145 178 / 0.16) 1px, transparent 1.3px);
+  background-size: 11px 11px;
+}
+
+/* Grade técnica para superfícies de tinta */
+.ink-grid {
+  background-image:
+    linear-gradient(rgb(255 255 255 / 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(255 255 / 255 / 0.035) 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+
+/* Marca de registro — linhas de corte */
+.trim-marks {
+  position: relative;
+}
+.trim-marks::before,
+.trim-marks::after {
+  content: "";
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border-color: currentColor;
+  opacity: 0.5;
+}
+.trim-marks::before {
+  top: -5px; left: -5px;
+  border-top: 1.5px solid; border-left: 1.5px solid;
+}
+.trim-marks::after {
+  bottom: -5px; right: -5px;
+  border-bottom: 1.5px solid; border-right: 1.5px solid;
+}
+
+/* Display expandido — manchetes de gráfica */
+.display-expanded {
+  font-family: var(--font-display);
+  font-stretch: 112.5%;
+  letter-spacing: -0.015em;
+}
+
+/* Números tabulares em todo lugar que importa */
+.tnum { font-variant-numeric: tabular-nums lining-nums; }
+
+/* ═══ Componentes utilitários ════════════════════════════════════ */
+.focus-ring {
+  outline: none;
+}
+.focus-ring:focus-visible {
+  outline: 2px solid var(--color-proc-c);
+  outline-offset: 2px;
+}
+
+/* Filete CMYK — detalhe de identidade */
+.cmyk-strip {
+  background: linear-gradient(
+    90deg,
+    var(--color-proc-c) 0 25%,
+    var(--color-proc-m) 25% 50%,
+    var(--color-proc-y) 50% 75%,
+    var(--color-proc-k) 75% 100%
+  );
+}
+
+/* Linha pontilhada de cupom */
+.receipt-edge {
+  --notch: 7px;
+  mask-image: radial-gradient(circle at 8px 0, transparent 6px, black 6.5px);
+}
+
+/* Revelação ao entrar */
+.reveal {
+  animation: var(--animate-fade-up);
+}
+.reveal-1 { animation-delay: 40ms; }
+.reveal-2 { animation-delay: 90ms; }
+.reveal-3 { animation-delay: 140ms; }
+.reveal-4 { animation-delay: 190ms; }
+.reveal-5 { animation-delay: 240ms; }
+
+/* Impressão */
+@media print {
+  body { background: #fff; }
+  .no-print { display: none !important; }
+}
+
+/* ------------------------------------------------------------------
+   Impressões do Sistema (Cupom Térmico 80mm & Documentos A4 / Ordem de Produção)
+   ------------------------------------------------------------------ */
+@media print {
+  /* 1. IMPRESSÃO TÉRMICA 80MM (#receipt-print ou #order-print-80mm) */
+  body:has(#receipt-print, #order-print-80mm) * {
+    visibility: hidden !important;
+  }
+  body:has(#receipt-print) #receipt-print,
+  body:has(#receipt-print) #receipt-print *,
+  body:has(#order-print-80mm) #order-print-80mm,
+  body:has(#order-print-80mm) #order-print-80mm * {
+    visibility: visible !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  #receipt-print,
+  #order-print-80mm {
+    display: block !important;
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 80mm;
+    max-width: 80mm;
+    margin: 0;
+    padding: 2mm 3mm;
+    background: #ffffff !important;
+    color: #000000 !important;
+    font-family: var(--font-mono), 'IBM Plex Mono', 'Courier New', Courier, monospace !important;
+    font-size: 11px !important;
+    line-height: 1.25 !important;
+  }
+
+  /* 2. IMPRESSÃO A4 (ORDEM DE PRODUÇÃO / PROPOSTA COMERCIAL: #order-print-a4 ou #quote-print-a4) */
+  body:has(#order-print-a4, #quote-print-a4) * {
+    visibility: hidden !important;
+  }
+  body:has(#order-print-a4) #order-print-a4,
+  body:has(#order-print-a4) #order-print-a4 *,
+  body:has(#quote-print-a4) #quote-print-a4,
+  body:has(#quote-print-a4) #quote-print-a4 * {
+    visibility: visible !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  #order-print-a4,
+  #quote-print-a4 {
+    display: block !important;
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+
+  @page {
+    size: auto;
+    margin: 10mm;
+  }
+}

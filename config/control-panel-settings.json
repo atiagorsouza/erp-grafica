@@ -1,0 +1,667 @@
+{
+  "version": "3.10.0",
+  "groups": [
+    {
+      "id": "empresa",
+      "title": "Identidade da empresa",
+      "desc": "Aparece nos orçamentos, cupons e impressão de OS.",
+      "icon": "building",
+      "color": "text-proc-c",
+      "fields": [
+        {
+          "key": "company_name",
+          "label": "Nome fantasia / Marca",
+          "defaultValue": "Gráfica VT Digital"
+        },
+        {
+          "key": "company_legal_name",
+          "label": "Razão social",
+          "defaultValue": ""
+        },
+        {
+          "key": "company_cnpj",
+          "label": "CNPJ",
+          "mono": true,
+          "defaultValue": ""
+        },
+        {
+          "key": "company_email",
+          "label": "E-mail comercial",
+          "defaultValue": ""
+        },
+        {
+          "key": "company_phone",
+          "label": "Telefone 1",
+          "mono": true,
+          "defaultValue": "(21) 3000-0000"
+        },
+        {
+          "key": "company_phone2",
+          "label": "Telefone 2",
+          "mono": true,
+          "defaultValue": ""
+        },
+        {
+          "key": "company_whatsapp",
+          "label": "WhatsApp",
+          "mono": true,
+          "defaultValue": ""
+        },
+        {
+          "key": "company_website",
+          "label": "Website",
+          "defaultValue": ""
+        },
+        {
+          "key": "pix_key",
+          "label": "Chave PIX",
+          "span2": true,
+          "defaultValue": "contato@graficavtdigital.com.br"
+        },
+        {
+          "key": "company_street",
+          "label": "Rua / Logradouro",
+          "defaultValue": ""
+        },
+        {
+          "key": "company_number",
+          "label": "Número",
+          "mono": true,
+          "defaultValue": ""
+        },
+        {
+          "key": "company_district",
+          "label": "Bairro",
+          "defaultValue": ""
+        },
+        {
+          "key": "company_city",
+          "label": "Cidade",
+          "defaultValue": ""
+        },
+        {
+          "key": "company_state",
+          "label": "UF",
+          "mono": true,
+          "defaultValue": ""
+        },
+        {
+          "key": "company_cep",
+          "label": "CEP",
+          "mono": true,
+          "defaultValue": ""
+        }
+      ]
+    },
+    {
+      "id": "tributacao",
+      "title": "Precificação & taxas",
+      "desc": "Parâmetros globais usados pelo motor de preços em todos os cálculos.",
+      "icon": "calc",
+      "color": "text-amber-600",
+      "fields": [
+        {
+          "key": "tax_rate",
+          "label": "Imposto sobre venda (Simples etc.)",
+          "type": "number",
+          "suffix": "%",
+          "hint": "Embutido no preço final pelo motor",
+          "defaultValue": "6"
+        },
+        {
+          "key": "operational_rate",
+          "label": "Markup operacional (aluguel, folha, energia)",
+          "type": "number",
+          "suffix": "%",
+          "defaultValue": "15"
+        },
+        {
+          "key": "card_fee_debit",
+          "label": "Taxa maquininha — Débito",
+          "type": "number",
+          "suffix": "%",
+          "mono": true,
+          "defaultValue": "1.99"
+        },
+        {
+          "key": "card_fee_credit",
+          "label": "Taxa maquininha — Crédito",
+          "type": "number",
+          "suffix": "%",
+          "mono": true,
+          "defaultValue": "4.99"
+        }
+      ]
+    },
+    {
+      "id": "documentos",
+      "title": "Numeração de documentos",
+      "desc": "Sequências atômicas — nunca colidem entre operadores simultâneos.",
+      "icon": "quote",
+      "color": "text-proc-m",
+      "fields": [
+        {
+          "key": "document_number_mode",
+          "label": "Modo de numeração",
+          "type": "select",
+          "defaultValue": "annual",
+          "options": [
+            {
+              "value": "annual",
+              "label": "Anual (reinicia todo ano)"
+            },
+            {
+              "value": "continuous",
+              "label": "Contínuo (nunca reinicia)"
+            }
+          ]
+        },
+        {
+          "key": "document_number_width",
+          "label": "Dígitos do sequencial",
+          "type": "number",
+          "hint": "Ex.: 4 → ORC-2026-0001",
+          "defaultValue": "4"
+        },
+        {
+          "key": "document_prefix_quote",
+          "label": "Prefixo orçamento",
+          "mono": true,
+          "hint": "Ex.: ORC",
+          "defaultValue": "ORC"
+        },
+        {
+          "key": "document_prefix_order",
+          "label": "Prefixo pedido / OS",
+          "mono": true,
+          "hint": "Ex.: PED",
+          "defaultValue": "PED"
+        },
+        {
+          "key": "document_prefix_sale",
+          "label": "Prefixo venda PDV",
+          "mono": true,
+          "hint": "Ex.: PDV",
+          "defaultValue": "PDV"
+        },
+        {
+          "key": "document_prefix_purchase",
+          "label": "Prefixo compra",
+          "mono": true,
+          "hint": "Ex.: CMP",
+          "defaultValue": "CMP"
+        }
+      ]
+    },
+    {
+      "id": "pdv",
+      "title": "PDV · Frente de Caixa",
+      "desc": "Padrões do ponto de venda: vendedor padrão, rodapé do cupom, entrega e regras de estoque.",
+      "icon": "receipt",
+      "color": "text-emerald-600",
+      "fields": [
+        {
+          "key": "pdv_seller_default",
+          "label": "Vendedor / Atendente padrão",
+          "hint": "Pré-preenchido no cupom",
+          "defaultValue": "OPERADOR"
+        },
+        {
+          "key": "pdv_delivery_default",
+          "label": "Situação de entrega padrão",
+          "type": "select",
+          "defaultValue": "Retirada no balcão",
+          "options": [
+            {
+              "value": "Entrega direto para o cliente",
+              "label": "Entrega direto para o cliente"
+            },
+            {
+              "value": "Retirada no balcão",
+              "label": "Retirada no balcão"
+            },
+            {
+              "value": "Envio por Motoboy / Transportadora",
+              "label": "Envio por Motoboy / Transportadora"
+            }
+          ]
+        },
+        {
+          "key": "pdv_allow_negative_stock",
+          "label": "Permitir venda com estoque negativo?",
+          "type": "select",
+          "defaultValue": "false",
+          "options": [
+            {
+              "value": "false",
+              "label": "Não (exige confirmação)"
+            },
+            {
+              "value": "true",
+              "label": "Sim (sem bloqueio)"
+            }
+          ]
+        },
+        {
+          "key": "pdv_require_customer",
+          "label": "Exigir cliente identificado?",
+          "type": "select",
+          "defaultValue": "false",
+          "options": [
+            {
+              "value": "false",
+              "label": "Não (consumidor final)"
+            },
+            {
+              "value": "true",
+              "label": "Sim (obrigatório)"
+            }
+          ]
+        },
+        {
+          "key": "pdv_require_open_cash",
+          "label": "Exigir caixa aberto para vender?",
+          "type": "select",
+          "defaultValue": "true",
+          "options": [
+            {
+              "value": "true",
+              "label": "Sim (recomendado em produção)"
+            },
+            {
+              "value": "false",
+              "label": "Não (permite vender sem sessão)"
+            }
+          ]
+        },
+        {
+          "key": "pdv_receipt_footer",
+          "label": "Rodapé do cupom térmico",
+          "type": "textarea",
+          "span2": true,
+          "hint": "Aparece no final do cupom impresso e no texto do WhatsApp",
+          "defaultValue": "Agradecemos a preferência! Volte sempre."
+        }
+      ]
+    },
+    {
+      "id": "orcamentos",
+      "title": "Orçamentos",
+      "desc": "Padrões para novos orçamentos: validade, vendedor, pagamento e texto de condições.",
+      "icon": "quote",
+      "color": "text-proc-c",
+      "fields": [
+        {
+          "key": "quote_validity_days",
+          "label": "Validade padrão (dias)",
+          "type": "number",
+          "hint": "Dias a partir da criação",
+          "defaultValue": "7"
+        },
+        {
+          "key": "quote_default_payment",
+          "label": "Forma de pagamento padrão",
+          "type": "select",
+          "defaultValue": "PIX",
+          "options": [
+            {
+              "value": "PIX",
+              "label": "PIX"
+            },
+            {
+              "value": "Dinheiro",
+              "label": "Dinheiro"
+            },
+            {
+              "value": "Débito",
+              "label": "Débito"
+            },
+            {
+              "value": "Crédito",
+              "label": "Crédito"
+            },
+            {
+              "value": "Boleto",
+              "label": "Boleto"
+            },
+            {
+              "value": "50% entrada + 50% na entrega",
+              "label": "50% entrada + 50% na entrega"
+            }
+          ]
+        },
+        {
+          "key": "quote_default_seller",
+          "label": "Vendedor padrão",
+          "defaultValue": "OPERADOR"
+        },
+        {
+          "key": "quote_default_notes",
+          "label": "Observações / condições padrão",
+          "type": "textarea",
+          "span2": true,
+          "defaultValue": "Orçamento válido conforme prazo informado. Produção inicia após aprovação e pagamento combinado."
+        }
+      ]
+    },
+    {
+      "id": "pedidos",
+      "title": "Pedidos & OS",
+      "desc": "Automações e padrões para ordens de produção — Kanban, entrega e lançamento financeiro.",
+      "icon": "orders",
+      "color": "text-proc-m",
+      "fields": [
+        {
+          "key": "order_default_priority",
+          "label": "Prioridade padrão",
+          "type": "select",
+          "defaultValue": "normal",
+          "options": [
+            {
+              "value": "baixa",
+              "label": "Baixa"
+            },
+            {
+              "value": "normal",
+              "label": "Normal"
+            },
+            {
+              "value": "alta",
+              "label": "Alta"
+            },
+            {
+              "value": "urgente",
+              "label": "Urgente"
+            }
+          ]
+        },
+        {
+          "key": "order_default_channel",
+          "label": "Canal de entrada padrão",
+          "type": "select",
+          "defaultValue": "Atendimento",
+          "options": [
+            {
+              "value": "Atendimento",
+              "label": "Atendimento"
+            },
+            {
+              "value": "Balcão",
+              "label": "Balcão"
+            },
+            {
+              "value": "Instagram",
+              "label": "Instagram"
+            },
+            {
+              "value": "Site",
+              "label": "Site"
+            },
+            {
+              "value": "Indicação",
+              "label": "Indicação"
+            }
+          ]
+        },
+        {
+          "key": "order_auto_kanban",
+          "label": "Criar card Kanban automaticamente?",
+          "type": "select",
+          "defaultValue": "true",
+          "options": [
+            {
+              "value": "true",
+              "label": "Sim"
+            },
+            {
+              "value": "false",
+              "label": "Não"
+            }
+          ]
+        },
+        {
+          "key": "order_auto_delivery",
+          "label": "Criar registro de entrega automaticamente?",
+          "type": "select",
+          "defaultValue": "true",
+          "options": [
+            {
+              "value": "true",
+              "label": "Sim"
+            },
+            {
+              "value": "false",
+              "label": "Não"
+            }
+          ]
+        },
+        {
+          "key": "order_auto_transaction",
+          "label": "Lançar no financeiro automaticamente?",
+          "type": "select",
+          "defaultValue": "true",
+          "options": [
+            {
+              "value": "true",
+              "label": "Sim"
+            },
+            {
+              "value": "false",
+              "label": "Não"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "kanban",
+      "title": "Kanban de Produção",
+      "desc": "Sincronização entre o status do pedido e a coluna do Kanban — mapeamento automático.",
+      "icon": "kanban",
+      "color": "text-proc-c",
+      "fields": [
+        {
+          "key": "kanban_auto_sync_orders",
+          "label": "Sincronizar automaticamente com Pedidos?",
+          "type": "select",
+          "defaultValue": "true",
+          "options": [
+            {
+              "value": "true",
+              "label": "Sim — ao avançar produção, o card se move"
+            },
+            {
+              "value": "false",
+              "label": "Não — mover manual"
+            }
+          ]
+        },
+        {
+          "key": "kanban_columns",
+          "label": "Colunas (separadas por vírgula)",
+          "hint": "backlog,producao,revisao,pronto,entregue,cancelado",
+          "mono": true,
+          "defaultValue": "backlog,producao,revisao,pronto,entregue,cancelado"
+        }
+      ]
+    },
+    {
+      "id": "crm",
+      "title": "Clientes & CRM",
+      "desc": "Intervalo de follow-up e expiração de leads inativos.",
+      "icon": "users",
+      "color": "text-proc-c",
+      "fields": [
+        {
+          "key": "crm_followup_interval_days",
+          "label": "Intervalo padrão de follow-up (dias)",
+          "type": "number",
+          "hint": "Dias entre contatos no pipeline",
+          "defaultValue": "7"
+        },
+        {
+          "key": "crm_lead_expiry_days",
+          "label": "Expiração de leads inativos (dias)",
+          "type": "number",
+          "hint": "Lead sem contato depois desse prazo vai para Perdido",
+          "defaultValue": "30"
+        }
+      ]
+    },
+    {
+      "id": "calendario",
+      "title": "Calendário Comemorativo",
+      "desc": "Alertas antecipados de datas e oportunidades comerciais sazonais.",
+      "icon": "calendar",
+      "color": "text-proc-y",
+      "fields": [
+        {
+          "key": "calendar_alert_days_before",
+          "label": "Alertar quantos dias antes da data?",
+          "type": "number",
+          "hint": "Ex.: 7 = alerta com uma semana de antecedência",
+          "defaultValue": "15"
+        },
+        {
+          "key": "calendar_auto_campaign_alert",
+          "label": "Criar alerta automático de campanha?",
+          "type": "select",
+          "defaultValue": "true",
+          "options": [
+            {
+              "value": "true",
+              "label": "Sim — notificação no painel"
+            },
+            {
+              "value": "false",
+              "label": "Não"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "fiscal",
+      "title": "Fiscal & Nota Fiscal",
+      "desc": "Ambiente NF-e / NFC-e e regime tributário. Emissão via integrador externo.",
+      "icon": "wallet",
+      "color": "text-ink-500",
+      "fields": [
+        {
+          "key": "fiscal_environment",
+          "label": "Ambiente",
+          "type": "select",
+          "defaultValue": "homologacao",
+          "options": [
+            {
+              "value": "homologacao",
+              "label": "Homologação"
+            },
+            {
+              "value": "producao",
+              "label": "Produção"
+            }
+          ]
+        },
+        {
+          "key": "fiscal_tax_regime",
+          "label": "Regime tributário",
+          "type": "select",
+          "defaultValue": "simples",
+          "options": [
+            {
+              "value": "simples",
+              "label": "Simples Nacional"
+            },
+            {
+              "value": "presumido",
+              "label": "Lucro Presumido"
+            },
+            {
+              "value": "real",
+              "label": "Lucro Real"
+            },
+            {
+              "value": "mei",
+              "label": "MEI"
+            }
+          ]
+        },
+        {
+          "key": "fiscal_nfe_enabled",
+          "label": "NF-e habilitada?",
+          "type": "select",
+          "defaultValue": "false",
+          "options": [
+            {
+              "value": "false",
+              "label": "Não"
+            },
+            {
+              "value": "true",
+              "label": "Sim"
+            }
+          ]
+        },
+        {
+          "key": "fiscal_nfce_enabled",
+          "label": "NFC-e habilitada?",
+          "type": "select",
+          "defaultValue": "false",
+          "options": [
+            {
+              "value": "false",
+              "label": "Não"
+            },
+            {
+              "value": "true",
+              "label": "Sim"
+            }
+          ]
+        },
+        {
+          "key": "fiscal_nfse_enabled",
+          "label": "NFS-e habilitada?",
+          "type": "select",
+          "defaultValue": "false",
+          "options": [
+            {
+              "value": "false",
+              "label": "Não"
+            },
+            {
+              "value": "true",
+              "label": "Sim"
+            }
+          ]
+        },
+        {
+          "key": "fiscal_provider",
+          "label": "Integrador / provedor fiscal",
+          "hint": "Ex.: Focus NFe, PlugNotas, Webmania, Manual",
+          "defaultValue": "manual"
+        },
+        {
+          "key": "fiscal_certificate_type",
+          "label": "Certificado digital",
+          "type": "select",
+          "defaultValue": "nenhum",
+          "options": [
+            {
+              "value": "nenhum",
+              "label": "Não configurado"
+            },
+            {
+              "value": "a1",
+              "label": "A1"
+            },
+            {
+              "value": "a3",
+              "label": "A3"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
