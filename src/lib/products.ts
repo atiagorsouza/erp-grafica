@@ -11,6 +11,7 @@ import {
   printFormats,
   productFinishings,
   productMaterials,
+  productPriceTiers,
   products,
   quoteItems,
   services,
@@ -74,6 +75,17 @@ const productSchema = z.object({
   shipLength: finite.min(0).max(200).default(0),
   finishings: z.array(componentSchema).optional().default([]),
   materials: z.array(componentSchema).optional().default([]),
+  /* faixas de preço por quantidade (v3.34.0) — "mínimo 50, depois 100..." */
+  priceTiers: z
+    .array(
+      z.object({
+        minQuantity: finite.min(0.001).max(1_000_000),
+        unitPrice: finite.min(0).max(1_000_000),
+        label: z.string().trim().max(80).nullable().optional(),
+      })
+    )
+    .optional()
+    .default([]),
 });
 
 type ProductPayload = z.infer<typeof productSchema>;
@@ -232,6 +244,22 @@ async function syncComponents(tx: Tx, productId: number, data: ProductPayload) {
       productId,
       materialId: m.id,
       quantity: toDecimalString(m.quantity, 3),
+    });
+  }
+
+  /* Faixas de preço: `Map` por quantidade porque o índice único no
+     banco rejeitaria duplicata com 500 — e um erro de digitação na
+     tela não deve derrubar o salvamento inteiro do produto. */
+  await tx.delete(productPriceTiers).where(eq(productPriceTiers.productId, productId));
+  const seen = new Map<number, (typeof data.priceTiers)[number]>();
+  for (const t of data.priceTiers) seen.set(t.minQuantity, t);
+  const ordered = [...seen.values()].sort((a, b) => a.minQuantity - b.minQuantity);
+  for (const t of ordered) {
+    await tx.insert(productPriceTiers).values({
+      productId,
+      minQuantity: toDecimalString(t.minQuantity, 3),
+      unitPrice: toDecimalString(t.unitPrice, 4),
+      label: t.label?.trim() || null,
     });
   }
 }

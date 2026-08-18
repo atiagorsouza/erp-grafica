@@ -52,6 +52,7 @@ export function ProductsClient({
   products,
   finishings,
   materials,
+  priceTiers = [],
   taxRate,
   cardFeeRate,
 }: {
@@ -69,6 +70,7 @@ export function ProductsClient({
   products: Row[];
   finishings: Row[];
   materials: Row[];
+  priceTiers?: Row[];
   taxRate: number;
   cardFeeRate: number;
 }) {
@@ -86,6 +88,7 @@ export function ProductsClient({
   const [colorMode, setColorMode] = useState<ColorMode>("color");
   const [compFinishings, setCompFinishings] = useState<{ id: string; quantity: string; chargeMode: string; batchSize: string }[]>([]);
   const [compMaterials, setCompMaterials] = useState<{ id: string; quantity: string }[]>([]);
+  const [tiers, setTiers] = useState<{ minQuantity: string; unitPrice: string; label: string }[]>([]);
   const [simQty, setSimQty] = useState<string>("");
 
   const set = (k: string) => (e: { target: { value: string } }) => setForm((f) => ({ ...f, [k]: e.target.value }));
@@ -187,6 +190,7 @@ export function ProductsClient({
     setColorMode("color");
     setCompFinishings([]);
     setCompMaterials([]);
+    setTiers([]);
     setSimQty("");
     setForm({ margin: "40", pagesPerUnit: "1", copies: "1", baseMaterialQty: "1", defaultQuantity: "100", piecesPerSheet: "1", printSides: "1", wastePercent: "5", setupSheets: "0", minOrderQty: "1", operationalRate: "15", roundingStep: "0.01" });
     setEditorOpen(true);
@@ -202,6 +206,12 @@ export function ProductsClient({
     );
     setCompMaterials(
       materials.filter((m) => Number(m.productId) === Number(p.id)).map((m) => ({ id: String(m.materialId), quantity: String(m.quantity) }))
+    );
+    setTiers(
+      priceTiers
+        .filter((t) => Number(t.productId) === Number(p.id))
+        .sort((a, b) => num(a.minQuantity) - num(b.minQuantity))
+        .map((t) => ({ minQuantity: String(num(t.minQuantity)), unitPrice: String(num(t.unitPrice)), label: String(t.label || "") }))
     );
     setForm({
       name: String(p.name || ""),
@@ -276,6 +286,9 @@ export function ProductsClient({
         shipLength: form.shipLength || 0,
         finishings: compFinishings.filter((f) => f.id).map((f) => ({ id: Number(f.id), quantity: num(f.quantity, 1), chargeMode: f.chargeMode, batchSize: num(f.batchSize, 1) })),
         materials: compMaterials.filter((m) => m.id).map((m) => ({ id: Number(m.id), quantity: num(m.quantity, 1) })),
+        priceTiers: tiers
+          .filter((t) => num(t.minQuantity) > 0)
+          .map((t) => ({ minQuantity: num(t.minQuantity), unitPrice: num(t.unitPrice), label: t.label?.trim() || null })),
       };
       if (editId) await mutate("products", "update", data, editId);
       else await mutate("products", "create", data);
@@ -582,6 +595,60 @@ export function ProductsClient({
                 ))}
                 <Button size="xs" variant="outline" icon="plus" onClick={() => setCompMaterials((arr) => [...arr, { id: "", quantity: "1" }])}>
                   Insumo extra
+                </Button>
+              </div>
+            </section>
+
+            {/* Faixas de preço por quantidade */}
+            <section className="rounded-xl border border-paper-200 bg-paper-100/50 p-4">
+              <h4 className="mb-1.5 flex items-center gap-2 font-mono text-[10.5px] font-semibold tracking-[0.16em] text-ink-600 uppercase">
+                <Icon name="tag" size={13} />
+                Preço por quantidade
+              </h4>
+              <p className="mb-3.5 text-[11.5px] text-ink-500">
+                Para quem vende em lote: mínimo 50, depois 100, 250… Vale a maior faixa
+                que o pedido alcançar. Sem faixas, usa o preço calculado acima.
+              </p>
+              <div className="space-y-2">
+                {tiers.map((t, i) => {
+                  const q = num(t.minQuantity);
+                  const pu = num(t.unitPrice);
+                  const custoUn = liveCalc && calcMode === "unit" ? liveCalc.baseCost : 0;
+                  const prejuizo = custoUn > 0 && pu > 0 && pu < custoUn;
+                  return (
+                    <div key={i}>
+                      <div className="grid grid-cols-[110px_130px_1fr_32px] items-center gap-2">
+                        <Input
+                          mono
+                          value={t.minQuantity}
+                          placeholder="a partir de"
+                          onChange={(e) => setTiers((arr) => arr.map((x, j) => (j === i ? { ...x, minQuantity: e.target.value } : x)))}
+                        />
+                        <Input
+                          mono
+                          value={t.unitPrice}
+                          placeholder="R$/un"
+                          onChange={(e) => setTiers((arr) => arr.map((x, j) => (j === i ? { ...x, unitPrice: e.target.value } : x)))}
+                        />
+                        <Input
+                          value={t.label}
+                          placeholder="rótulo no orçamento (opcional)"
+                          onChange={(e) => setTiers((arr) => arr.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)))}
+                        />
+                        <IconButton size="sm" name="trash" label="Remover" tone="danger" onClick={() => setTiers((arr) => arr.filter((_, j) => j !== i))} />
+                      </div>
+                      {q > 0 && pu > 0 && (
+                        <p className={cn("mt-1 pl-1 font-mono text-[10.5px]", prejuizo ? "font-semibold text-red-600" : "text-ink-400")}>
+                          {prejuizo
+                            ? `⚠ abaixo do custo de ${formatMoney(custoUn)}/un — venda no prejuízo`
+                            : `${q.toLocaleString("pt-BR")} un × ${formatMoney(pu)} = ${formatMoney(q * pu)}`}
+                        </p>
+                      )}
+                    </div>
+                  );
+                })}
+                <Button size="xs" variant="outline" icon="plus" onClick={() => setTiers((arr) => [...arr, { minQuantity: "", unitPrice: "", label: "" }])}>
+                  Faixa de quantidade
                 </Button>
               </div>
             </section>

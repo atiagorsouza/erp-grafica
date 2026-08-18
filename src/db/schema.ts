@@ -567,6 +567,35 @@ export const productMaterials = pgTable("product_materials", {
 });
 
 /* ------------------------------------------------------------------ */
+/*  FAIXAS DE PREÇO POR QUANTIDADE (v3.34.0)                          */
+/*                                                                     */
+/*  "vendo mínimo 50 und, depois 100 und e assim vai" — etiqueta,      */
+/*  adesivo e brinde não são vendidos por unidade solta: o cliente     */
+/*  compra lote, e quanto maior o lote menor o preço unitário.         */
+/*                                                                     */
+/*  Até aqui o produto tinha UM preço só. Vender 50 e 500 pelo mesmo   */
+/*  unitário ou perde a venda grande, ou entrega a pequena no prejuízo */
+/*  — o setup (calibrar, carregar ribbon, testar) é o mesmo nas duas.  */
+/* ------------------------------------------------------------------ */
+export const productPriceTiers = pgTable("product_price_tiers", {
+  id: serial("id").primaryKey(),
+  productId: integer("product_id")
+    .notNull()
+    .references(() => products.id, { onDelete: "cascade" }),
+  /** quantidade mínima que ativa a faixa (50, 100, 250...) */
+  minQuantity: numeric("min_quantity", { precision: 12, scale: 3 }).notNull(),
+  /** preço UNITÁRIO praticado a partir dessa quantidade */
+  unitPrice: numeric("unit_price", { precision: 12, scale: 4 }).notNull(),
+  /** rótulo opcional mostrado no orçamento: "a partir de 100 un" */
+  label: text("label"),
+  createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+}, (table) => [
+  /* Duas faixas com a mesma quantidade mínima tornam o preço
+     indeterminado — qual das duas o motor escolhe? */
+  uniqueIndex("product_price_tiers_qty_idx").on(table.productId, table.minQuantity),
+]);
+
+/* ------------------------------------------------------------------ */
 /*  QUOTES / ORÇAMENTOS                                               */
 /* ------------------------------------------------------------------ */
 export const quoteStatusEnum = pgEnum("quote_status", [

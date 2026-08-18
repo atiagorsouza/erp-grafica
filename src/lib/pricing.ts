@@ -674,6 +674,99 @@ export function computeBatchProduct(input: BatchCalcInput): BatchCalcResult {
   };
 }
 
+/* ------------------------------------------------------------------ */
+/*  FAIXAS DE PREÇO POR QUANTIDADE                                     */
+/* ------------------------------------------------------------------ */
+
+/** Normaliza para 2 casas sem herdar erro binário da multiplicação. */
+function money2(v: number): number {
+  return Number.isFinite(v) ? Math.round(v * 100) / 100 : 0;
+}
+
+export interface PriceTierLike {
+  minQuantity: string | number;
+  unitPrice: string | number;
+  label?: string | null;
+}
+
+export interface TierResolution {
+  /** preço unitário da faixa aplicada */
+  unitPrice: number;
+  /** total da venda: unitário × quantidade */
+  total: number;
+  /** faixa escolhida, ou null quando caiu no preço padrão do produto */
+  tier: PriceTierLike | null;
+  /** quantidade mínima da menor faixa — abaixo disso a venda é recusada */
+  minQuantity: number;
+  /** true quando a quantidade pedida está abaixo do mínimo vendável */
+  belowMinimum: boolean;
+}
+
+/**
+ * Escolhe a faixa de preço para a quantidade pedida.
+ *
+ * Regra: vale a MAIOR faixa cujo mínimo é menor ou igual à quantidade.
+ * Com faixas 50/100/250, pedir 180 aplica a de 100 — não a de 250, que
+ * o cliente ainda não alcançou.
+ *
+ * `belowMinimum` sinaliza pedido abaixo da menor faixa (ex.: 20 un num
+ * produto que só sai a partir de 50). Quem chama decide se recusa ou
+ * cobra o mínimo; o motor não inventa preço nesse caso, porque vender
+ * 20 etiquetas ao unitário de 1.000 é prejuízo garantido.
+ *
+ * Sem faixas cadastradas devolve o `fallbackUnitPrice` — todo produto
+ * que já existia continua funcionando igual.
+ */
+export function resolvePriceTier(
+  tiers: PriceTierLike[],
+  quantity: number,
+  fallbackUnitPrice: number
+): TierResolution {
+  const qty = Math.max(num(quantity, 0), 0);
+  const sorted = [...tiers]
+    .filter((t) => num(t.minQuantity, 0) > 0)
+    .sort((a, b) => num(a.minQuantity) - num(b.minQuantity));
+
+  if (sorted.length === 0) {
+    return {
+      unitPrice: fallbackUnitPrice,
+      total: money2(fallbackUnitPrice * qty),
+      tier: null,
+      minQuantity: 0,
+      belowMinimum: false,
+    };
+  }
+
+  const minQuantity = num(sorted[0].minQuantity);
+  /* `reduce` em vez de `findLast`: a lista já está ordenada, então o
+     último que couber é o correto, e evitamos depender de lib nova. */
+  const applicable = sorted.reduce<PriceTierLike | null>(
+    (acc, t) => (qty >= num(t.minQuantity) ? t : acc),
+    null
+  );
+
+  if (!applicable) {
+    /* Abaixo do mínimo: devolvemos o preço da menor faixa para a tela
+       ter o que mostrar, mas com a flag ligada. */
+    return {
+      unitPrice: num(sorted[0].unitPrice),
+      total: money2(num(sorted[0].unitPrice) * qty),
+      tier: sorted[0],
+      minQuantity,
+      belowMinimum: true,
+    };
+  }
+
+  const unitPrice = num(applicable.unitPrice);
+  return {
+    unitPrice,
+    total: money2(unitPrice * qty),
+    tier: applicable,
+    minQuantity,
+    belowMinimum: false,
+  };
+}
+
 export function formatMoney(v: number): string {
   return new Intl.NumberFormat("pt-BR", {
     style: "currency",
