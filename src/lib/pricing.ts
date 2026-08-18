@@ -683,6 +683,53 @@ function money2(v: number): number {
   return Number.isFinite(v) ? Math.round(v * 100) / 100 : 0;
 }
 
+/* ------------------------------------------------------------------ */
+/*  TÉRMICA — rendimento do ribbon por formato                         */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Quantas etiquetas um ribbon imprime, dada a geometria do rolo.
+ *
+ * O ribbon avança o COMPRIMENTO da etiqueta mais o gap entre elas; a
+ * largura não importa (o ribbon é mais largo que a etiqueta). Rolos com
+ * várias colunas imprimem N etiquetas no mesmo avanço, multiplicando o
+ * rendimento.
+ *
+ *   76 m, etiqueta 100×30 (avanço 32 mm), 3 colunas → 7.125 etiquetas
+ *   76 m, etiqueta 100×150 (avanço 152 mm), 1 coluna →   500 etiquetas
+ *
+ * 14× de diferença: por isso o rendimento não pode morar na categoria.
+ */
+export function ribbonLabelYield(
+  ribbonMeters: number,
+  feedMm: number,
+  columns = 1
+): number {
+  const mm = num(ribbonMeters, 0) * 1000;
+  const feed = num(feedMm, 0);
+  const cols = Math.max(Math.floor(num(columns, 1)), 1);
+  if (mm <= 0 || feed <= 0) return 0;
+  return Math.floor((mm / feed) * cols);
+}
+
+/**
+ * Custo de ribbon por etiqueta.
+ *
+ * Devolve 0 quando falta geometria — o motor então cai no
+ * comportamento antigo (consumível da categoria escalado por
+ * `areaFactor`), preservando o cadastro legado.
+ */
+export function ribbonCostPerLabel(input: {
+  ribbonCost: number;
+  ribbonMeters: number;
+  feedMm: number;
+  columns?: number;
+}): number {
+  const yieldLabels = ribbonLabelYield(input.ribbonMeters, input.feedMm, input.columns);
+  if (yieldLabels <= 0) return 0;
+  return num(input.ribbonCost, 0) / yieldLabels;
+}
+
 export interface PriceTierLike {
   minQuantity: string | number;
   unitPrice: string | number;

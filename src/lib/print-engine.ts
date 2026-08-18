@@ -66,6 +66,9 @@ const formatSchema = z.object({
   inkCoverage: finite.min(0).max(1).optional().default(0.05),
   printCostOverride: finite.min(0).max(999999999).optional().default(0),
   isPhoto: z.boolean().optional().default(false),
+  /* térmica: avanço por linha (altura + gap) e colunas do rolo (v3.36.0) */
+  feedMm: finite.min(0).max(100000).optional().default(0),
+  columns: z.coerce.number().int().min(1).max(50).optional().default(1),
 });
 
 function slugify(s: string) {
@@ -219,6 +222,8 @@ export async function savePrintFormat(raw: unknown, id?: number) {
     inkCoverage: dec(d.inkCoverage, 4),
     printCostOverride: dec(d.printCostOverride, 4),
     isPhoto: d.isPhoto,
+    feedMm: dec(d.feedMm, 2),
+    columns: d.columns,
   };
   if (id) {
     const [row] = await db.update(printFormats).set(data).where(eq(printFormats.id, id)).returning();

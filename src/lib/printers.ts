@@ -212,6 +212,9 @@ export const formatSchema = z.object({
   inkCoverage: z.coerce.number().finite().min(0).max(1).default(0.05),
   printCostOverride: money4.default(0),
   isPhoto: z.coerce.boolean().default(false),
+  /* térmica: avanço por linha e colunas do rolo (v3.36.0) */
+  feedMm: z.coerce.number().finite().min(0).max(100000).default(0),
+  columns: z.coerce.number().int().min(1).max(50).default(1),
 });
 
 export async function createFormat(raw: unknown) {
@@ -225,6 +228,7 @@ export async function createFormat(raw: unknown) {
     areaFactor: String(input.areaFactor),
     inkCoverage: String(input.inkCoverage),
     printCostOverride: String(input.printCostOverride),
+    feedMm: String(input.feedMm),
   } as never).returning();
   return { ok: true as const, row };
 }
@@ -234,7 +238,7 @@ export async function updateFormat(id: number, raw: unknown) {
   if (!parsed.success) return zodErr(parsed.error);
   const input = parsed.data;
   const patch: Record<string, unknown> = { ...input };
-  for (const k of ["widthMm", "heightMm", "areaFactor", "inkCoverage", "printCostOverride"] as const) {
+  for (const k of ["widthMm", "heightMm", "areaFactor", "inkCoverage", "printCostOverride", "feedMm"] as const) {
     if (input[k] !== undefined) patch[k] = String(input[k]);
   }
   const [row] = await db.update(printFormats).set(patch as never).where(eq(printFormats.id, id)).returning();

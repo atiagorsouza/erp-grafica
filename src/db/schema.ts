@@ -275,6 +275,22 @@ export const printFormats = pgTable("print_formats", {
   /** custo comercial interno da impressão por folha; 0 usa cálculo técnico de consumíveis */
   printCostOverride: numeric("print_cost_override", { precision: 12, scale: 4 }).default("0"),
   isPhoto: boolean("is_photo").default(false),
+  /* --------------------------------------------------------------
+   * TÉRMICA — geometria do rolo (v3.36.0)
+   *
+   * Etiqueta não tem rendimento fixo: o ribbon avança o COMPRIMENTO
+   * da etiqueta mais o gap, e o rolo pode ter várias colunas lado a
+   * lado. Uma 100x30 em 3 colunas rende 7.125 etiquetas por ribbon
+   * de 76 m; uma 100x150 em coluna única rende 500 — 14× de
+   * diferença. Sem esses campos o custo por etiqueta era um chute
+   * herdado da categoria.
+   *
+   * `feedMm` = avanço por linha (altura da etiqueta + gap).
+   * `columns` = etiquetas lado a lado na largura do rolo.
+   * Zerados, o motor cai no comportamento antigo (areaFactor).
+   * ------------------------------------------------------------- */
+  feedMm: numeric("feed_mm", { precision: 8, scale: 2 }).default("0"),
+  columns: integer("columns").default(1),
   createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
 });
 
