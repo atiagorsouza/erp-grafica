@@ -503,7 +503,19 @@ export const products = pgTable("products", {
   shipWidth: numeric("ship_width", { precision: 10, scale: 2 }).default("0"), // cm
   shipLength: numeric("ship_length", { precision: 10, scale: 2 }).default("0"), // cm
   createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
-});
+}, (table) => [
+  /* SKU e código de barras precisam ser únicos: o PDV resolve o item
+     bipado com `find`, que devolve o PRIMEIRO resultado. Com código
+     repetido o operador vende o produto errado, com o preço errado, e
+     nada avisa — o erro só aparece no fechamento do caixa.
+     Índices parciais: os dois campos são opcionais e vazios não colidem. */
+  uniqueIndex("products_sku_unique_idx")
+    .on(table.sku)
+    .where(sql`coalesce(sku, '') <> ''`),
+  uniqueIndex("products_barcode_unique_idx")
+    .on(table.barcode)
+    .where(sql`coalesce(barcode, '') <> ''`),
+]);
 
 /* product -> finishing (N:N) */
 export const productFinishings = pgTable("product_finishings", {

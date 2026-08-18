@@ -33,6 +33,35 @@ export async function POST(req: Request) {
     return Response.json({ error: "op inválido" }, { status: 400 });
   } catch (e) {
     console.error("[products]", e);
-    return Response.json({ error: e instanceof Error ? e.message : "erro interno" }, { status: 500 });
+
+    /* Violação dos índices únicos de SKU/código de barras. Sem este
+       tratamento o catch devolvia `e.message`, que num erro de
+       constraint carrega o SQL inteiro para o navegador.
+
+       O Drizzle embrulha o erro do driver, então o nome do índice pode
+       estar na mensagem, em `cause.constraint` ou em `cause.message`. */
+    const cause = (e as { cause?: { constraint?: string; message?: string } })?.cause;
+    const raw = [
+      e instanceof Error ? e.message : "",
+      cause?.constraint || "",
+      cause?.message || "",
+    ].join(" ");
+    if (raw.includes("products_sku_unique_idx")) {
+      return Response.json(
+        { error: "Já existe um produto com este SKU.", status: 409 },
+        { status: 409 }
+      );
+    }
+    if (raw.includes("products_barcode_unique_idx")) {
+      return Response.json(
+        { error: "Já existe um produto com este código de barras.", status: 409 },
+        { status: 409 }
+      );
+    }
+
+    return Response.json(
+      { error: "Não foi possível salvar o produto. Tente novamente." },
+      { status: 500 }
+    );
   }
 }

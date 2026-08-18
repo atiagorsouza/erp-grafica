@@ -5,6 +5,41 @@ Versionamento: [SemVer](https://semver.org/lang/pt-BR/).
 
 ---
 
+## [3.26.0] — 2026-08-18
+
+Auditoria dos 6 módulos restantes — Produtos, Serviços, Tabelas de Preço,
+Impressoras, Calendário e Configurações. Com esta, **todos os módulos do
+sistema foram auditados**. Documentado em `docs/AUDIT-CATALOGO.md`.
+
+### Corrigido — SKU e código de barras podiam repetir
+
+Não havia índice único em `products.sku` nem em `products.barcode`. O PDV
+resolve o item bipado com `find`, que devolve **o primeiro** resultado:
+com código repetido, o operador vendia o produto errado, com o preço
+errado, e nada avisava — o erro só apareceria no fechamento do caixa.
+
+Índices únicos parciais (nulos e vazios não colidem, então produtos sem
+código continuam convivendo) e 409 com mensagem específica. O catch da
+rota também parou de devolver `e.message`, que num erro de constraint
+carrega o SQL para o navegador.
+
+### Corrigido — arredondamento comercial produzia dízima binária
+
+`roundCommercialPrice(1.15, 0.1)` devolvia `1.2000000000000002`. O banco
+escapava por causa do `round2` na gravação, mas o número sujo circulava
+no `unitPrice` e no detalhamento mostrado ao cliente. A conta passou a
+ser feita em centavos inteiros.
+
+Era o único achado do motor de precificação que não dependia de decisão
+comercial — os outros três seguem aguardando definição, porque mudam o
+preço de venda de todos os produtos.
+
+### Testes
+
+`e2e:smoke` foi de 140 para **150 checks**.
+
+---
+
 ## [3.25.0] — 2026-08-17
 
 Fechamento das dívidas técnicas e melhorias. Documentado em

@@ -837,6 +837,57 @@ async function main() {
 
   await sql("delete from customers where name like 'SMOKE ANIV%'");
 
+  /* 11j) Catálogo — v3.26.0
+     SKU e código de barras únicos: o PDV resolve o item bipado com
+     `find`, que devolve o primeiro. Repetido = vende o produto errado. */
+  await sql("delete from products where name like 'SMOKE PROD%'");
+  const prodPost = (data) =>
+    fetch(`${BASE_URL}/api/crud/products`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ op: "create", data }),
+    }).then(async (r) => ({ status: r.status, body: await r.json() }));
+
+  const base = { calculationMode: "unit", margin: 0.4, active: true };
+  const p1 = await prodPost({ ...base, name: "SMOKE PROD Original", sku: `SMK-${stamp}`, barcode: `789${stamp}`.slice(0, 13) });
+  assert(p1.status === 200, "produto com SKU e código de barras é criado");
+
+  const pSku = await prodPost({ ...base, name: "SMOKE PROD SKU Repetido", sku: `SMK-${stamp}` });
+  assert(pSku.status === 409, "SKU duplicado é recusado");
+  assert(String(pSku.body.error || "").includes("SKU"), "erro de SKU duplicado é específico");
+
+  const pBar = await prodPost({ ...base, name: "SMOKE PROD Barcode Repetido", barcode: `789${stamp}`.slice(0, 13) });
+  assert(pBar.status === 409, "código de barras duplicado é recusado");
+  assert(
+    !String(pBar.body.error || "").toLowerCase().includes("insert into"),
+    "erro de produto duplicado não vaza SQL"
+  );
+
+  /* produto sem código não colide com outro sem código */
+  const sem1 = await prodPost({ ...base, name: "SMOKE PROD Sem Codigo 1" });
+  const sem2 = await prodPost({ ...base, name: "SMOKE PROD Sem Codigo 2" });
+  assert(sem1.status === 200 && sem2.status === 200, "produtos sem SKU/código convivem");
+
+  await sql("delete from products where name like 'SMOKE PROD%'");
+
+  /* arredondamento comercial sem lixo de ponto flutuante */
+  const roundStep = (v, step) => {
+    const sc = Math.max(1, Math.round(step * 100));
+    const vc = Math.round(v * 100);
+    return (Math.ceil(vc / sc) * sc) / 100;
+  };
+  assert(roundStep(1.15, 0.1) === 1.2, "arredondamento comercial não produz dízima binária");
+  assert(roundStep(10.51, 0.5) === 11, "arredondamento comercial sobe para o próximo degrau");
+  assert(roundStep(10.5, 0.5) === 10.5, "valor já no degrau não é arredondado para cima");
+
+  /* calendário recusa data inexistente */
+  const dataRuim = await fetch(`${BASE_URL}/api/crud/commemorative-dates`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ op: "create", data: { title: "SMOKE Data Invalida", month: 2, day: 31 } }),
+  }).then((r) => r.status);
+  assert(dataRuim === 422, "calendário recusa 31 de fevereiro");
+
   /* importador de PDF: rejeita arquivo que não é ficha do legado */
   const bogus = new FormData();
   bogus.append("file", new Blob(["nao sou um pdf"], { type: "application/pdf" }), "x.pdf");

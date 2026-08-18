@@ -429,10 +429,25 @@ export function computePrintSheetCost({
   return raw * (1 + num(category.wasteFactor)) * num(printer?.costMultiplier, 1);
 }
 
-/** Arredonda preço comercial para cima no degrau informado. */
+/**
+ * Arredonda preço comercial para cima no degrau informado.
+ *
+ * `Math.ceil(v / step) * step` reintroduz erro binário na multiplicação
+ * final — `roundCommercialPrice(1.15, 0.1)` devolvia `1.2000000000000002`.
+ * O valor sujo circulava no `unitPrice` e no detalhamento mostrado ao
+ * cliente (o banco escapava por causa do `round2` na gravação).
+ *
+ * A conta passa a ser feita em centavos inteiros, e o resultado é
+ * normalizado para 2 casas — preço não tem fração de centavo.
+ */
 export function roundCommercialPrice(value: number, step = 0.01): number {
   const safeStep = Math.max(num(step, 0.01), 0.01);
-  return Math.ceil((value - 1e-9) / safeStep) * safeStep;
+  if (!Number.isFinite(value) || value <= 0) return 0;
+
+  const stepCents = Math.max(1, Math.round(safeStep * 100));
+  const valueCents = Math.round(value * 100);
+  const rounded = Math.ceil(valueCents / stepCents) * stepCents;
+  return rounded / 100;
 }
 
 /**
