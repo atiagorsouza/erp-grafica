@@ -5,6 +5,26 @@ Versionamento: [SemVer](https://semver.org/lang/pt-BR/).
 
 ---
 
+## [3.29.1] — 2026-08-18
+
+### Auditoria — Impressoras e custo por página: sem achados
+
+Sétimo e último módulo da varredura. Documentado em
+`docs/AUDIT-IMPRESSORAS.md`.
+
+Todas as validações de entrada recusam corretamente rendimento zero ou
+negativo, multiplicador zero ou negativo, fator de área zero e exclusão
+de categoria em uso. O custo por página foi conferido com um parque real
+montado para o teste: colorido R$ 0,12276/pg, P&B R$ 0,09056/pg, com a
+separação correta entre consumível colorante e desgaste mecânico.
+
+Confirmado que o achado pendente de `AUDIT-CATALOGO.md` (consumível com
+rendimento zero) **não é alcançável pela API** — o schema barra antes,
+e a proteção no cálculo é defesa de segunda camada para importação
+direta no banco.
+
+---
+
 ## [3.29.0] — 2026-08-18
 
 Auditoria completa do PDV e do caixa. Documentado em
