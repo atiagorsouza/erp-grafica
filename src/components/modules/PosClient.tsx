@@ -27,6 +27,9 @@ import {
 } from "@/lib/money";
 import { isWhatsAppBlocked, whatsappNumber } from "@/lib/validators";
 
+import type { CompanyIdentity } from "@/lib/company";
+export type PosCompany = CompanyIdentity;
+
 /* ==================================================================
    TIPOS DA APLICAÇÃO
    ================================================================== */
@@ -72,27 +75,6 @@ export type PosCustomer = {
   whatsappOptOut?: boolean | null;
 };
 
-export type PosCompany = {
-  name: string;
-  legalName: string;
-  document: string;
-  email: string;
-  phone: string;
-  phone2: string;
-  whatsapp: string;
-  address: string;
-  street: string;
-  number: string;
-  district: string;
-  city: string;
-  state: string;
-  cep: string;
-  website: string;
-  pixKey: string;
-  receiptFooter?: string;
-  /* IE do emitente — obrigatória no cupom de quem tem inscrição (v3.23.0) */
-  stateRegistration?: string;
-};
 
 export type PdvConfig = {
   sellerDefault: string;

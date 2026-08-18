@@ -15,6 +15,7 @@ import {
 import { desc, asc, isNull } from "drizzle-orm";
 import { toLocalISODate, lastDays } from "@/lib/period";
 import { DashboardClient } from "@/components/modules/DashboardClient";
+import { upcomingBirthdays } from "@/lib/queries";
 
 export const dynamic = "force-dynamic";
 
@@ -126,6 +127,7 @@ export default async function DashboardPage() {
         min: Number(m.minStock || 0),
         unit: m.unit || "un",
       }))}
+      birthdays={upcomingBirthdays(customerRows)}
       recentQuotes={quoteRows.slice(0, 6).map((q) => ({
         id: q.id,
         number: q.number,

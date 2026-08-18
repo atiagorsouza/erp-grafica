@@ -798,6 +798,45 @@ async function main() {
   await sql("delete from materials where id = $1", [matId]);
   await sql("delete from products where sku = 'SMOKE-STK'");
 
+  /* 11i) Aniversariantes no painel — v3.25.0
+     A data de nascimento existia desde a v3.21.0 e não gerava ação. */
+  await sql("delete from customers where name like 'SMOKE ANIV%'");
+
+  /* usa o "hoje" da loja (America/Sao_Paulo), não o relógio UTC do
+     container: perto da meia-noite os dois divergem e o teste
+     começaria a falhar sozinho de madrugada. */
+  const hojeLoja = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Sao_Paulo", year: "numeric", month: "2-digit", day: "2-digit",
+  }).format(new Date());
+  const [aL, mL, dL] = hojeLoja.split("-").map(Number);
+  const mmdd = (offset) => {
+    const d = new Date(Date.UTC(aL, mL - 1, dL + offset));
+    return `${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
+  };
+
+  await sql(
+    `insert into customers (type, name, document, birth_date, whatsapp, whatsapp_opt_out, status) values
+       ('pf','SMOKE ANIV Hoje',    $1, $2::date, '21999990001', false, 'ativo'),
+       ('pf','SMOKE ANIV OptOut',  $3, $4::date, '21999990002', true,  'ativo'),
+       ('pf','SMOKE ANIV Inativo', $5, $6::date, '21999990003', false, 'inativo'),
+       ('pf','SMOKE ANIV Longe',   $7, $8::date, '21999990004', false, 'ativo')`,
+    [
+      makeCpf(stamp + 101), `1985-${mmdd(0)}`,
+      makeCpf(stamp + 102), `1990-${mmdd(0)}`,
+      makeCpf(stamp + 103), `1991-${mmdd(0)}`,
+      makeCpf(stamp + 104), `1988-${mmdd(20)}`,
+    ]
+  );
+
+  const homeHtml = await fetch(`${BASE_URL}/`).then((r) => r.text());
+  assert(homeHtml.includes("Aniversariantes da semana"), "painel mostra aniversariantes da semana");
+  assert(homeHtml.includes("SMOKE ANIV Hoje"), "aniversariante de hoje aparece no painel");
+  assert(!homeHtml.includes("SMOKE ANIV Inativo"), "cliente inativo fica fora dos aniversariantes");
+  assert(!homeHtml.includes("SMOKE ANIV Longe"), "aniversário fora da janela de 7 dias não aparece");
+  assert(homeHtml.includes("sem contato para envio"), "aniversariante com opt-out é marcado sem contato");
+
+  await sql("delete from customers where name like 'SMOKE ANIV%'");
+
   /* importador de PDF: rejeita arquivo que não é ficha do legado */
   const bogus = new FormData();
   bogus.append("file", new Blob(["nao sou um pdf"], { type: "application/pdf" }), "x.pdf");

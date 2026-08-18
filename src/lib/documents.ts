@@ -3,6 +3,7 @@ import "server-only";
 import { db } from "@/db";
 import { settings } from "@/db/schema";
 import { eq, sql } from "drizzle-orm";
+import { todayISO } from "@/lib/period";
 
 export type DocumentType = "quote" | "order" | "sale" | "purchase";
 
@@ -33,7 +34,11 @@ export async function nextDocumentNumber(type: DocumentType): Promise<string> {
     .toUpperCase()
     .replace(/[^A-Z0-9]/g, "")
     .slice(0, 10) || DEFAULT_PREFIX[type];
-  const year = mode === "annual" ? new Date().getFullYear() : 0;
+  /* Ano do fuso da operação: o servidor roda em UTC e, entre 21h e
+     meia-noite de 31/12 no Brasil, `new Date()` já devolve o ano
+     seguinte — a numeração pularia para ORC-2027-0001 com a gráfica
+     ainda em 2026. */
+  const year = mode === "annual" ? Number(todayISO().slice(0, 4)) : 0;
 
   const result = await db.execute(sql`
     INSERT INTO document_counters (document_type, year, current, updated_at)

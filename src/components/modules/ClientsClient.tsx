@@ -29,6 +29,7 @@ import {
 import { Icon } from "@/components/icons";
 import { cn, initials } from "@/lib/format";
 import { formatCEP, formatCNPJ, formatCPF, formatPhone, formatStateRegistration } from "@/lib/validators";
+import { todayISO } from "@/lib/period";
 
 type Row = Record<string, any>;
 
@@ -75,8 +76,9 @@ function ageFrom(v: unknown): number | null {
 function isBirthdayToday(v: unknown): boolean {
   const m = String(v || "").match(/^\d{4}-(\d{2})-(\d{2})/);
   if (!m) return false;
-  const today = new Date();
-  return Number(m[1]) === today.getMonth() + 1 && Number(m[2]) === today.getDate();
+  /* compara com o "hoje" da loja: no navegador do usuário o fuso é o
+     dele, mas o restante do sistema raciocina em America/Sao_Paulo */
+  return `${m[1]}-${m[2]}` === todayISO().slice(5, 10);
 }
 
 const COL_LABEL: Record<string, string> = {

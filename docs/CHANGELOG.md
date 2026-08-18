@@ -5,6 +5,49 @@ Versionamento: [SemVer](https://semver.org/lang/pt-BR/).
 
 ---
 
+## [3.25.0] — 2026-08-17
+
+Fechamento das dívidas técnicas e melhorias. Documentado em
+`docs/AUDIT-MELHORIAS.md`.
+
+### Corrigido — ano errado na numeração de documentos na virada do ano
+
+`documents.ts` usava `new Date().getFullYear()`. O servidor roda em UTC:
+entre 21h e a meia-noite de 31/12 no Brasil, a numeração pularia para
+`ORC-2027-0001` com a gráfica ainda operando em 2026 — documento fiscal
+fora de sequência. Passou a usar o ano do fuso da operação. O contador e
+o formato não mudaram.
+
+Mesmo defeito corrigido no selo "Aniversário hoje" da ficha do cliente.
+
+### Adicionado — aniversariantes da semana no painel
+
+`birthDate` era coletado desde a v3.21.0 e só aparecia na ficha
+individual, onde ninguém ia procurar. Novo card no painel com os
+próximos 7 dias, "hoje" destacado.
+
+Respeita o opt-out de WhatsApp: quem recusou aparece como "sem contato
+para envio" em vez de virar alvo de campanha. Inativos e bloqueados
+ficam de fora.
+
+### Alterado — tipo da empresa unificado
+
+`PosCompany` estava declarado **três** vezes (PDV, Pedidos, Orçamentos).
+Foi o que fez a IE da v3.23.0 entrar em uma cópia só. Agora existe um
+`CompanyIdentity` em `lib/company.ts`, com alias para não quebrar
+imports. Um campo novo passa a obrigar as 3 páginas a fornecê-lo.
+
+### Removido — `PrintDocument.tsx`
+
+284 linhas que ninguém importava, e que já haviam custado uma correção
+inócua na v3.21.0. O histórico do git preserva o arquivo.
+
+### Testes
+
+`e2e:smoke` foi de 135 para **140 checks**.
+
+---
+
 ## [3.24.0] — 2026-08-17
 
 Primeira auditoria do módulo de Estoque, Compras & Produtos. 7 bugs

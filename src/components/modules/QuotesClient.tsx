@@ -27,32 +27,15 @@ import { Icon } from "@/components/icons";
 import { cn } from "@/lib/format";
 import { applyDiscount, formatBRL, round2, toNumber, toPositive } from "@/lib/money";
 
+import type { CompanyIdentity } from "@/lib/company";
+export type PosCompany = CompanyIdentity;
+
 /* ==================================================================
    TIPOS
    ================================================================== */
 
 type Row = Record<string, any>;
 
-export type PosCompany = {
-  name: string;
-  legalName: string;
-  document: string;
-  email: string;
-  phone: string;
-  phone2: string;
-  whatsapp: string;
-  address: string;
-  street: string;
-  number: string;
-  district: string;
-  city: string;
-  state: string;
-  cep: string;
-  website: string;
-  pixKey: string;
-  /* IE do emitente (v3.23.0) */
-  stateRegistration?: string;
-};
 
 type Item = {
   description: string;
