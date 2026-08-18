@@ -37,6 +37,9 @@ const materialSchema = z.object({
   categoryId: z.coerce.number().int().positive().nullable().optional(),
   unit: z.string().trim().min(1).max(40).default("unidade"),
   unitCost: finite.min(0).max(999999999).default(0),
+  packName: z.string().trim().max(120).nullable().optional(),
+  packQuantity: finite.min(0).max(999999999).default(0),
+  packCost: finite.min(0).max(999999999).default(0),
   supplier: z.string().trim().max(180).nullable().optional(),
   stock: finite.min(-999999999).max(999999999).default(0),
   minStock: finite.min(0).max(999999999).default(0),
@@ -115,11 +118,39 @@ function parse<T>(schema: z.ZodType<T>, raw: unknown): { ok: true; data: T } | S
 }
 const nullable = (v: unknown) => { const s = String(v ?? "").trim(); return s ? s : null; };
 
+/**
+ * Custo por unidade base derivado da embalagem de compra.
+ *
+ * Resma de 500 folhas por R$ 28,00 → R$ 0,056/folha. Pacote de 100
+ * fotos 10x15 por R$ 42,00 → R$ 0,42/foto. A divisão acontece aqui e
+ * não na cabeça do usuário, então reajuste de preço é só trocar o
+ * `packCost`.
+ *
+ * Sem embalagem informada devolve `null` e quem chama mantém o
+ * `unitCost` digitado — o cadastro antigo continua funcionando.
+ *
+ * Guarda 6 casas na divisão porque insumos baratos (etiqueta, folha de
+ * bobina) somem no arredondamento de 4 casas: R$ 38,00 / 15.000 =
+ * 0,00253, que truncado a 4 casas ainda é 0,0025 — 1,3% de erro que se
+ * propaga por toda a precificação.
+ */
+export function derivedUnitCost(packCost: number, packQuantity: number): number | null {
+  if (!Number.isFinite(packCost) || !Number.isFinite(packQuantity)) return null;
+  if (packQuantity <= 0 || packCost <= 0) return null;
+  return Math.round((packCost / packQuantity) * 1e6) / 1e6;
+}
+
 export async function saveMaterial(raw: unknown, id?: number) {
   const parsed = parse(materialSchema, raw);
   if ("error" in parsed) return parsed;
   const d = parsed.data;
-  const data = { name: d.name, categoryId: d.categoryId || null, unit: d.unit, unitCost: toDecimalString(d.unitCost, 4), supplier: nullable(d.supplier), stock: toDecimalString(d.stock, 3), minStock: toDecimalString(d.minStock, 3), notes: nullable(d.notes) };
+  /* Embalagem informada MANDA no custo unitário: se as duas coisas
+     vierem preenchidas, a divisão vence o número digitado — senão o
+     usuário edita a resma, vê R$ 0,056 na tela e o produto continua
+     custeado pelo valor velho. */
+  const derived = derivedUnitCost(d.packCost, d.packQuantity);
+  const effectiveUnitCost = derived ?? d.unitCost;
+  const data = { name: d.name, categoryId: d.categoryId || null, unit: d.unit, unitCost: toDecimalString(effectiveUnitCost, 4), packName: nullable(d.packName), packQuantity: toDecimalString(d.packQuantity, 3), packCost: toDecimalString(d.packCost, 4), supplier: nullable(d.supplier), stock: toDecimalString(d.stock, 3), minStock: toDecimalString(d.minStock, 3), notes: nullable(d.notes) };
   if (id) {
     const [row] = await db.update(materials).set(data).where(eq(materials.id, id)).returning();
     if (!row) return { error: "Material não encontrado", status: 404 } satisfies StockError;
@@ -404,7 +435,27 @@ async function receivePurchaseLocked(
       const quantity = toNumber(item.quantity, 0);
       const unitCost = toNumber(item.unitCost, 0);
       if (!item.materialId || quantity <= 0) continue;
-      await tx.update(materials).set({ stock: sql`${materials.stock} + ${quantity}`, unitCost: toDecimalString(unitCost, 4) }).where(eq(materials.id, item.materialId));
+
+      /* ------------------------------------------------------------
+       * O recebimento grava o custo unitário praticado na compra. Se o
+       * material é comprado em embalagem fechada, gravar só o unitário
+       * deixava a ficha incoerente: a tela seguia mostrando "Resma 500
+       * fls · R$ 28,00" enquanto o custo por folha já era outro, e a
+       * próxima edição do material RECALCULAVA a partir da resma velha,
+       * desfazendo o reajuste que a compra tinha acabado de aplicar.
+       *
+       * Então reprecificamos a embalagem junto: mesma quantidade de
+       * unidades, novo preço de pacote.
+       * ----------------------------------------------------------- */
+      const [mat] = await tx.select().from(materials).where(eq(materials.id, item.materialId)).limit(1).for("update");
+      const packQty = toNumber(mat?.packQuantity, 0);
+      const patch: Record<string, unknown> = {
+        stock: sql`${materials.stock} + ${quantity}`,
+        unitCost: toDecimalString(unitCost, 4),
+      };
+      if (packQty > 0) patch.packCost = toDecimalString(unitCost * packQty, 4);
+
+      await tx.update(materials).set(patch).where(eq(materials.id, item.materialId));
       await tx.insert(stockMovements).values({ kind: "entrada", targetType: "material", materialId: item.materialId, quantity: toDecimalString(quantity, 3), unitCost: toDecimalString(unitCost, 4), reason: "compra", reference: purchase.number, notes: "Recebimento automático de compra.", automatic: true });
     }
     const [updated] = await tx.update(purchases).set({ status: "recebido", receivedAt: new Date() }).where(eq(purchases.id, purchaseId)).returning();

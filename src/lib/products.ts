@@ -188,6 +188,7 @@ async function buildCalculation(data: ProductPayload) {
     category,
     consumables: categoryConsumables,
     printer,
+    format,
     colorMode: data.colorMode as ColorMode,
     pagesPerUnit: data.pagesPerUnit,
     copies: data.copies,

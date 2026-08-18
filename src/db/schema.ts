@@ -289,6 +289,26 @@ export const materials = pgTable("materials", {
   }),
   unit: text("unit").default("unidade"), // folha, metro, kg, unidade
   unitCost: numeric("unit_cost", { precision: 12, scale: 4 }).default("0"),
+  /* --------------------------------------------------------------
+   * EMBALAGEM DE COMPRA (v3.31.0)
+   *
+   * O insumo é COMPRADO em embalagem fechada (resma de 500 folhas,
+   * pacote de 100 fotos, bobina de 300 m) mas é CONSUMIDO na unidade
+   * (folha, foto, metro). Antes disso o usuário tinha que dividir na
+   * calculadora e digitar o custo unitário à mão — e qualquer reajuste
+   * de preço exigia refazer a conta, com erro de arredondamento
+   * entrando direto na precificação de todos os produtos.
+   *
+   * Agora `unitCost` é DERIVADO: packCost / packQuantity. Quando a
+   * embalagem não é informada (packQuantity = 0) o campo continua
+   * sendo digitado direto, então todo o cadastro legado segue válido.
+   * ------------------------------------------------------------- */
+  /** rótulo da embalagem: "Resma 500 folhas", "Pacote 100 un" */
+  packName: text("pack_name"),
+  /** quantas unidades base vêm na embalagem — 0/null = não usa embalagem */
+  packQuantity: numeric("pack_quantity", { precision: 12, scale: 3 }).default("0"),
+  /** preço pago na embalagem fechada */
+  packCost: numeric("pack_cost", { precision: 12, scale: 4 }).default("0"),
   supplier: text("supplier"),
   stock: numeric("stock", { precision: 12, scale: 3 }).default("0"),
   minStock: numeric("min_stock", { precision: 12, scale: 3 }).default("0"),

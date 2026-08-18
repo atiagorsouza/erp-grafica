@@ -80,6 +80,9 @@ export function StockClient({ materials, suppliers, purchases, materialCats, mov
         categoryId: form.categoryId || null,
         unit: form.unit || "unidade",
         unitCost: form.unitCost || "0",
+        packName: form.packName || null,
+        packQuantity: form.packQuantity || "0",
+        packCost: form.packCost || "0",
         supplier: form.supplier || null,
         stock: form.stock ?? "0",
         minStock: form.minStock ?? "0",
@@ -181,6 +184,12 @@ export function StockClient({ materials, suppliers, purchases, materialCats, mov
 
   const buyTotal = buyItems.reduce((s, i) => s + Number(i.quantity || 0) * Number(i.unitCost || 0), 0);
 
+  /* Prévia do custo por unidade enquanto o usuário digita a embalagem:
+     ver "R$ 0,056 por folha" aparecer sozinho é o que ensina a regra. */
+  const packQty = Number(form.packQuantity || 0);
+  const packCost = Number(form.packCost || 0);
+  const packUnitCost = packQty > 0 && packCost > 0 ? packCost / packQty : null;
+
   return (
     <div>
       <PageHeader
@@ -253,7 +262,14 @@ export function StockClient({ materials, suppliers, purchases, materialCats, mov
                         </span>
                       ) : "—"}
                     </Td>
-                    <Td right mono>{formatMoney(Number(m.unitCost || 0))}<span className="text-[10px] text-ink-400">/{String(m.unit || "un")}</span></Td>
+                    <Td right mono>
+                      {formatMoney(Number(m.unitCost || 0))}<span className="text-[10px] text-ink-400">/{String(m.unit || "un")}</span>
+                      {Number(m.packQuantity || 0) > 0 && (
+                        <p className="text-[9.5px] text-ink-400">
+                          {m.packName ? String(m.packName) : `${Number(m.packQuantity).toLocaleString("pt-BR")} ${String(m.unit || "un")}`} · {formatMoney(Number(m.packCost || 0))}
+                        </p>
+                      )}
+                    </Td>
                     <Td className="min-w-[150px]">
                       <InkBar percent={pct} color={low ? "#dc2626" : pct < 60 ? "#d97706" : "#10b981"} />
                       {low && <p className="mt-1 font-mono text-[9.5px] font-semibold tracking-wide text-red-600 uppercase">repor agora</p>}
@@ -413,7 +429,41 @@ export function StockClient({ materials, suppliers, purchases, materialCats, mov
               {["folha", "unidade", "metro", "kg", "rolo", "pacote", "caixa"].map((u) => <option key={u}>{u}</option>)}
             </Select>
           </Field>
-          <Field label="Custo unitário (R$)"><Input mono value={form.unitCost || ""} onChange={set("unitCost")} /></Field>
+          {/* ── EMBALAGEM DE COMPRA ──
+              Você compra a resma, o sistema calcula a folha. */}
+          <div className="sm:col-span-2 rounded-xl border border-cyan-200 bg-cyan-50/60 p-3">
+            <p className="mb-3 flex items-center gap-1.5 font-mono text-[10.5px] font-semibold tracking-wide text-cyan-800 uppercase">
+              <Icon name="boxes" size={12} />
+              Como você compra este insumo
+            </p>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <Field label="Embalagem" hint="Rótulo do que você compra">
+                <Input value={form.packName || ""} onChange={set("packName")} placeholder="Resma 500 folhas" />
+              </Field>
+              <Field label={`Rende quantos "${form.unit || "unidade"}"`} hint="Unidades por embalagem">
+                <Input mono value={form.packQuantity || ""} onChange={set("packQuantity")} placeholder="500" />
+              </Field>
+              <Field label="Preço da embalagem (R$)" hint="O que você paga fechado">
+                <Input mono value={form.packCost || ""} onChange={set("packCost")} placeholder="28,00" />
+              </Field>
+            </div>
+            {packUnitCost !== null ? (
+              <p className="mt-3 rounded-lg bg-white px-3 py-2 font-mono text-[12px] text-ink-700">
+                <span className="text-ink-400">{formatMoney(packCost)} ÷ {packQty.toLocaleString("pt-BR")} = </span>
+                <strong className="text-cyan-700">{formatMoney(packUnitCost)}</strong>
+                <span className="text-ink-500"> por {String(form.unit || "unidade")}</span>
+                <span className="ml-1 text-ink-400">— é este valor que entra no custo dos produtos.</span>
+              </p>
+            ) : (
+              <p className="mt-3 font-mono text-[10.5px] text-ink-400">
+                Deixe em branco para digitar o custo unitário direto no campo abaixo.
+              </p>
+            )}
+          </div>
+
+          <Field label="Custo unitário (R$)" hint={packUnitCost !== null ? "Calculado pela embalagem acima" : `Por ${form.unit || "unidade"}`}>
+            <Input mono disabled={packUnitCost !== null} value={packUnitCost !== null ? packUnitCost.toFixed(6).replace(/0+$/, "").replace(/\.$/, "") : (form.unitCost || "")} onChange={set("unitCost")} />
+          </Field>
           <Field label="Fornecedor (texto)"><Input value={form.supplier || ""} onChange={set("supplier")} /></Field>
           <Field label="Estoque atual"><Input mono value={form.stock || "0"} onChange={set("stock")} /></Field>
           <Field label="Estoque mínimo"><Input mono value={form.minStock || "0"} onChange={set("minStock")} /></Field>

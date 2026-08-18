@@ -151,6 +151,7 @@ export function ProductsClient({
       category: printerCat,
       consumables,
       printer,
+      format,
       colorMode,
       pagesPerUnit: num(form.pagesPerUnit, 1),
       copies: num(form.copies, 1),

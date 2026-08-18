@@ -146,6 +146,19 @@ export interface ProductCalcInput {
   category?: CategoryLike | null;
   consumables: ConsumableLike[];
   printer?: PrinterLike | null;
+  /* --------------------------------------------------------------
+   * FORMATO NO MODO UNIT (v3.31.0)
+   *
+   * Até a v3.30.0 o modo unit ignorava o formato: chamava
+   * `printerCostPerPage`, que não conhece cobertura nem área. Na
+   * prática o select "Formato" da tela de produto era decorativo —
+   * uma foto 10x15 com 100% de cobertura era custeada com a mesma
+   * tinta de um texto 5%, e o A3 custava igual ao A4.
+   *
+   * Agora unit e batch usam o MESMO motor (`computePrintSheetCost`),
+   * então cobertura, área e override valem nos dois modos.
+   * ------------------------------------------------------------- */
+  format?: PrintFormatLike | null;
   colorMode: ColorMode;
   pagesPerUnit: number; // páginas/impressões por unidade de produto
   copies: number; // vias/copias por unidade
@@ -190,18 +203,24 @@ export function computeProduct(input: ProductCalcInput): ProductCalcResult {
   // 1) IMPRESSÃO -----------------------------------------------------
   let printing = 0;
   if (input.printer && input.category) {
-    const perPage = printerCostPerPage(
-      input.printer,
-      input.category,
-      input.consumables,
-      input.colorMode
-    );
+    /* Mesmo motor do modo batch: respeita cobertura do formato, fator
+       de área e `printCostOverride`. `printSides` fica em 1 porque no
+       modo unit as faces já são contadas em `pagesPerUnit`. */
+    const perPage = computePrintSheetCost({
+      printer: input.printer,
+      category: input.category,
+      consumables: input.consumables,
+      format: input.format,
+      colorMode: input.colorMode,
+      printSides: 1,
+    });
     printing = perPage * num(input.pagesPerUnit) * num(input.copies);
+    const fmt = input.format?.name ? ` · ${input.format.name}` : "";
     lines.push({
       label: "Impressão",
       detail: `${num(input.copies)} via(s) × ${num(input.pagesPerUnit)} pg × ${formatMoney(
         perPage
-      )}/pg (${input.colorMode === "color" ? "colorido" : "P&B"})`,
+      )}/pg (${input.colorMode === "color" ? "colorido" : "P&B"}${fmt})`,
       amount: printing,
     });
   } else if (input.category) {
