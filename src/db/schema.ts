@@ -507,6 +507,8 @@ export const finishingItems = pgTable("finishing_items", {
   unit: text("unit").default("unidade"),
   unitCost: numeric("unit_cost", { precision: 12, scale: 4 }).default("0"),
   description: text("description"),
+  /** ver comentário em `services.archivedAt` (v3.46.1) */
+  archivedAt: timestamp("archived_at", { mode: "date" }),
   createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
 });
 
@@ -527,6 +529,12 @@ export const services = pgTable("services", {
   becomesProduct: boolean("becomes_product").default(false),
   partner: text("partner"), // empresa terceirizada
   description: text("description"),
+  /* Arquivado = fora das listas de seleção, mas preservado no histórico.
+     Até a v3.46.0 o estado era marcado escrevendo "ARQUIVADO:" dentro de
+     `description` — e nada filtrava por isso, então o serviço arquivado
+     continuava aparecendo para uso. Estado em campo de texto livre também
+     quebrava se alguém escrevesse a palavra numa observação legítima. */
+  archivedAt: timestamp("archived_at", { mode: "date" }),
   createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
 });
 

@@ -40,11 +40,28 @@ const rows = [
   ["dtf_uv", "DTF UV A3 28x40", "36.00", "79.20", "unidade", "28", "40", "1", "0", "0"],
   ["dtf_uv", "DTF UV Metro 28x100", "67.50", "148.50", "unidade", "28", "100", "1", "0", "0"],
 
-  /* Lona/Vinil: preço por m² com PISO EM REAIS por peça. O piso de
-     custo é o do fornecedor (26/30); o de venda é o seu, com margem —
-     usar o mesmo nos dois zerava o lucro nas peças pequenas. */
-  ["lona", "Lona 440g", "45.00", "89.00", "m2", "100", "100", "1", "26", "60"],
-  ["adesivo", "Vinil adesivo", "45.00", "95.00", "m2", "100", "100", "1", "30", "70"],
+  /* GRANDE FORMATO — preços reais do fornecedor (v3.46.1).
+   *
+   * A VTDIGITAL não tem plotter de grande formato: lona e adesivo são
+   * TERCEIRIZADOS. Os valores de custo abaixo são o que o fornecedor
+   * cobra por m²; a venda sai da fórmula do motor
+   * (margem 40% + imposto 6% + pagamento 6,12% → divisor 0,4788),
+   * arredondada para múltiplo de R$5 por ser mais fácil de falar ao
+   * telefone. A margem real fica em 40-41%.
+   *
+   * PISO EM REAIS: abaixo de 1 m² cobra-se o piso, não a fração. Um
+   * adesivo de 30×30 (0,09 m²) custaria R$2,79 sem piso — não paga nem
+   * o tempo de atendimento. O piso de CUSTO é o do fornecedor; o de
+   * VENDA leva a mesma margem, senão a peça pequena sai no prejuízo.
+   *
+   * As 4 linhas são materiais/serviços distintos, não variações:
+   * o recorte eletrônico e a máscara de transferência (fita que
+   * transporta o desenho recortado para a parede/vidro) são etapas a
+   * mais, cada uma com seu preço fechado. */
+  ["lona", "Lona e Banner", "35.00", "75.00", "m2", "100", "100", "1", "26", "55"],
+  ["adesivo", "Adesivo vinil", "31.00", "65.00", "m2", "100", "100", "1", "20", "45"],
+  ["adesivo", "Adesivo vinil com recorte", "40.00", "85.00", "m2", "100", "100", "1", "30", "65"],
+  ["adesivo", "Adesivo com recorte e máscara", "50.00", "105.00", "m2", "100", "100", "1", "37", "80"],
 ];
 
 for (const [type, label, cost, sell, unit, w, h, pcs, minC, minS] of rows) {

@@ -30,7 +30,7 @@ import {
   deliveries,
   settings,
 } from "@/db/schema";
-import { eq, desc, asc } from "drizzle-orm";
+import { eq, desc, asc, isNull } from "drizzle-orm";
 import { todayISO } from "@/lib/period";
 
 export async function getCategoriesByModule(
@@ -220,8 +220,12 @@ export async function getCatalog() {
     db.select().from(printerConsumables),
     db.select().from(printers).orderBy(asc(printers.id)),
     db.select().from(materials).orderBy(asc(materials.id)),
-    db.select().from(finishingItems).orderBy(asc(finishingItems.id)),
-    db.select().from(services).orderBy(asc(services.id)),
+    /* Arquivado sai da seleção mas continua no banco: produto e orçamento
+       antigos seguem mostrando o nome certo. Sem este filtro (até a
+       v3.46.0) o operador podia escolher um serviço que foi arquivado
+       justamente para não ser mais usado. */
+    db.select().from(finishingItems).where(isNull(finishingItems.archivedAt)).orderBy(asc(finishingItems.id)),
+    db.select().from(services).where(isNull(services.archivedAt)).orderBy(asc(services.id)),
     db.select().from(pricingTables),
     db.select().from(printFormats).orderBy(asc(printFormats.id)),
   ]);

@@ -221,6 +221,10 @@ main() {
   backup_state
   install_deps
   node scripts/preflight.mjs
+  # Aponta sobras de versões antigas ANTES do build. O tar/unzip não apaga
+  # arquivo que saiu do projeto, e uma rota duplicada faz o Next compilar a
+  # página errada — foi o que quebrou o deploy da v3.46.0.
+  bash scripts/verificar-instalacao.sh || true
   migrate_schema
   rebuild
   write_meta
