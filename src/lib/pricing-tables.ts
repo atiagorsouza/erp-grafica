@@ -112,13 +112,46 @@ export async function archivePricingTable(id: number) {
   return { ok: true as const, row };
 }
 
-export function estimatePricingTableCost(row: typeof pricingTables.$inferSelect, quantity: number, widthCm?: number, heightCm?: number) {
+/**
+ * Custo de uma linha de tabela para a quantidade pedida.
+ *
+ * Em `m2` a conta tem DOIS eixos que não podem ser confundidos:
+ *   - a área de UMA peça (largura × altura), com m² mínimo faturável;
+ *   - quantas peças foram pedidas.
+ *
+ * A versão anterior calculava a área e devolvia o valor de UMA peça,
+ * descartando `quantity`: 10 lonas de 1 m² custavam o mesmo que 1.
+ * O bug estava dormente porque a função nunca era chamada — mas ela é
+ * a única porta de entrada para plugar a tabela no orçamento, então
+ * seria o primeiro erro a aparecer no dia em que fosse ligada.
+ *
+ * `minQty` em m² é o mínimo faturável POR PEÇA (gráfica não vende
+ * 0,3 m² de lona), não o mínimo do pedido.
+ */
+export function estimatePricingTableCost(
+  row: typeof pricingTables.$inferSelect,
+  quantity: number,
+  widthCm?: number,
+  heightCm?: number
+) {
   const unit = String(row.unit || "unidade");
-  const q = Math.max(quantity, toNumber(row.minQty, 1));
+  const unitCost = toNumber(row.unitCost, 0);
+  const minQty = toNumber(row.minQty, 1);
+  /* Quantidade nunca é negativa nem fracionária-negativa; 0 peças = 0. */
+  const qty = Math.max(quantity, 0);
+
   if (unit === "m2") {
-    const areaM2 = Math.max((toNumber(widthCm, toNumber(row.widthCm, 100)) * toNumber(heightCm, toNumber(row.heightCm, 100))) / 10000, 0);
-    return round2(Math.max(areaM2, toNumber(row.minQty, 1)) * toNumber(row.unitCost, 0));
+    const w = toNumber(widthCm, toNumber(row.widthCm, 0));
+    const h = toNumber(heightCm, toNumber(row.heightCm, 0));
+    const areaM2 = Math.max((w * h) / 10000, 0);
+    /* mínimo faturável por peça */
+    const billableArea = Math.max(areaM2, minQty);
+    return round2(billableArea * unitCost * qty);
   }
-  if (unit === "metro") return round2(q * toNumber(row.unitCost, 0));
-  return round2(q * toNumber(row.unitCost, 0));
+
+  /* unidade | metro | folha: o mínimo é do PEDIDO.
+     Zero peças custa zero — sem isso, uma linha removida do orçamento
+     continuaria cobrando o mínimo. */
+  if (qty <= 0) return 0;
+  return round2(Math.max(qty, minQty) * unitCost);
 }
