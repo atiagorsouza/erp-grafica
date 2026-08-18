@@ -6,6 +6,7 @@ import controlPanelConfig from "../../../config/control-panel-settings.json";
 import { mutate } from "@/lib/mutate";
 import { Badge, Button, Card, Field, Input, PageHeader, Select, Textarea, toast } from "@/components/ui";
 import { Icon, type IconName } from "@/components/icons";
+import { LogoUpload } from "@/components/LogoUpload";
 import { cn } from "@/lib/format";
 
 type Row = {
@@ -20,7 +21,7 @@ type FieldDef = {
   label: string;
   defaultValue?: string;
   hint?: string;
-  type?: "text" | "number" | "select" | "textarea" | "toggle";
+  type?: "text" | "number" | "select" | "textarea" | "toggle" | "logo";
   options?: { value: string; label: string }[];
   suffix?: string;
   span2?: boolean;
@@ -182,7 +183,14 @@ export function SettingsClient({ rows }: { rows: Row[] }) {
                   hint={f.hint}
                   className={f.span2 ? "sm:col-span-2" : ""}
                 >
-                  {f.type === "select" ? (
+                  {f.type === "logo" ? (
+                    <LogoUpload
+                      chave={f.key}
+                      valor={form[f.key] ?? ""}
+                      escura={f.key.includes("dark")}
+                      onChange={(uri) => setForm((x) => ({ ...x, [f.key]: uri }))}
+                    />
+                  ) : f.type === "select" ? (
                     <Select
                       value={form[f.key] ?? String(f.defaultValue ?? "")}
                       onChange={(e) => setForm((x) => ({ ...x, [f.key]: e.target.value }))}

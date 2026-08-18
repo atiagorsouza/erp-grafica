@@ -166,6 +166,30 @@
               "label": "3 — Regime normal"
             }
           ]
+        },
+        {
+          "key": "company_logo",
+          "label": "Logo principal (documentos e cabeçalho)",
+          "type": "logo",
+          "hint": "Usada em orçamento, OS e no topo do sistema. Ideal: versão horizontal com fundo transparente.",
+          "span2": true,
+          "defaultValue": ""
+        },
+        {
+          "key": "company_logo_dark",
+          "label": "Logo para fundo escuro",
+          "type": "logo",
+          "hint": "Versão clara/branca. Usada no cupom do PDV e onde o fundo é escuro. Opcional.",
+          "span2": true,
+          "defaultValue": ""
+        },
+        {
+          "key": "company_logo_icon",
+          "label": "Ícone quadrado",
+          "type": "logo",
+          "hint": "Versão compacta 1:1 para favicon e miniaturas. Opcional.",
+          "span2": true,
+          "defaultValue": ""
         }
       ]
     },
