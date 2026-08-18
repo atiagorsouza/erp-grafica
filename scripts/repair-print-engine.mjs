@@ -76,8 +76,61 @@ async function main() {
        WHERE area_factor IS NULL OR area_factor::numeric <= 0 OR ink_coverage IS NULL OR ink_coverage::numeric < 0 OR ink_coverage::numeric > 1 OR print_cost_override IS NULL OR print_cost_override::numeric < 0
     `);
 
+    /* v3.46.4 — remove o custo comercial de exemplo dos formatos laser.
+       O seed antigo gravava 1,50 / 2,50 / 3,50 em print_cost_override, e
+       esse campo SUBSTITUI o cálculo técnico inteiro: toner, cilindro,
+       fusor, técnico, cobertura de tinta, área e desperdício deixavam de
+       contar. Numa agenda de 92 faces dava R$ 138,00 contra R$ 21,14 de
+       custo real.
+
+       Só zera os valores que vieram do exemplo. Se o usuário digitou
+       outro número, é decisão dele e fica. */
+    const overrideFix = await client.query(`
+      UPDATE print_formats f
+         SET print_cost_override = 0
+        FROM printer_categories c
+       WHERE f.category_id = c.id
+         AND c.slug IN ('laser', 'laser-colorida')
+         AND f.print_cost_override::numeric IN (1.50, 2.50, 3.50)
+    `);
+
+    /* v3.46.5 — faixas reais da Konica.
+       O formato "gráfico/foto (60%)" descrevia um trabalho que não existe
+       na operação do usuário (a Konica faz texto, meia cobertura ou
+       chapado), e o CHAPADO — que existe — não tinha formato nenhum.
+       Quem fosse orçar um chapado escolhia o de 60% e cobrava menos do
+       que devia.
+
+       Renomeia 60% -> 50% (meia cobertura) e cria o chapado se faltar.
+       Só mexe em quem ainda está no formato antigo. */
+    const renomeados = await client.query(`
+      UPDATE print_formats f
+         SET name = replace(f.name, 'gráfico/foto (60%)', 'meia cobertura (50%)'),
+             ink_coverage = 0.50
+        FROM printer_categories c
+       WHERE f.category_id = c.id
+         AND c.slug = 'laser-colorida'
+         AND f.name LIKE '%gráfico/foto (60%%)%'
+    `);
+
+    let chapados = 0;
+    for (const [rotulo, w, h, area] of [["A4", 210, 297, 1], ["A3", 297, 420, 2]]) {
+      const r = await client.query(
+        `INSERT INTO print_formats (category_id, name, width_mm, height_mm, area_factor, ink_coverage, print_cost_override, is_photo)
+         SELECT c.id, $1, $2, $3, $4, 1.00, 0, false
+           FROM printer_categories c
+          WHERE c.slug = 'laser-colorida'
+            AND NOT EXISTS (
+              SELECT 1 FROM print_formats f
+               WHERE f.category_id = c.id AND f.name = $1
+            )`,
+        [`${rotulo} chapado (100%)`, w, h, area]
+      );
+      chapados += r.rowCount;
+    }
+
     await client.query("COMMIT");
-    console.log(`✅ Impressoras & Tintas reparado: ${catFix} categorias, ${consFix.rowCount} rendimentos, ${consRoleFix.rowCount} papéis de custo, ${printerFix.rowCount} impressoras, ${formatFix.rowCount} formatos.`);
+    console.log(`✅ Impressoras & Tintas reparado: ${catFix} categorias, ${consFix.rowCount} rendimentos, ${consRoleFix.rowCount} papéis de custo, ${printerFix.rowCount} impressoras, ${formatFix.rowCount} formatos, ${overrideFix.rowCount} custos de exemplo removidos, ${renomeados.rowCount} faixas renomeadas, ${chapados} chapados criados.`);
   } catch (e) {
     await client.query("ROLLBACK");
     throw e;

@@ -1,8 +1,25 @@
 import type { ClassValue } from "clsx";
 import { clsx } from "clsx";
+import { twMerge } from "tailwind-merge";
 
+/**
+ * Junta classes resolvendo CONFLITO entre utilities do Tailwind (v3.46.2).
+ *
+ * Antes era só `clsx`, que concatena tudo. Quando um componente define
+ * `bg-white text-ink-900` na base e quem chama passa
+ * `bg-ink-900 text-white`, as quatro classes iam juntas para o HTML.
+ * Qual vence não depende da ordem na string — depende da ordem em que o
+ * Tailwind gerou cada regra no CSS final.
+ *
+ * No PDV isso deixava o campo "Recebido R$" com fundo escuro e texto
+ * escuro: o troco ficava invisível, tanto no celular quanto no PC. Era
+ * o bug de "campo sem cor" — e havia 8 campos no mesmo estado.
+ *
+ * Com `twMerge`, a última classe da mesma propriedade ganha, que é o
+ * comportamento que qualquer um espera ao passar `className`.
+ */
 export function cn(...inputs: ClassValue[]) {
-  return clsx(inputs);
+  return twMerge(clsx(inputs));
 }
 
 const money = (v: number) =>

@@ -39,7 +39,31 @@ tar --exclude="./node_modules" \
     --exclude="./coverage" \
     --exclude="./.env" \
     --exclude="./tsconfig.tsbuildinfo" \
+    --exclude="./backups" \
+    --exclude="./logs" \
+    --exclude="./.printflow" \
     -czf "$PKG" -C "$ROOT" .
+
+# ---- validação: o pacote NÃO pode levar dado de produção ----
+# `backups/` nasceu na v3.46.0 com o backup automático e entrou em dois
+# pacotes antes de alguém notar: um dump do banco viajando junto com o
+# código levaria clientes e vendas de uma instalação para outra, e ainda
+# corria o risco de sobrescrever o backup local de quem instalasse.
+# Falhar aqui é melhor que publicar.
+# `grep -x` casa a linha inteira: sem isso "./.env" casaria com
+# "./.env.example", que é justamente um arquivo que DEVE ir no pacote.
+for PROIBIDO in "./backups/" "./logs/"; do
+  if tar -tzf "$PKG" | grep -q "^${PROIBIDO}"; then
+    echo "✖ O pacote contém '${PROIBIDO}' — dado de produção não pode ser publicado."
+    rm -f "$PKG"
+    exit 1
+  fi
+done
+if tar -tzf "$PKG" | grep -qx "\./\.env"; then
+  echo "✖ O pacote contém './.env' — credenciais não podem ser publicadas."
+  rm -f "$PKG"
+  exit 1
+fi
 
 # ---- validação: o pacote precisa extrair NA RAIZ, sem prefixo ----
 # `head -1` fecha o pipe e o SIGPIPE aborta sob `pipefail`; lê a
