@@ -14,7 +14,10 @@
     "install:prod": "bash scripts/install.sh",
     "update": "bash scripts/update.sh",
     "preflight": "node scripts/preflight.mjs",
-    "e2e:smoke": "node scripts/e2e-smoke.mjs"
+    "e2e:smoke": "node scripts/e2e-smoke.mjs",
+    "deploy": "bash scripts/deploy-auto.sh",
+    "verificar:contraste": "node scripts/verificar-contraste.mjs",
+    "verificar": "bash scripts/verificar-tudo.sh"
   },
   "dependencies": {
     "clsx": "^2.1.1",
