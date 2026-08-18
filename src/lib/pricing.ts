@@ -184,6 +184,8 @@ export interface ProductCalcInput {
   /** linha de tabela (DTF UV, Lona...) como custo do produto */
   basePricingTable?: PricingTableLike | null;
   basePricingTableQty?: number;
+  /** peças deste produto por folha; 0 = usa a referência da tabela */
+  basePricingTablePieces?: number;
   finishings: FinishingLine[];
   extraMaterials: MaterialLine[];
   service?: ServiceLike | null;
@@ -335,7 +337,11 @@ export function computeProduct(input: ProductCalcInput): ProductCalcResult {
          quantas PEÇAS do produto saem por folha comprada — a caneca
          usa 1/6 de uma folha 20×28, então o custo dela é a folha
          dividida pelo que cabe. */
-      const perSheet = num(t.piecesPerSheet, 1);
+      /* O override do produto manda: quantas peças cabem depende da
+         ESTAMPA (6 canecas ou 30 chaveiros na mesma folha), não da
+         folha. Sem override, cai na referência da tabela. */
+      const override = num(input.basePricingTablePieces, 0);
+      const perSheet = override > 0 ? override : num(t.piecesPerSheet, 1);
       if (perSheet > 1) {
         v = (tableCost / perSheet) * qty;
         detail = `${formatMoney(tableCost)} ÷ ${perSheet} por folha × ${qty}`;

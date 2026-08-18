@@ -164,6 +164,7 @@ export function ProductsClient({
       baseMaterialQty: num(form.baseMaterialQty, 1),
       basePricingTable: pricingTableRow as never,
       basePricingTableQty: num(form.basePricingTableQty, 1),
+      basePricingTablePieces: num(form.basePricingTablePieces, 0),
       finishings: finLines,
       extraMaterials: matLines,
       service,
@@ -230,6 +231,7 @@ export function ProductsClient({
       baseServiceId: p.baseServiceId ? String(p.baseServiceId) : "",
       basePricingTableId: p.basePricingTableId ? String(p.basePricingTableId) : "",
       basePricingTableQty: String(p.basePricingTableQty ?? 1),
+      basePricingTablePieces: String(p.basePricingTablePieces ?? 0),
       defaultQuantity: String(p.defaultQuantity ?? 1),
       piecesPerSheet: String(p.piecesPerSheet ?? 1),
       printSides: String(p.printSides ?? 1),
@@ -281,6 +283,7 @@ export function ProductsClient({
         baseServiceId: form.baseServiceId || null,
         basePricingTableId: form.basePricingTableId || null,
         basePricingTableQty: num(form.basePricingTableQty, 1),
+        basePricingTablePieces: num(form.basePricingTablePieces, 0),
         margin: String(num(form.margin, 40) / 100),
         costSnapshot: String(liveCalc?.baseCost ?? 0),
         sellPrice: String(liveCalc?.sellPrice ?? 0),
@@ -497,6 +500,19 @@ export function ProductsClient({
               {form.basePricingTableId && (
                 <Field label="Quantidade da tabela" hint={`em ${String(pricingTableRow?.unit || "unidade")} por unidade do produto`}>
                   <Input mono value={form.basePricingTableQty || "1"} onChange={set("basePricingTableQty")} />
+                </Field>
+              )}
+              {form.basePricingTableId && String(pricingTableRow?.unit) !== "m2" && (
+                <Field
+                  label="Peças por folha"
+                  hint={`quantas cabem na ${String(pricingTableRow?.label || "folha")} — depende do tamanho da estampa`}
+                >
+                  <Input
+                    mono
+                    value={form.basePricingTablePieces || ""}
+                    onChange={set("basePricingTablePieces")}
+                    placeholder={String(num(pricingTableRow?.piecesPerSheet, 1))}
+                  />
                 </Field>
               )}
             </section>

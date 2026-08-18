@@ -478,7 +478,13 @@ export const pricingTables = pgTable("pricing_tables", {
    * cobrem o que ele não conseguia expressar. Zerados, o
    * comportamento é o anterior.
    * ------------------------------------------------------------- */
-  /** DTF: peças que cabem na folha. 0/1 = folha inteira por peça */
+  /**
+   * DTF: peças que cabem na folha — REFERÊNCIA, não regra fixa.
+   *
+   * Quantas peças cabem depende do TAMANHO DA ESTAMPA, não da folha:
+   * na mesma 20×28 cabem 6 canecas ou 30 chaveiros. Este valor é só o
+   * padrão sugerido; o produto e a linha de venda podem sobrescrever.
+   */
   piecesPerSheet: numeric("pieces_per_sheet", { precision: 10, scale: 3 }).default("1"),
   /** piso de CUSTO em R$ por peça — o mínimo que o fornecedor cobra */
   minCharge: numeric("min_charge", { precision: 12, scale: 4 }).default("0"),
@@ -577,6 +583,14 @@ export const products = pgTable("products", {
   ),
   /** quantidade da linha por unidade do produto (m², metros, peças) */
   basePricingTableQty: numeric("base_pricing_table_qty", { precision: 10, scale: 3 }).default("1"),
+  /**
+   * Quantas peças DESTE produto cabem na folha (v3.44.0).
+   *
+   * Sobrescreve o padrão da tabela: a estampa da caneca rende 6 por
+   * folha, a do chaveiro rende 30 — mesma folha, mesmo preço. Zerado,
+   * usa o valor de referência da linha da tabela.
+   */
+  basePricingTablePieces: numeric("base_pricing_table_pieces", { precision: 10, scale: 3 }).default("0"),
   // receita de produção por tiragem
   calculationMode: text("calculation_mode").default("unit").notNull(), // unit, batch
   defaultQuantity: numeric("default_quantity", { precision: 12, scale: 3 }).default("1"),

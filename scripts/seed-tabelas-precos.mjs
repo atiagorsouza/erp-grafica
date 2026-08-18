@@ -23,21 +23,22 @@ await c.query("delete from pricing_tables");
  * que muda é quantas peças cabem. A folha é INDIVISÍVEL: 8 canecas
  * consomem 2 folhas de 6 e a sobra é perda.
  *
- * `piecesPerSheet` no têxtil é 1 porque a estampa ocupa a folha toda.
- * No UV vem da referência do usuário: 6 canecas na 20×28 (≈93 cm² por
- * caneca); A3 e Metro foram derivados por área — CONFIRMAR.
+ * `piecesPerSheet` = 1 é só a REFERÊNCIA: quantas peças cabem depende
+ * do tamanho da ESTAMPA, não da folha (6 canecas ou 30 chaveiros na
+ * mesma 20×28). Quem define é o produto (`basePricingTablePieces`) ou
+ * a linha de venda no PDV (`piecesPerSheet` no item).
  *
- * `sellPrice` são valores de partida (~2,2× o custo) — ajustar.
+ * `sellPrice` = custo × 2,2, confirmado pelo usuário.
  * ------------------------------------------------------------------ */
 const rows = [
   // type, label, custo, venda, unit, w, h, pcs/folha, minCusto, minVenda
-  ["dtf_textil", "DTF Textil A4+ 38x25", "11.61", "29.00", "unidade", "38", "25", "1", "0", "0"],
-  ["dtf_textil", "DTF Textil A3+ 38x50", "24.03", "56.00", "unidade", "38", "50", "1", "0", "0"],
-  ["dtf_textil", "DTF Textil Metro 38x100", "36.00", "79.00", "unidade", "38", "100", "1", "0", "0"],
+  ["dtf_textil", "DTF Textil A4+ 38x25", "11.61", "25.54", "unidade", "38", "25", "1", "0", "0"],
+  ["dtf_textil", "DTF Textil A3+ 38x50", "24.03", "52.87", "unidade", "38", "50", "1", "0", "0"],
+  ["dtf_textil", "DTF Textil Metro 38x100", "36.00", "79.20", "unidade", "38", "100", "1", "0", "0"],
 
-  ["dtf_uv", "DTF UV A4 20x28", "23.22", "55.00", "unidade", "20", "28", "6", "0", "0"],
-  ["dtf_uv", "DTF UV A3 28x40", "36.00", "82.00", "unidade", "28", "40", "12", "0", "0"],
-  ["dtf_uv", "DTF UV Metro 28x100", "67.50", "149.00", "unidade", "28", "100", "30", "0", "0"],
+  ["dtf_uv", "DTF UV A4 20x28", "23.22", "51.08", "unidade", "20", "28", "1", "0", "0"],
+  ["dtf_uv", "DTF UV A3 28x40", "36.00", "79.20", "unidade", "28", "40", "1", "0", "0"],
+  ["dtf_uv", "DTF UV Metro 28x100", "67.50", "148.50", "unidade", "28", "100", "1", "0", "0"],
 
   /* Lona/Vinil: preço por m² com PISO EM REAIS por peça. O piso de
      custo é o do fornecedor (26/30); o de venda é o seu, com margem —

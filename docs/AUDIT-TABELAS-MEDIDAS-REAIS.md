@@ -1,56 +1,24 @@
-# Tabelas de preço — medidas reais
+# Tabelas de preço — DTF, Lona e Vinil
 
-## DTF Têxtil
+## Medidas e preços (venda = custo × 2,2)
 
-| Formato | Medida | Custo | Venda* |
+### DTF Têxtil
+
+| Formato | Medida | Custo | Venda |
 |---|---|---|---|
-| A4+ | 38×25 | R$ 11,61 | R$ 29,00 |
-| A3+ | 38×50 | R$ 24,03 | R$ 56,00 |
-| Metro | 38×100 | R$ 36,00 | R$ 79,00 |
+| A4+ | 38×25 | R$ 11,61 | R$ 25,54 |
+| A3+ | 38×50 | R$ 24,03 | R$ 52,87 |
+| Metro | 38×100 | R$ 36,00 | R$ 79,20 |
 
-## DTF UV
+### DTF UV
 
-| Formato | Medida | Custo | Venda* | Cabem |
-|---|---|---|---|---|
-| A4 | 20×28 | R$ 23,22 | R$ 55,00 | 6 canecas |
-| A3 | 28×40 | R$ 36,00 | R$ 82,00 | 12 ⚠️ |
-| Metro | 28×100 | R$ 67,50 | R$ 149,00 | 30 ⚠️ |
+| Formato | Medida | Custo | Venda |
+|---|---|---|---|
+| A4 | 20×28 | R$ 23,22 | R$ 51,08 |
+| A3 | 28×40 | R$ 36,00 | R$ 79,20 |
+| Metro | 28×100 | R$ 67,50 | R$ 148,50 |
 
-\* preços de venda são partida (~2,2× custo) — **ajuste conforme sua tabela**
-
-⚠️ **Confirmar:** você informou 6 canecas na A4 20×28 (≈93 cm² por
-caneca). Derivei A3 = 12 e Metro = 30 por proporção de área. Se na
-prática cabe menos (perda de encaixe, margem de corte), me diga os
-números reais.
-
----
-
-## 💡 Qual folha compensa
-
-Custo por 100 cm² de área útil:
-
-| DTF Têxtil | R$/100cm² | | DTF UV | R$/100cm² |
-|---|---|---|---|---|
-| A4+ | 1,222 | | A4 | 4,146 |
-| A3+ | 1,265 | | A3 | 3,214 |
-| **Metro** | **0,947** | | **Metro** | **2,411** |
-
-**No têxtil o metro é 25% mais barato por área que o A4+** (e o A3+ é
-ligeiramente pior que o A4+). **No UV, cada salto de tamanho reduz o
-custo**: o metro é 42% mais barato que o A4.
-
-Isso aparece no produto composto:
-
-| Caneca UV | Custo | Venda |
-|---|---|---|
-| via folha A4 (23,22 ÷ 6 = 3,87) | R$ 12,76 | R$ 38,80 |
-| **via folha A3** (36,00 ÷ 12 = 3,00) | **R$ 11,89** | **R$ 36,16** |
-
-Mesma caneca, **R$ 2,64 mais barata** só por usar a folha maior.
-
----
-
-## Lona e Vinil — mínimo em reais
+### Lona e Vinil — mínimo em reais
 
 | | Custo/m² | Venda/m² | Mín. custo | Mín. venda |
 |---|---|---|---|---|
@@ -58,36 +26,72 @@ Mesma caneca, **R$ 2,64 mais barata** só por usar a folha maior.
 | Vinil | R$ 45 | R$ 95 | R$ 30 | R$ 70 |
 
 O piso de **custo** é o do fornecedor; o de **venda** é o seu. Separados
-de propósito — com um número só, um adesivo pequeno seria vendido pelo
-próprio mínimo do fornecedor, com margem zero.
-
-| Peça | Área | Custo | Venda | Margem |
-|---|---|---|---|---|
-| Adesivo 30×30 | 0,09 m² | R$ 26,00 (mín) | R$ 60,00 (mín) | 57% |
-| Banner 1,20×0,90 | 1,08 m² | R$ 48,60 | R$ 96,12 | 49% |
-| Lona 2×1,5 | 3,00 m² | R$ 135,00 | R$ 267,00 | 49% |
+porque, com um número só, um adesivo pequeno sairia pelo próprio mínimo
+do fornecedor — margem zero.
 
 ---
 
-## Como o sistema usa
+## ✅ Peças por folha: quem decide é você
 
-**Caso 1 — venda direta no PDV.** A folha é indivisível:
+> "Isso não posso decidir colocando a quantidade? depende muito do
+> tamanho da estampa."
 
-| Pedido | Folhas | Cobrado |
+Correto — e o desenho anterior estava errado. Eu tinha gravado "cabem 6"
+como propriedade da **folha**, mas é propriedade da **estampa**: na mesma
+20×28 cabem 6 canecas ou 30 chaveiros.
+
+Agora o número é editável nos dois pontos de uso:
+
+| Onde | Campo | Quando |
 |---|---|---|
-| 6 canecas (A4) | 1 | R$ 55,00 |
-| 8 canecas (A4) | 2 | R$ 110,00 |
-| 12 canecas (A3) | 1 | R$ 82,00 |
-| 31 canecas (Metro) | 2 | R$ 298,00 |
+| Produto | "Peças por folha" | fixo para aquele produto |
+| PDV | `piecesPerSheet` no item | por venda, estampa avulsa |
 
-**Caso 2 — produto composto.** A folha é rateada pelo que cabe:
+O valor da tabela virou apenas **referência** (padrão 1). A folha
+continua **indivisível** — a sobra é perda, então o motor arredonda
+para cima.
 
-| Produto | Blank | Tabela | Custo | Venda |
+### Mesma folha UV A4 (R$ 51,08), estampas diferentes
+
+| Venda | Cabem | Folhas | Cobrado |
+|---|---|---|---|
+| 6 canecas | 6 | 1 | R$ 51,08 |
+| 8 canecas | 6 | 2 | R$ 102,16 |
+| 30 chaveiros | 30 | 1 | R$ 51,08 |
+| 31 chaveiros | 30 | 2 | R$ 102,16 |
+| 4 estampas grandes | 2 | 2 | R$ 102,16 |
+
+### Produtos compostos
+
+| Produto | Cabem | Custo tabela | Custo total | Venda |
 |---|---|---|---|---|
-| Caneca UV A4 | 8,89 | 3,87 | R$ 12,76 | R$ 38,80 |
-| Caneca UV A3 | 8,89 | 3,00 | R$ 11,89 | R$ 36,16 |
-| Camiseta A4+ | 22,00 | 11,61 | R$ 33,61 | R$ 102,22 |
-| Camiseta A3+ | 22,00 | 24,03 | R$ 46,03 | R$ 139,99 |
+| Caneca (folha A4) | 6 | R$ 3,87 | R$ 12,76 | R$ 38,80 |
+| Caneca (folha A3) | 12 | R$ 3,00 | R$ 11,89 | R$ 36,16 |
+| Chaveiro (folha A4) | 30 | R$ 0,77 | R$ 0,77 | R$ 2,78 |
+| Camiseta A4+ | 1 | R$ 11,61 | R$ 33,61 | R$ 102,22 |
+
+Caneca e chaveiro saem da **mesma folha de R$ 23,22** — o que muda é
+quantas peças você encaixa.
+
+---
+
+## 💡 Qual folha compensa
+
+Custo por 100 cm²:
+
+| DTF Têxtil | R$/100cm² | DTF UV | R$/100cm² |
+|---|---|---|---|
+| A4+ | 1,222 | A4 | 4,146 |
+| A3+ | 1,265 | A3 | 3,214 |
+| **Metro** | **0,947** | **Metro** | **2,411** |
+
+No têxtil o **A3+ é ligeiramente pior que o A4+** por área, e o metro é
+25% mais barato. No UV cada salto de tamanho reduz o custo — o metro é
+42% mais barato que o A4.
+
+Por isso a mesma caneca sai **R$ 2,64 mais barata** na folha A3.
+
+---
 
 ## Recadastrar após reset do ambiente
 

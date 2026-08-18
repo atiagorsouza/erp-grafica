@@ -41,6 +41,10 @@ export const saleItemSchema = z.object({
      balcão. Como o `productId`, o servidor resolve o valor no banco —
      o preço que vem do cliente é ignorado. */
   pricingTableId: z.coerce.number().int().positive().nullable().optional(),
+  /* Quantas peças cabem na folha NESTA venda. Depende do tamanho da
+     estampa, não da folha: 6 canecas ou 30 chaveiros na mesma 20×28.
+     Zerado, usa a referência cadastrada na linha da tabela. */
+  piecesPerSheet: z.coerce.number().finite().min(0).max(1_000_000).optional(),
   description: z.string().trim().min(1, "Descrição obrigatória").max(200),
   quantity: finiteNumber
     .min(0.001, "Quantidade deve ser de ao menos 0,001")
@@ -213,7 +217,10 @@ export async function createSale(raw: unknown) {
     let tableUnitPrice = 0;
     if (tableRow) {
       const qty = toPositive(item.quantity);
-      const total = estimatePricingTableCost(tableRow, qty, undefined, undefined, "sell");
+      const effective = item.piecesPerSheet && item.piecesPerSheet > 0
+        ? { ...tableRow, piecesPerSheet: String(item.piecesPerSheet) }
+        : tableRow;
+      const total = estimatePricingTableCost(effective, qty, undefined, undefined, "sell");
       tableUnitPrice = qty > 0 ? total / qty : 0;
     }
 
