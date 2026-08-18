@@ -166,3 +166,42 @@ ser bom argumento de venda.
 3. **Ribbons coloridos além do rosê** — o anúncio cita várias cores
    metálicas a R$ 190; cadastrar conforme comprar.
 4. **Tempo de máquina** segue fora do motor.
+
+---
+
+## Adendo — faixas conectadas ao PDV e ao Orçamento
+
+A estrutura da v3.34.0 não era consumida na hora de vender. Agora é,
+respeitando a diferença de filosofia que já existia entre as duas telas.
+
+### PDV — o servidor impõe a faixa
+
+`createSale` carrega as faixas junto dos produtos e resolve o unitário
+pela quantidade. O preço nunca vem do cliente HTTP.
+
+Venda abaixo do menor mínimo é **recusada com 422**:
+
+> Produto "Etiqueta Rosê 5x5cm" tem venda mínima de 50 un (pedido: 20)
+
+### Orçamento — a faixa vira referência do aviso
+
+O orçamento continua aceitando o preço do vendedor (negociação é
+legítima), mas o alerta de divergência agora compara com **a faixa que a
+quantidade alcança**, não com o `finalPrice`.
+
+Sem isso, orçar 1.000 etiquetas a R$ 0,35 — preço correto de tabela —
+dispararia "desconto de 53%", e o aviso viraria ruído que o vendedor
+aprende a ignorar. O rótulo `[faixa 1000+]` mostra qual foi usada.
+
+### Verificação ponta a ponta
+
+| Pedido | Cobrado | R$/un | Faixa |
+|---|---|---|---|
+| 20 un | **recusado** | — | abaixo do mínimo ✔ |
+| 50 un | R$ 37,50 | 0,7500 | 50+ ✔ |
+| 80 un | R$ 60,00 | 0,7500 | 50+ ✔ |
+| 100 un | R$ 54,00 | 0,5400 | 100+ ✔ |
+| 250 un | R$ 102,50 | 0,4100 | 250+ ✔ |
+| 499 un | R$ 204,59 | 0,4100 | 250+ ✔ |
+| 500 un | R$ 185,00 | 0,3700 | 500+ ✔ |
+| 1.000 un | R$ 350,00 | 0,3500 | 1.000+ ✔ |

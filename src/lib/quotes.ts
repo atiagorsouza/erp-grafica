@@ -2,11 +2,12 @@ import "server-only";
 
 import { z } from "zod";
 import { db } from "@/db";
-import { customers, kanbanCards, orders, products, quoteItems, quotes, settings } from "@/db/schema";
+import { customers, kanbanCards, orders, productPriceTiers, products, quoteItems, quotes, settings } from "@/db/schema";
 import { and, eq, inArray, isNotNull, lt } from "drizzle-orm";
 import { nextDocumentNumber } from "@/lib/documents";
 import { getPricingDefaults } from "@/lib/settings";
 import { applyDiscount, round2, toDecimalString, toNumber, toPositive } from "@/lib/money";
+import { resolvePriceTier } from "@/lib/pricing";
 import { toLocalISODate } from "@/lib/period";
 
 export type QuoteError = { error: string; status: number; details?: unknown };
@@ -252,24 +253,51 @@ async function priceWarnings(items: QuoteItem[]): Promise<string[]> {
   const ids = [...new Set(items.map((i) => i.productId).filter((x): x is number => !!x))];
   if (ids.length === 0) return [];
 
-  const rows = await db
-    .select({ id: products.id, name: products.name, finalPrice: products.finalPrice })
-    .from(products)
-    .where(inArray(products.id, ids));
+  const [rows, tierRows] = await Promise.all([
+    db
+      .select({ id: products.id, name: products.name, finalPrice: products.finalPrice })
+      .from(products)
+      .where(inArray(products.id, ids)),
+    db.select().from(productPriceTiers).where(inArray(productPriceTiers.productId, ids)),
+  ]);
   const table = new Map(rows.map((r) => [r.id, r]));
+  const tiers = new Map<number, { minQuantity: string; unitPrice: string }[]>();
+  for (const t of tierRows) {
+    const list = tiers.get(t.productId) || [];
+    list.push({ minQuantity: t.minQuantity, unitPrice: t.unitPrice });
+    tiers.set(t.productId, list);
+  }
 
   const warnings: string[] = [];
   for (const it of items) {
     if (!it.productId) continue;
     const ref = table.get(it.productId);
     if (!ref) continue;
-    const listed = toNumber(ref.finalPrice, 0);
+
+    /* Com faixas cadastradas, o preço de referência é o da faixa que a
+       quantidade alcança — comparar com o `finalPrice` acusaria
+       "desconto de 53%" num lote de 1.000 que na verdade está na
+       tabela. O orçamento continua aceitando o valor do vendedor. */
+    const productTiers = tiers.get(it.productId) || [];
+    const resolved = productTiers.length > 0
+      ? resolvePriceTier(productTiers, it.quantity, toNumber(ref.finalPrice, 0))
+      : null;
+
+    if (resolved?.belowMinimum) {
+      warnings.push(
+        `${ref.name}: ${it.quantity} un abaixo do mínimo de ${resolved.minQuantity} un`
+      );
+      continue;
+    }
+
+    const listed = resolved ? resolved.unitPrice : toNumber(ref.finalPrice, 0);
     if (listed <= 0) continue;
     /* 1 centavo de folga evita ruído de arredondamento */
     if (Math.abs(it.unitPrice - listed) < 0.01) continue;
     const pct = ((it.unitPrice - listed) / listed) * 100;
+    const faixa = resolved?.tier ? ` [faixa ${resolved.tier.minQuantity}+]` : "";
     warnings.push(
-      `${ref.name}: ${it.unitPrice.toFixed(2)} vs ${listed.toFixed(2)} de tabela (${pct > 0 ? "+" : ""}${pct.toFixed(1)}%)`
+      `${ref.name}: ${it.unitPrice.toFixed(2)} vs ${listed.toFixed(2)} de tabela${faixa} (${pct > 0 ? "+" : ""}${pct.toFixed(1)}%)`
     );
   }
   return warnings;

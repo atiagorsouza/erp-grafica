@@ -6,6 +6,7 @@ import {
   sales,
   products,
   productMaterials,
+  productPriceTiers,
   materials,
   stockMovements,
   transactions,
@@ -24,6 +25,7 @@ import {
   toNumber,
   toPositive,
 } from "@/lib/money";
+import { resolvePriceTier } from "@/lib/pricing";
 
 /* ==================================================================
  *  VALIDAÇÃO (Zod)
@@ -128,9 +130,23 @@ export async function createSale(raw: unknown) {
     ...new Set(input.items.map((i) => i.productId).filter((id): id is number => !!id)),
   ];
   const productMap = new Map<number, ProductRow>();
+  const tierMap = new Map<number, { minQuantity: string; unitPrice: string }[]>();
   if (productIds.length > 0) {
     const rows = await db.select().from(products).where(inArray(products.id, productIds));
     for (const row of rows) productMap.set(row.id, row);
+
+    /* Faixas por quantidade (v3.34.0): etiqueta e brinde são vendidos em
+       lote, e o unitário cai conforme a quantidade. Sem isso o PDV
+       cobrava o preço de 50 un numa venda de 1.000. */
+    const tierRows = await db
+      .select()
+      .from(productPriceTiers)
+      .where(inArray(productPriceTiers.productId, productIds));
+    for (const t of tierRows) {
+      const list = tierMap.get(t.productId) || [];
+      list.push({ minQuantity: t.minQuantity, unitPrice: t.unitPrice });
+      tierMap.set(t.productId, list);
+    }
   }
 
   const validLines: ResolvedLine[] = [];
@@ -146,7 +162,26 @@ export async function createSale(raw: unknown) {
       return { error: `Produto "${product.name}" está inativo`, status: 422 } satisfies SaleError;
     }
 
-    const unitPrice = product ? toNumber(product.finalPrice, 0) : toPositive(item.unitPrice);
+    const quantityForTier = toPositive(item.quantity);
+    const productTiers = product ? tierMap.get(product.id) || [] : [];
+    /* A faixa manda sobre o `finalPrice` quando existe: o preço de
+       tabela do produto é o do lote mínimo. */
+    const tierResult = product && productTiers.length > 0
+      ? resolvePriceTier(productTiers, quantityForTier, toNumber(product.finalPrice, 0))
+      : null;
+
+    if (tierResult?.belowMinimum) {
+      return {
+        error: `Produto "${product!.name}" tem venda mínima de ${tierResult.minQuantity} un (pedido: ${quantityForTier})`,
+        status: 422,
+      } satisfies SaleError;
+    }
+
+    const unitPrice = tierResult
+      ? tierResult.unitPrice
+      : product
+        ? toNumber(product.finalPrice, 0)
+        : toPositive(item.unitPrice);
     if (product && unitPrice <= 0) {
       return {
         error: `Produto "${product.name}" está sem preço final definido`,
