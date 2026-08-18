@@ -50,7 +50,10 @@ async function main() {
 
   // 1) Cliente/CRM
   const customer = await req("/api/crud/customers", { op: "create", data: {
-    type: "pf", name: `E2E Cliente ${stamp}`, document: makeCpf(stamp), email: `e2e-${stamp}@example.com`, phone: "21988887777", status: "lead"
+    /* Telefone derivado do stamp: com o índice único em phone_e164
+       (v3.46.6) um número fixo colidiria com a execução anterior do
+       smoke. Mesma razão do CPF e do e-mail já serem variáveis. */
+    type: "pf", name: `E2E Cliente ${stamp}`, document: makeCpf(stamp), email: `e2e-${stamp}@example.com`, phone: `219${String(stamp).slice(-8)}`, status: "lead"
   }});
   const customerId = customer.row.id;
   assert(customerId, "cliente criado");
