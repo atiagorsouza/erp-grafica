@@ -16,6 +16,7 @@ const tableSchema = z.object({
   categoryId: z.coerce.number().int().positive().nullable().optional(),
   label: z.string().trim().min(2, "Descrição obrigatória").max(180),
   unitCost: z.coerce.number().finite().min(0, "Preço não pode ser negativo").max(999999999),
+  sellPrice: z.coerce.number().finite().min(0, "Preço de venda não pode ser negativo").max(999999999).default(0),
   unit: z.enum(UNITS).default("unidade"),
   widthCm: z.coerce.number().finite().min(0).max(100000).nullable().optional(),
   heightCm: z.coerce.number().finite().min(0).max(100000).nullable().optional(),
@@ -63,6 +64,7 @@ function dataToDb(data: TablePayload) {
     categoryId: data.categoryId || null,
     label: data.label.trim(),
     unitCost: toDecimalString(data.unitCost, 4),
+    sellPrice: toDecimalString(data.sellPrice, 4),
     unit,
     widthCm: data.widthCm != null && data.widthCm > 0 ? toDecimalString(data.widthCm, 2) : null,
     heightCm: data.heightCm != null && data.heightCm > 0 ? toDecimalString(data.heightCm, 2) : null,
@@ -132,10 +134,15 @@ export function estimatePricingTableCost(
   row: typeof pricingTables.$inferSelect,
   quantity: number,
   widthCm?: number,
-  heightCm?: number
+  heightCm?: number,
+  /* "cost" para compor produto (margem vem depois), "sell" para venda
+     direta no PDV. Sem `sellPrice` cadastrado, cai no custo — melhor
+     cobrar o custo do que cobrar zero. */
+  mode: "cost" | "sell" = "cost"
 ) {
   const unit = String(row.unit || "unidade");
-  const unitCost = toNumber(row.unitCost, 0);
+  const sell = toNumber(row.sellPrice, 0);
+  const unitCost = mode === "sell" && sell > 0 ? sell : toNumber(row.unitCost, 0);
   const minQty = toNumber(row.minQty, 1);
   /* Quantidade nunca é negativa nem fracionária-negativa; 0 peças = 0. */
   const qty = Math.max(quantity, 0);

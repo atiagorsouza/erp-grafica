@@ -436,6 +436,24 @@ export const pricingTables = pgTable("pricing_tables", {
   }),
   label: text("label").notNull(),          // "A4 (22x28cm)", "A3 (28x42cm)", "1 Metro Linear", "m² Lona 440g"
   unitCost: numeric("unit_cost", { precision: 12, scale: 4 }).default("0"),  // R$ por unidade
+  /* --------------------------------------------------------------
+   * CUSTO × VENDA (v3.42.0)
+   *
+   * A mesma linha serve a dois usos que o usuário faz na prática:
+   *
+   *   1. VENDER DIRETO no PDV  → precisa de preço final ao cliente
+   *   2. COMPOR PRODUTO (caneca na UV, camisa têxtil) → entra como
+   *      custo, e a margem do produto é aplicada por cima
+   *
+   * Com um campo só, um dos dois estaria sempre errado: vender pelo
+   * custo é prejuízo, compor produto pelo preço de venda cobra margem
+   * duas vezes.
+   *
+   * `unitCost` = o que você paga ao fornecedor.
+   * `sellPrice` = o que você cobra do cliente. Zerado, o PDV não
+   * oferece a linha para venda avulsa (só serve para compor).
+   * ------------------------------------------------------------- */
+  sellPrice: numeric("sell_price", { precision: 12, scale: 4 }).default("0"),
   unit: text("unit").default("unidade"),    // unidade, metro, m2, folha
   widthCm: numeric("width_cm", { precision: 8, scale: 2 }),   // largura útil em cm (28cm para metro linear)
   heightCm: numeric("height_cm", { precision: 8, scale: 2 }), // altura útil em cm
@@ -519,6 +537,20 @@ export const products = pgTable("products", {
   baseServiceId: integer("base_service_id").references(() => services.id, {
     onDelete: "set null",
   }),
+  /* --------------------------------------------------------------
+   * LINHA DE TABELA COMO INSUMO (v3.42.0)
+   *
+   * "componho produtos como caneca na UV e camisa têxtil": o produto
+   * usa uma linha de tabela terceirizada como CUSTO, e a margem do
+   * produto é aplicada por cima. Entra pelo `unitCost` da linha —
+   * nunca pelo `sellPrice`, senão a margem seria cobrada duas vezes.
+   * ------------------------------------------------------------- */
+  basePricingTableId: integer("base_pricing_table_id").references(
+    () => pricingTables.id,
+    { onDelete: "set null" }
+  ),
+  /** quantidade da linha por unidade do produto (m², metros, peças) */
+  basePricingTableQty: numeric("base_pricing_table_qty", { precision: 10, scale: 3 }).default("1"),
   // receita de produção por tiragem
   calculationMode: text("calculation_mode").default("unit").notNull(), // unit, batch
   defaultQuantity: numeric("default_quantity", { precision: 12, scale: 3 }).default("1"),

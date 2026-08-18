@@ -71,6 +71,15 @@ export interface MaterialLike {
   unit?: string | null;
   unitCost: string | number | null;
 }
+/** Linha de tabela terceirizada usada como insumo do produto (v3.42.0). */
+export interface PricingTableLike {
+  label?: string | null;
+  unit?: string | null;
+  unitCost: string | number | null;
+  minQty?: string | number | null;
+  widthCm?: string | number | null;
+  heightCm?: string | number | null;
+}
 export interface FinishingLike {
   name?: string | null;
   unit?: string | null;
@@ -168,6 +177,9 @@ export interface ProductCalcInput {
   machineMinutes?: number;
   baseMaterial?: MaterialLike | null;
   baseMaterialQty: number;
+  /** linha de tabela (DTF UV, Lona...) como custo do produto */
+  basePricingTable?: PricingTableLike | null;
+  basePricingTableQty?: number;
   finishings: FinishingLine[];
   extraMaterials: MaterialLine[];
   service?: ServiceLike | null;
@@ -286,6 +298,37 @@ export function computeProduct(input: ProductCalcInput): ProductCalcResult {
       detail: `${num(fl.quantity)} ${fl.finishing.unit} × ${formatMoney(
         num(fl.finishing.unitCost)
       )}`,
+      amount: v,
+    });
+  }
+
+  /* 3b) TABELA TERCEIRIZADA ----------------------------------------
+     Caneca na UV, camisa têxtil: o custo vem da tabela do fornecedor
+     e a margem do produto é aplicada por cima. Usa `unitCost`, nunca
+     `sellPrice` — senão a margem entraria duas vezes. */
+  if (input.basePricingTable) {
+    const t = input.basePricingTable;
+    const qty = num(input.basePricingTableQty, 1);
+    const unit = String(t.unit || "unidade");
+    let billable = qty;
+    if (unit === "m2") {
+      /* Em m² a quantidade é o número de peças e o mínimo é faturável
+         POR PEÇA — o fornecedor não vende 0,3 m² de lona. */
+      const area = (num(t.widthCm) * num(t.heightCm)) / 10000;
+      billable = Math.max(area, num(t.minQty, 1)) * qty;
+    } else {
+      /* Metro/unidade: o `minQty` da linha é o mínimo do PEDIDO ao
+         fornecedor, não o consumo de uma peça. Aplicá-lo aqui cobrava
+         1 metro inteiro numa estampa que usa 0,40 m — inviabilizando
+         justamente o caso de compor produto, onde a bobina é
+         partilhada entre várias peças. */
+      billable = qty;
+    }
+    const v = billable * num(t.unitCost);
+    materials += v;
+    lines.push({
+      label: `Tabela: ${t.label || "terceirizado"}`,
+      detail: `${billable.toFixed(3).replace(/\.?0+$/, "")} ${unit} × ${formatMoney(num(t.unitCost))}`,
       amount: v,
     });
   }

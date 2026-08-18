@@ -9,6 +9,7 @@ import {
   printerConsumables,
   printers,
   printFormats,
+  pricingTables,
   productFinishings,
   productMaterials,
   productPriceTiers,
@@ -54,6 +55,8 @@ const productSchema = z.object({
   baseMaterialId: z.coerce.number().int().positive().nullable().optional(),
   baseMaterialQty: finite.min(0).max(1_000_000).default(1),
   baseServiceId: z.coerce.number().int().positive().nullable().optional(),
+  basePricingTableId: z.coerce.number().int().positive().nullable().optional(),
+  basePricingTableQty: finite.min(0).max(1_000_000).default(1),
   calculationMode: z.enum(["unit", "batch"]).default("unit"),
   defaultQuantity: finite.min(0).max(1_000_000).default(1),
   piecesPerSheet: finite.min(0.0001).max(1_000_000).default(1),
@@ -125,7 +128,7 @@ async function findById<T extends { id: number }>(rows: T[], id?: number | null)
 }
 
 async function buildCalculation(data: ProductPayload) {
-  const [cats, cons, prts, fmts, mats, fins, srvs, defaults] = await Promise.all([
+  const [cats, cons, prts, fmts, mats, fins, srvs, ptbs, defaults] = await Promise.all([
     db.select().from(printerCategories),
     db.select().from(printerConsumables),
     db.select().from(printers),
@@ -133,6 +136,7 @@ async function buildCalculation(data: ProductPayload) {
     db.select().from(materials),
     db.select().from(finishingItems),
     db.select().from(services),
+    db.select().from(pricingTables),
     getPricingDefaults(),
   ]);
 
@@ -142,6 +146,7 @@ async function buildCalculation(data: ProductPayload) {
   const format = await findById(fmts, data.printFormatId || null);
   const baseMaterial = await findById(mats, data.baseMaterialId || null);
   const service = await findById(srvs, data.baseServiceId || null);
+  const basePricingTable = await findById(ptbs, data.basePricingTableId || null);
   const categoryConsumables = printerCategoryId ? cons.filter((c) => Number(c.categoryId) === Number(printerCategoryId)) : [];
 
   const finishingLines: BatchFinishingLine[] = data.finishings.map((line) => ({
@@ -208,6 +213,8 @@ async function buildCalculation(data: ProductPayload) {
     machineMinutes: data.machineMinutes,
     baseMaterial,
     baseMaterialQty: data.baseMaterialQty,
+    basePricingTable,
+    basePricingTableQty: data.basePricingTableQty,
     finishings: finishingLines,
     extraMaterials: materialLines,
     service,
@@ -282,6 +289,8 @@ function baseProductData(data: ProductPayload, calc: Awaited<ReturnType<typeof b
     baseMaterialId: data.baseMaterialId || null,
     baseMaterialQty: toDecimalString(data.baseMaterialQty, 3),
     baseServiceId: data.baseServiceId || null,
+    basePricingTableId: data.basePricingTableId || null,
+    basePricingTableQty: toDecimalString(data.basePricingTableQty, 3),
     calculationMode: data.calculationMode,
     defaultQuantity: toDecimalString(data.defaultQuantity, 3),
     piecesPerSheet: toDecimalString(data.piecesPerSheet, 3),

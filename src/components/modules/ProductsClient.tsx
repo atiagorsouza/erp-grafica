@@ -102,6 +102,7 @@ export function ProductsClient({
   const format = catalog.formats.find((f) => String(f.id) === form.printFormatId);
   const baseMaterial = asLike<MaterialLike>(catalog.materials.find((m) => String(m.id) === form.baseMaterialId));
   const service = asLike<ServiceLike>(catalog.services.find((s) => String(s.id) === form.baseServiceId));
+  const pricingTableRow = catalog.pricingTables.find((t) => String(t.id) === form.basePricingTableId);
   const finLines = compFinishings
     .map((f) => ({ finishing: asLike<FinishingLike>(catalog.finishings.find((x) => String(x.id) === f.id)), quantity: num(f.quantity, 1), chargeMode: f.chargeMode, batchSize: num(f.batchSize, 1) }));
   const matLines = compMaterials
@@ -161,6 +162,8 @@ export function ProductsClient({
       machineMinutes: num(form.machineMinutes, 0),
       baseMaterial,
       baseMaterialQty: num(form.baseMaterialQty, 1),
+      basePricingTable: pricingTableRow as never,
+      basePricingTableQty: num(form.basePricingTableQty, 1),
       finishings: finLines,
       extraMaterials: matLines,
       service,
@@ -182,7 +185,7 @@ export function ProductsClient({
       feeAmount: r.cardFeeAmount,
       opAmount: 0,
     };
-  }, [printer, printerCat, consumables, format, baseMaterial, service, finLines, matLines, calcMode, colorMode, form, simQty, taxRate, cardFeeRate]);
+  }, [printer, printerCat, consumables, format, baseMaterial, service, pricingTableRow, finLines, matLines, calcMode, colorMode, form, simQty, taxRate, cardFeeRate]);
 
   /* ── abrir editor ── */
   function openNew() {
@@ -225,6 +228,8 @@ export function ProductsClient({
       baseMaterialId: p.baseMaterialId ? String(p.baseMaterialId) : "",
       baseMaterialQty: String(p.baseMaterialQty ?? 1),
       baseServiceId: p.baseServiceId ? String(p.baseServiceId) : "",
+      basePricingTableId: p.basePricingTableId ? String(p.basePricingTableId) : "",
+      basePricingTableQty: String(p.basePricingTableQty ?? 1),
       defaultQuantity: String(p.defaultQuantity ?? 1),
       piecesPerSheet: String(p.piecesPerSheet ?? 1),
       printSides: String(p.printSides ?? 1),
@@ -274,6 +279,8 @@ export function ProductsClient({
         baseMaterialId: form.baseMaterialId || null,
         baseMaterialQty: form.baseMaterialQty || 1,
         baseServiceId: form.baseServiceId || null,
+        basePricingTableId: form.basePricingTableId || null,
+        basePricingTableQty: num(form.basePricingTableQty, 1),
         margin: String(num(form.margin, 40) / 100),
         costSnapshot: String(liveCalc?.baseCost ?? 0),
         sellPrice: String(liveCalc?.sellPrice ?? 0),
@@ -473,6 +480,25 @@ export function ProductsClient({
                   options={catalog.services.map((s) => ({ value: String(s.id), label: String(s.name), hint: formatMoney(num(s.baseCost)) }))}
                 />
               </Field>
+              <Field label="Tabela terceirizada" hint="DTF UV, têxtil, lona — entra pelo CUSTO">
+                <Combobox
+                  value={form.basePricingTableId || ""}
+                  onChange={(v) => setForm((f) => ({ ...f, basePricingTableId: v }))}
+                  placeholder="Nenhuma"
+                  options={catalog.pricingTables
+                    .filter((t) => t.active !== false)
+                    .map((t) => ({
+                      value: String(t.id),
+                      label: String(t.label),
+                      hint: `${formatMoney(num(t.unitCost))}/${String(t.unit)}`,
+                    }))}
+                />
+              </Field>
+              {form.basePricingTableId && (
+                <Field label="Quantidade da tabela" hint={`em ${String(pricingTableRow?.unit || "unidade")} por unidade do produto`}>
+                  <Input mono value={form.basePricingTableQty || "1"} onChange={set("basePricingTableQty")} />
+                </Field>
+              )}
             </section>
 
             {/* Motor */}

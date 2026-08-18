@@ -7,6 +7,7 @@ import {
   products,
   productMaterials,
   productPriceTiers,
+  pricingTables,
   materials,
   stockMovements,
   transactions,
@@ -26,6 +27,7 @@ import {
   toPositive,
 } from "@/lib/money";
 import { resolvePriceTier } from "@/lib/pricing";
+import { estimatePricingTableCost } from "@/lib/pricing-tables";
 
 /* ==================================================================
  *  VALIDAÇÃO (Zod)
@@ -35,6 +37,10 @@ const finiteNumber = z.coerce.number().finite();
 
 export const saleItemSchema = z.object({
   productId: z.coerce.number().int().positive().nullable().optional(),
+  /* Linha de tabela de preço (DTF UV, Lona...) vendida direto no
+     balcão. Como o `productId`, o servidor resolve o valor no banco —
+     o preço que vem do cliente é ignorado. */
+  pricingTableId: z.coerce.number().int().positive().nullable().optional(),
   description: z.string().trim().min(1, "Descrição obrigatória").max(200),
   quantity: finiteNumber
     .min(0.001, "Quantidade deve ser de ao menos 0,001")
@@ -149,6 +155,16 @@ export async function createSale(raw: unknown) {
     }
   }
 
+  /* Linhas de tabela referenciadas na venda: preço vem do banco. */
+  const tableIds = [
+    ...new Set(input.items.map((i) => i.pricingTableId).filter((id): id is number => !!id)),
+  ];
+  const tableMap = new Map<number, typeof pricingTables.$inferSelect>();
+  if (tableIds.length > 0) {
+    const rows = await db.select().from(pricingTables).where(inArray(pricingTables.id, tableIds));
+    for (const row of rows) tableMap.set(row.id, row);
+  }
+
   const validLines: ResolvedLine[] = [];
   let hasProduct = false;
   let hasServiceLike = false;
@@ -160,6 +176,21 @@ export async function createSale(raw: unknown) {
     }
     if (product && product.active === false) {
       return { error: `Produto "${product.name}" está inativo`, status: 422 } satisfies SaleError;
+    }
+
+    /* Linha de tabela: resolve preço de VENDA no servidor. */
+    const tableRow = item.pricingTableId ? tableMap.get(item.pricingTableId) : undefined;
+    if (item.pricingTableId && !tableRow) {
+      return { error: `Linha de tabela ${item.pricingTableId} não encontrada`, status: 422 } satisfies SaleError;
+    }
+    if (tableRow && tableRow.active === false) {
+      return { error: `"${tableRow.label}" está arquivada`, status: 422 } satisfies SaleError;
+    }
+    if (tableRow && toNumber(tableRow.sellPrice, 0) <= 0) {
+      return {
+        error: `"${tableRow.label}" não tem preço de venda definido — use apenas para compor produtos`,
+        status: 422,
+      } satisfies SaleError;
     }
 
     const quantityForTier = toPositive(item.quantity);
@@ -177,18 +208,29 @@ export async function createSale(raw: unknown) {
       } satisfies SaleError;
     }
 
-    const unitPrice = tierResult
-      ? tierResult.unitPrice
-      : product
-        ? toNumber(product.finalPrice, 0)
-        : toPositive(item.unitPrice);
+    /* Em m² o total depende da ÁREA, não só da quantidade — então o
+       unitário é derivado do total calculado pelo motor da tabela. */
+    let tableUnitPrice = 0;
+    if (tableRow) {
+      const qty = toPositive(item.quantity);
+      const total = estimatePricingTableCost(tableRow, qty, undefined, undefined, "sell");
+      tableUnitPrice = qty > 0 ? total / qty : 0;
+    }
+
+    const unitPrice = tableRow
+      ? tableUnitPrice
+      : tierResult
+        ? tierResult.unitPrice
+        : product
+          ? toNumber(product.finalPrice, 0)
+          : toPositive(item.unitPrice);
     if (product && unitPrice <= 0) {
       return {
         error: `Produto "${product.name}" está sem preço final definido`,
         status: 422,
       } satisfies SaleError;
     }
-    if (!product && unitPrice <= 0) {
+    if (!product && !tableRow && unitPrice <= 0) {
       return { error: `Item "${item.description}" sem preço`, status: 422 } satisfies SaleError;
     }
 
@@ -198,7 +240,7 @@ export async function createSale(raw: unknown) {
 
     validLines.push({
       productId: item.productId ?? null,
-      description: product ? String(product.name) : item.description,
+      description: product ? String(product.name) : tableRow ? String(tableRow.label) : item.description,
       quantity,
       unitPrice: round2(unitPrice),
       total: round2(unitPrice * quantity),

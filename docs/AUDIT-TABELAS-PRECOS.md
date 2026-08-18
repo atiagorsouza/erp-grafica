@@ -130,3 +130,98 @@ mudança ✔
 3. Quer **faixa por quantidade** como nos produtos?
 
 Sem isso, #1 e #4 ficam abertos.
+
+---
+
+# Adendo — tabela ligada ao fluxo de venda (v3.42.0)
+
+> "vendo direto no pdv.. mas tb componho produtos como caneca na uv e
+> camisa textil."
+
+Os dois usos ao mesmo tempo. Isso resolveu o desenho que estava travado
+e fechou o #1 desta auditoria.
+
+## A consequência: custo ≠ venda
+
+Com **um** campo só, um dos dois usos estaria sempre errado:
+
+- vender pelo custo = prejuízo
+- compor produto pelo preço de venda = margem cobrada **duas vezes**
+
+Por isso `pricing_tables` ganhou `sellPrice` ao lado de `unitCost`:
+
+| Campo | Significado | Usado em |
+|---|---|---|
+| `unitCost` | o que você paga ao fornecedor | composição de produto |
+| `sellPrice` | o que você cobra do cliente | venda direta no PDV |
+
+`sellPrice = 0` significa **"só compõe"** — a linha não é vendável
+avulsa. O PDV recusa com 422 e mensagem explícita.
+
+## 1. Venda direta no PDV
+
+`saleItemSchema` aceita `pricingTableId`. O preço é resolvido **no
+servidor**, igual ao `productId`: o valor que vem do cliente é ignorado.
+
+Verificado:
+
+| Caso | Resultado |
+|---|---|
+| DTF UV A3 × 2 (venda R$ 39) | R$ 78,00 ✔ |
+| Lona 440g 1 m² (venda R$ 89) | R$ 89,00 ✔ |
+| UV caneca (`sellPrice` = 0) | **recusado 422** ✔ |
+| Cliente forja `unitPrice: 1` | cobrou **R$ 39** ✔ |
+
+## 2. Composição de produto
+
+`products` ganhou `basePricingTableId` + `basePricingTableQty`. Entra
+como linha no breakdown, pelo **custo**, e a margem do produto incide
+por cima.
+
+**Caneca UV 11oz**
+
+| Componente | Valor |
+|---|---|
+| Blank (caixa 36 ÷ R$ 320) | R$ 8,89 |
+| Tabela: UV caneca | R$ 3,50 |
+| **Custo** | **R$ 12,39** |
+| **Venda** (margem 55%) | **R$ 37,68** |
+
+**Camiseta DTF têxtil, estampa 30×40**
+
+| Componente | Valor |
+|---|---|
+| Blank camiseta (pct 10 ÷ R$ 220) | R$ 22,00 |
+| Tabela: DTF têxtil, 0,40 m × R$ 38 | R$ 15,20 |
+| **Custo** | **R$ 37,20** |
+| **Venda** (margem 55%) | **R$ 113,14** |
+
+## 🔴 Bug encontrado no teste: mínimo aplicado na composição
+
+A camisa saiu primeiro a **R$ 182,48**: pedi 0,40 m de DTF têxtil e o
+motor cobrou **1 metro inteiro**, porque aplicava o `minQty` da linha.
+
+O `minQty` é o mínimo do **pedido ao fornecedor** — você não compra
+0,40 m de bobina. Mas ao **compor um produto** a bobina é partilhada
+entre várias peças: cada camisa consome sua fração real.
+
+Distinção agora explícita no motor:
+
+- **m²** → mínimo faturável **por peça** (lona de 30×30 cm paga 1 m²)
+- **metro/unidade** → consumo real, sem mínimo
+
+A camisa caiu de R$ 182,48 para **R$ 113,14** — 38% de diferença que
+sairia direto do bolso do cliente.
+
+## Validação
+
+`typecheck` ✔ · `build` ✔ · `e2e:smoke` **179** ✔ ·
+`/tabelas-precos`, `/produtos`, `/pdv`, `/impressoras`, `/estoque` → 200 ✔ ·
+`lint` sem erros novos
+
+## Restante
+
+**#4 — faixa por quantidade nas tabelas** segue aberto. Agora que a
+tabela gera preço, aplicar `product_price_tiers` aqui passou a fazer
+sentido. Não implementado: você não respondeu se seus fornecedores dão
+desconto por volume.
