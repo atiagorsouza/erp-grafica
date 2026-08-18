@@ -205,3 +205,61 @@ aprende a ignorar. O rótulo `[faixa 1000+]` mostra qual foi usada.
 | 499 un | R$ 204,59 | 0,4100 | 250+ ✔ |
 | 500 un | R$ 185,00 | 0,3700 | 500+ ✔ |
 | 1.000 un | R$ 350,00 | 0,3500 | 1.000+ ✔ |
+
+---
+
+## Adendo 2 — quantidade editável no PDV (v3.37.0)
+
+> "agora a quantidade poderia ter uma edição serviria?"
+
+A pergunta expôs uma **inconsistência entre tela e servidor** que a
+v3.35.0 tinha deixado passar.
+
+### O problema
+
+O carrinho fixava o preço no momento de adicionar o produto e **nunca
+recalculava**. O operador via R$ 1,20/un na tela, digitava 1.000 no
+campo de quantidade — que já existia e já era editável — e a tela
+seguia mostrando R$ 1.200,00. Ao fechar, o servidor aplicava a faixa
+correta e cobrava R$ 350,00.
+
+O valor final estava certo (o servidor manda), mas o operador
+trabalhava com um número falso na tela inteira: subtotal, desconto,
+troco e análise de margem. Ninguém fecha uma venda assim com confiança.
+
+### A correção
+
+`repriceLine()` no cliente espelha `resolvePriceTier` do servidor e roda
+a cada mudança de quantidade — no `+`, no `−` e ao digitar direto.
+
+Conferência tela × servidor, 9 quantidades:
+
+| Qtd | Tela | Servidor | |
+|---|---|---|---|
+| 50 / 80 / 99 | R$ 0,75 | R$ 0,75 | ✓ |
+| 100 / 249 | R$ 0,54 | R$ 0,54 | ✓ |
+| 250 | R$ 0,41 | R$ 0,41 | ✓ |
+| 500 | R$ 0,37 | R$ 0,37 | ✓ |
+| 1.000 / 5.000 | R$ 0,35 | R$ 0,35 | ✓ |
+
+### Três decisões de comportamento
+
+**1. Produto com mínimo entra já na quantidade mínima.** Adicionar 1 un
+de um item que só sai a partir de 50 mostraria um preço que o servidor
+vai recusar no fechamento. Entra com 50 e avisa por toast.
+
+**2. A próxima faixa aparece na linha.** Em verde:
+`500+ sai R$ 0,37 un`. Transforma o degrau — "levar mais sai mais
+barato" — em argumento de venda na tela, em vez de deixar o operador
+descobrir por acaso.
+
+**3. O rascunho é reprecificado ao restaurar.** O carrinho salvo no
+localStorage guarda o preço congelado da sessão anterior; se as faixas
+foram editadas nesse intervalo, restaurar o valor antigo traria de volta
+o mesmo bug. `d.cart.map(repriceLine)` refaz a conta.
+
+### O que o servidor continua fazendo
+
+Nada mudou no `createSale`: ele recalcula tudo e recusa venda abaixo do
+mínimo com 422. O cliente **nunca** define preço — `repriceLine` existe
+só para a tela não mentir.

@@ -47,6 +47,8 @@ export type PosProduct = {
   minStock: string | number | null;
   /** custo direto — usado para mostrar a margem real da venda (v3.28.0) */
   costSnapshot?: string | number | null;
+  /** faixas de preço por quantidade (v3.37.0) */
+  priceTiers?: { minQuantity: string | number; unitPrice: string | number; label?: string | null }[];
 };
 
 export type PosCategory = {
@@ -113,9 +115,46 @@ type CartLine = {
   unitLabel?: string;
   /** custo unitário no momento da venda, para a análise de margem */
   costSnapshot?: number;
+  /* --------------------------------------------------------------
+   * FAIXAS POR QUANTIDADE (v3.37.0)
+   *
+   * Guardadas NA LINHA para a reprecificação não depender de procurar
+   * o produto de novo a cada clique no +/-. O servidor recalcula tudo
+   * na hora de fechar — isto aqui é só para a tela não mentir.
+   * ------------------------------------------------------------- */
+  priceTiers?: { minQuantity: number; unitPrice: number; label?: string | null }[];
+  /** menor quantidade vendável; 0 = sem mínimo */
+  minQuantity?: number;
+  /** rótulo da faixa ativa, mostrado na linha do carrinho */
+  tierLabel?: string | null;
 };
 
 /** Rascunho do carrinho espelhado no navegador (recuperação após F5/queda). */
+/**
+ * Reprecifica a linha do carrinho segundo a faixa de quantidade.
+ *
+ * Espelha `resolvePriceTier` do servidor: vale a MAIOR faixa cujo
+ * mínimo cabe na quantidade. A conta é refeita a cada +/- porque o
+ * preço unitário muda no meio da venda — passar de 99 para 100 un
+ * derruba o unitário, e a tela precisa mostrar isso na hora.
+ *
+ * O servidor recalcula tudo de novo em `createSale`; esta função existe
+ * para a tela não mentir para o operador, não para definir o preço.
+ */
+function repriceLine(line: CartLine): CartLine {
+  const tiers = line.priceTiers;
+  if (!tiers || tiers.length === 0) return line;
+
+  const applicable = tiers.reduce<(typeof tiers)[number] | null>(
+    (acc, t) => (line.quantity >= t.minQuantity ? t : acc),
+    null
+  );
+  /* Abaixo do mínimo mantemos o preço da menor faixa: o aviso visual
+     fica por conta de `minQuantity`, e o servidor recusa no fechamento. */
+  const chosen = applicable || tiers[0];
+  return { ...line, unitPrice: round2(chosen.unitPrice), tierLabel: chosen.label ?? null };
+}
+
 const DRAFT_KEY = "pdv_cart_draft";
 /** Rascunho de mais de 12h é lixo de turno anterior. */
 const DRAFT_TTL_MS = 12 * 60 * 60 * 1000;
@@ -338,7 +377,10 @@ export function PosClient({
   }, [cart, customerId, discountInput, discountMode, payment, sellerName, deliveryMode, notes]);
 
   const restoreDraft = useCallback((d: PosDraft) => {
-    setCart(d.cart);
+    /* Rascunho guarda o preço congelado da sessão anterior. As faixas
+       podem ter sido editadas no intervalo, então reprecificamos ao
+       restaurar em vez de confiar no que estava no localStorage. */
+    setCart(d.cart.map(repriceLine));
     setCustomerId(d.customerId || "");
     setDiscountInput(d.discountInput || "0");
     setDiscountMode(d.discountMode === "percent" ? "percent" : "value");
@@ -482,33 +524,55 @@ export function PosClient({
   /* ---------------- ações do carrinho ---------------- */
   const addProduct = useCallback((p: PosProduct) => {
     const price = toNumber(p.finalPrice, 0);
-    if (price <= 0) {
+    const tiers = (p.priceTiers || [])
+      .map((t) => ({ minQuantity: toNumber(t.minQuantity, 0), unitPrice: toNumber(t.unitPrice, 0), label: t.label ?? null }))
+      .filter((t) => t.minQuantity > 0)
+      .sort((a, b) => a.minQuantity - b.minQuantity);
+
+    /* Sem faixas o produto precisa de preço próprio. Com faixas o
+       `finalPrice` pode até estar zerado — quem manda é a faixa. */
+    if (price <= 0 && tiers.length === 0) {
       toast.error("Produto sem preço", `"${p.name}" está sem preço final definido.`);
       return;
     }
+
+    /* Produto com mínimo entra no carrinho JÁ na quantidade mínima:
+       adicionar 1 un de um item que só sai a partir de 50 mostraria um
+       preço que o servidor vai recusar no fechamento. */
+    const minQuantity = tiers.length > 0 ? tiers[0].minQuantity : 0;
+    const startQty = minQuantity > 0 ? minQuantity : 1;
+
     setCart((c) => {
       const found = c.find((l) => l.productId === p.id);
       if (found)
-        return c.map((l) => (l.productId === p.id ? { ...l, quantity: l.quantity + 1 } : l));
+        return c.map((l) =>
+          l.productId === p.id ? repriceLine({ ...l, quantity: l.quantity + 1 }) : l
+        );
       return [
         ...c,
-        {
+        repriceLine({
           key: `p${p.id}`,
           productId: p.id,
           description: p.name,
           unitPrice: round2(price),
-          quantity: 1,
+          quantity: startQty,
           unitLabel: "UNI",
           costSnapshot: toNumber(p.costSnapshot, 0),
-        },
+          priceTiers: tiers,
+          minQuantity,
+        }),
       ];
     });
+
+    if (minQuantity > 0) {
+      toast.info(`Mínimo de ${minQuantity} un`, `"${p.name}" é vendido em lote.`);
+    }
   }, []);
 
   const setQty = useCallback((key: string, qty: number) => {
     setCart((c) =>
       c
-        .map((l) => (l.key === key ? { ...l, quantity: Math.max(0, round2(qty)) } : l))
+        .map((l) => (l.key === key ? repriceLine({ ...l, quantity: Math.max(0, round2(qty)) }) : l))
         .filter((l) => l.quantity > 0)
     );
   }, []);
@@ -1151,7 +1215,25 @@ export function PosClient({
                         </p>
                         <p className="font-mono text-[10px] text-ink-400 tnum">
                           {formatBRL(l.unitPrice)} un
+                          {l.tierLabel && <span className="ml-1 text-cyan-400">· {l.tierLabel}</span>}
                         </p>
+                        {(l.minQuantity ?? 0) > 0 && l.quantity < (l.minQuantity ?? 0) && (
+                          <p className="font-mono text-[10px] font-semibold text-amber-400">
+                            mínimo {l.minQuantity} un
+                          </p>
+                        )}
+                        {(() => {
+                          /* Próxima faixa: transforma "leva mais que sai
+                             mais barato" em argumento na tela, em vez de
+                             deixar o operador descobrir por acaso. */
+                          const next = l.priceTiers?.find((t) => t.minQuantity > l.quantity);
+                          if (!next || l.quantity < (l.minQuantity ?? 0)) return null;
+                          return (
+                            <p className="font-mono text-[10px] text-emerald-400">
+                              {next.minQuantity}+ sai {formatBRL(next.unitPrice)} un
+                            </p>
+                          );
+                        })()}
                       </div>
                       <div className="flex items-center gap-1">
                         <button

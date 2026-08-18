@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { db } from "@/db";
-import { customers, cashSessions } from "@/db/schema";
+import { customers, cashSessions, productPriceTiers } from "@/db/schema";
 import { and, asc, eq, isNull } from "drizzle-orm";
 import { getCategoriesByModule, listProducts } from "@/lib/queries";
 import { getPricingDefaults } from "@/lib/settings";
@@ -10,10 +10,11 @@ export const metadata: Metadata = { title: "PDV · Frente de Caixa" };
 export const dynamic = "force-dynamic";
 
 export default async function PdvPage() {
-  const [productCats, defaults, productRows, customerRows, openSessions] = await Promise.all([
+  const [productCats, defaults, productRows, tierRows, customerRows, openSessions] = await Promise.all([
     getCategoriesByModule("product"),
     getPricingDefaults(),
     listProducts(),
+    db.select().from(productPriceTiers),
     db.select().from(customers).orderBy(asc(customers.name)),
     db
       .select()
@@ -40,6 +41,11 @@ export default async function PdvPage() {
           stock: p.stock,
           minStock: p.minStock,
           costSnapshot: p.costSnapshot,
+          /* faixas por quantidade: o PDV precisa delas no cliente para
+             reprecificar a linha enquanto o operador muda a quantidade */
+          priceTiers: tierRows
+            .filter((t) => t.productId === p.id)
+            .map((t) => ({ minQuantity: t.minQuantity, unitPrice: t.unitPrice, label: t.label })),
         }))}
       productCats={productCats.map((c) => ({
         id: c.id,
