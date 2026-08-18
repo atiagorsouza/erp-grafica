@@ -989,6 +989,54 @@ async function main() {
   const pdvHtml = await fetch(`${BASE_URL}/pdv`).then((r) => r.text());
   assert(pdvHtml.includes("Ponto de Venda") || pdvHtml.includes("PDV"), "página do PDV responde");
 
+  /* 11m) Caixa do PDV — concorrência e validação (v3.29.0) */
+  await sql("update cash_sessions set status='fechado', closed_at=now() where status='aberto'");
+  await sql("delete from cash_movements");
+  const abriu = await fetch(`${BASE_URL}/api/pdv/cash-session`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ op: "open", operator: "SMOKE", openingAmount: 100 }),
+  }).then((r) => r.json());
+  assert(abriu.ok === true, "caixa abre para o teste de sangria");
+
+  /* 5 sangrias de 40 sobre saldo 100: só 2 cabem. Sem a trava, todas
+     passavam e a gaveta ficava negativa. */
+  const sangrias = await Promise.all(
+    [1, 2, 3, 4, 5].map(() =>
+      fetch(`${BASE_URL}/api/pdv/cash-session`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ op: "move", kind: "sangria", amount: 40, reason: "smoke" }),
+      }).then(async (r) => ({ status: r.status, body: await r.json() }))
+    )
+  );
+  const sangriasOk = sangrias.filter((r) => r.body.ok === true).length;
+  const [totalSangria] = await sql(
+    "select coalesce(sum(amount),0)::float total from cash_movements where kind = 'sangria'"
+  );
+  assert(sangriasOk === 2, `sangria concorrente respeita o saldo (${sangriasOk} de 5 aceitas)`);
+  assert(Number(totalSangria.total) === 80, `total sangrado não excede a gaveta (${totalSangria.total})`);
+
+  const estado = await fetch(`${BASE_URL}/api/pdv/cash-session`).then((r) => r.json());
+  assert(Number(estado.expected) >= 0, `gaveta nunca fica negativa (${estado.expected})`);
+
+  /* fechamento com valor negativo é erro de digitação, não quebra */
+  const fechaRuim = await fetch(`${BASE_URL}/api/pdv/cash-session`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ op: "close", countedAmount: -500 }),
+  }).then((r) => r.status);
+  assert(fechaRuim === 422, "fechamento com valor negativo é recusado");
+
+  const fechaOk = await fetch(`${BASE_URL}/api/pdv/cash-session`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ op: "close", countedAmount: 20 }),
+  }).then((r) => r.json());
+  assert(fechaOk.ok === true, "fechamento com valor válido é aceito");
+  await sql("delete from cash_movements");
+  await sql("delete from transactions where category in ('sangria','suprimento','quebra_caixa','sobra_caixa')");
+
   /* importador de PDF: rejeita arquivo que não é ficha do legado */
   const bogus = new FormData();
   bogus.append("file", new Blob(["nao sou um pdf"], { type: "application/pdf" }), "x.pdf");

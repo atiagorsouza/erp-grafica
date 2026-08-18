@@ -16,8 +16,23 @@ type PaymentSlice = { method?: string; amount?: number | string };
  * Usa o JSON `payments` quando existe; fallback para payment_method + total
  * em vendas legadas. Não conta taxa de cartão nem PIX/débito/crédito.
  */
-async function expectedInDrawer(sessionId: number, openingAmount: number) {
-  const cashSales = await db
+type Executor = typeof db;
+
+/**
+ * Saldo esperado na gaveta.
+ *
+ * Aceita `db` (leitura avulsa) ou a `tx` de uma transação. Na sangria
+ * PRECISA receber a tx: calcular fora da transação permitia que cinco
+ * pedidos simultâneos lessem o mesmo saldo e todos passassem — um caixa
+ * com R$ 100 chegou a liberar R$ 160 em sangrias, deixando a gaveta em
+ * -59,99 e R$ 160 de despesa falsa no Financeiro.
+ */
+async function expectedInDrawer(
+  sessionId: number,
+  openingAmount: number,
+  exec: Executor = db
+) {
+  const cashSales = await exec
     .select({
       total: sales.total,
       paymentMethod: sales.paymentMethod,
@@ -53,7 +68,7 @@ async function expectedInDrawer(sessionId: number, openingAmount: number) {
     }
   }
 
-  const movements = await db
+  const movements = await exec
     .select()
     .from(cashMovements)
     .where(eq(cashMovements.sessionId, sessionId));
@@ -173,20 +188,33 @@ export async function POST(req: Request) {
         return Response.json({ error: "Valor deve ser maior que zero" }, { status: 400 });
       }
 
-      if (kind === "sangria") {
-        const expected = await expectedInDrawer(session.id, toNumber(session.openingAmount, 0));
-        if (amount > expected + 0.001) {
-          return Response.json(
-            {
-              error: `Sangria (${amount.toFixed(2)}) maior que o esperado em gaveta (${expected.toFixed(2)})`,
-            },
-            { status: 422 }
-          );
-        }
-      }
-
       const reason = String(body.reason || "").trim() || null;
+
+      /* A conferência do saldo acontece DENTRO da transação, sobre a
+         sessão travada com FOR UPDATE. Fora dela, sangrias concorrentes
+         liam o mesmo saldo e todas passavam. */
+      let saldoInsuficiente: { pedido: number; disponivel: number } | null = null;
+
       const row = await db.transaction(async (tx) => {
+        await tx
+          .select({ id: cashSessions.id })
+          .from(cashSessions)
+          .where(eq(cashSessions.id, session.id))
+          .limit(1)
+          .for("update");
+
+        if (kind === "sangria") {
+          const expected = await expectedInDrawer(
+            session.id,
+            toNumber(session.openingAmount, 0),
+            tx as unknown as Executor
+          );
+          if (amount > expected + 0.001) {
+            saldoInsuficiente = { pedido: amount, disponivel: expected };
+            return null;
+          }
+        }
+
         const [movement] = await tx
           .insert(cashMovements)
           .values({
@@ -223,6 +251,16 @@ export async function POST(req: Request) {
         return movement;
       });
 
+      if (saldoInsuficiente) {
+        const { pedido, disponivel } = saldoInsuficiente as { pedido: number; disponivel: number };
+        return Response.json(
+          {
+            error: `Sangria (${pedido.toFixed(2)}) maior que o esperado em gaveta (${disponivel.toFixed(2)})`,
+          },
+          { status: 422 }
+        );
+      }
+
       return Response.json({
         ok: true,
         movement: row,
@@ -234,7 +272,17 @@ export async function POST(req: Request) {
       if (body.countedAmount === undefined || body.countedAmount === null || body.countedAmount === "") {
         return Response.json({ error: "Informe o valor contado na gaveta" }, { status: 400 });
       }
-      const counted = toPositive(body.countedAmount);
+      /* `toPositive` transformaria -500 em 0 silenciosamente: o caixa
+         fecharia com quebra inventada e ninguém saberia que foi erro de
+         digitação. Melhor recusar e deixar o operador corrigir. */
+      const countedRaw = Number(String(body.countedAmount).replace(",", "."));
+      if (!Number.isFinite(countedRaw) || countedRaw < 0) {
+        return Response.json(
+          { error: "Valor contado inválido — informe um número igual ou maior que zero" },
+          { status: 422 }
+        );
+      }
+      const counted = toPositive(countedRaw);
       const expected = await expectedInDrawer(session.id, toNumber(session.openingAmount, 0));
       const difference = round2(counted - expected);
 

@@ -5,6 +5,34 @@ Versionamento: [SemVer](https://semver.org/lang/pt-BR/).
 
 ---
 
+## [3.29.0] — 2026-08-18
+
+Auditoria completa do PDV e do caixa. Documentado em
+`docs/AUDIT-PDV-CAIXA.md`.
+
+### Corrigido — sangria concorrente esvaziava a gaveta (crítico)
+
+O saldo era conferido **fora** da transação: cinco sangrias simultâneas
+liam o mesmo valor e todas passavam. Um caixa aberto com R$ 100 liberou
+**R$ 160** em sangrias, deixando a gaveta em −R$ 59,99 e R$ 160 de
+despesa falsa no Financeiro — dinheiro que nunca existiu, derrubando o
+resultado do mês.
+
+A sessão passou a ser travada com `FOR UPDATE` e o saldo conferido
+dentro da transação, como já era feito no Estoque e no estoque da venda.
+
+### Corrigido — fechamento aceitava valor negativo
+
+`toPositive(-500)` virava zero: o caixa fechava com quebra inventada de
+erro de digitação, sem avisar ninguém. Agora responde 422 pedindo
+correção.
+
+### Testes
+
+`e2e:smoke` foi de 173 para **179 checks**.
+
+---
+
 ## [3.28.0] — 2026-08-18
 
 Fecha a pendência da v3.27.0: as regras de pagamento saíram da biblioteca
