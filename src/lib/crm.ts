@@ -14,6 +14,7 @@ import {
   isValidEmail,
   onlyDigits,
 } from "@/lib/validators";
+import { phoneKey } from "@/lib/phone";
 import { todayISO } from "@/lib/period";
 
 export type CrmError = { error: string; status: number; details?: unknown };
@@ -119,6 +120,11 @@ function normalizeCustomer(data: z.infer<typeof customerSchema>) {
     phone,
     whatsapp,
     secondaryPhone,
+    /* Chave canônica para o WhatsApp encontrar este cliente. O campo
+       whatsapp tem prioridade — é o número que a pessoa realmente usa.
+       Se não der para reconhecer, fica null: melhor sem chave do que
+       com chave errada apontando para outra pessoa. */
+    phoneE164: phoneKey(data.whatsapp || data.phone || data.secondaryPhone || ""),
     website: nullable(data.website),
     contactName: nullable(data.contactName),
     contactRole: nullable(data.contactRole),
@@ -221,6 +227,23 @@ async function validateCustomer(data: z.infer<typeof customerSchema>, ignoreId?:
     }
   }
 
+  /* Telefone duplicado: compara pela forma canônica, então
+     "(21) 98888-7777", "21988887777" e "+5521988887777" colidem entre
+     si. Diz QUEM já tem o número — quem está no balcão precisa saber
+     se é o mesmo cliente voltando ou um homônimo. O índice único cobre
+     a corrida; isto aqui cobre a clareza. */
+  const chave = phoneKey(data.whatsapp || data.phone || data.secondaryPhone || "");
+  if (chave) {
+    const [dupe] = await db
+      .select({ id: customers.id, name: customers.name })
+      .from(customers)
+      .where(eq(customers.phoneE164, chave))
+      .limit(1);
+    if (dupe && dupe.id !== ignoreId) {
+      return { error: `Telefone já cadastrado para ${dupe.name}`, status: 409 } satisfies CrmError;
+    }
+  }
+
   return null;
 }
 
@@ -229,8 +252,37 @@ export async function createCustomer(raw: unknown) {
   if ("error" in parsed) return parsed;
   const validation = await validateCustomer(parsed.data);
   if (validation) return validation;
-  const [row] = await db.insert(customers).values(normalizeCustomer(parsed.data)).returning();
-  return { ok: true as const, row };
+  try {
+    const [row] = await db.insert(customers).values(normalizeCustomer(parsed.data)).returning();
+    return { ok: true as const, row };
+  } catch (e) {
+    return duplicataOuErro(e);
+  }
+}
+
+/* Os índices únicos são a última linha de defesa contra duplicata: a
+   validação anterior é SELECT-depois-INSERT, e duas requisições
+   simultâneas passam as duas. Quando o banco recusa, devolvemos 409
+   com uma frase que o operador entende — sem isso vira 500 e parece
+   que o sistema quebrou. */
+function duplicataOuErro(e: unknown): CrmError {
+  const err = e as { code?: string; constraint?: string };
+  if (err?.code === "23505") {
+    if (err.constraint === "customers_phone_e164_unique_idx") {
+      return {
+        error: "Já existe um cliente com este telefone.",
+        status: 409,
+      } satisfies CrmError;
+    }
+    if (err.constraint === "customers_document_unique_idx") {
+      return {
+        error: "Já existe um cliente com este CPF/CNPJ.",
+        status: 409,
+      } satisfies CrmError;
+    }
+    return { error: "Registro duplicado.", status: 409 } satisfies CrmError;
+  }
+  throw e;
 }
 
 export async function updateCustomer(id: number, raw: unknown) {
@@ -243,12 +295,16 @@ export async function updateCustomer(id: number, raw: unknown) {
   const validation = await validateCustomer(parsed.data, id);
   if (validation) return validation;
 
-  const [row] = await db
-    .update(customers)
-    .set(normalizeCustomer(parsed.data))
-    .where(eq(customers.id, id))
-    .returning();
-  return { ok: true as const, row };
+  try {
+    const [row] = await db
+      .update(customers)
+      .set(normalizeCustomer(parsed.data))
+      .where(eq(customers.id, id))
+      .returning();
+    return { ok: true as const, row };
+  } catch (e) {
+    return duplicataOuErro(e);
+  }
 }
 
 export async function archiveCustomer(id: number, reason = "Arquivado pelo CRM") {

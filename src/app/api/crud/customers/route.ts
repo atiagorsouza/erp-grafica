@@ -39,6 +39,15 @@ export async function POST(req: Request) {
        Vira 409 amigável — o catch genérico devolvia o INSERT inteiro
        para o navegador. Drizzle embrulha o erro do pg, daí o `cause`. */
     const raw = `${String(e)} ${String((e as { cause?: unknown })?.cause ?? "")}`;
+    /* Distinguir QUAL índice colidiu. Antes, um "duplicate key" genérico
+       era sempre reportado como documento duplicado — com o índice de
+       telefone isso passou a mentir para o operador. */
+    if (raw.includes("customers_phone_e164_unique_idx")) {
+      return Response.json(
+        { error: "Este telefone já está cadastrado para outro cliente." },
+        { status: 409 }
+      );
+    }
     if (raw.includes("customers_document_unique_idx") || raw.includes("duplicate key")) {
       return Response.json(
         { error: "Este documento já está cadastrado para outro cliente." },

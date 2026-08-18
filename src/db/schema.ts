@@ -129,6 +129,13 @@ export const customers = pgTable("customers", {
   origin: text("origin"),
   /* LGPD: cliente que pediu para não receber mensagem automática */
   whatsappOptOut: boolean("whatsapp_opt_out").default(false).notNull(),
+  /* Telefone canônico em E.164 ("5521988887777") — é por aqui que o
+     WhatsApp encontra o cliente. Os campos phone/whatsapp guardam a
+     grafia bonita para exibir; este guarda a chave para COMPARAR.
+     Preenchido por `toE164BR()` em lib/phone.ts. Sem ele o bot cria
+     um cliente novo a cada mensagem, porque "(21) 98888-7777" e
+     "21988887777" são strings diferentes para o banco. */
+  phoneE164: text("phone_e164"),
   status: customerStatusEnum("status").default("lead").notNull(),
   creditLimit: numeric("credit_limit", { precision: 12, scale: 2 }).default("0"),
   tags: text("tags"),
@@ -144,6 +151,14 @@ export const customers = pgTable("customers", {
   uniqueIndex("customers_document_unique_idx")
     .on(table.document)
     .where(sql`coalesce(document, '') <> ''`),
+  /* Um telefone, um cliente. O bot do WhatsApp faz "achou? usa : cria",
+     e duas mensagens quase simultâneas do mesmo número passariam as
+     duas pela checagem antes de qualquer INSERT — o mesmo TOCTOU do
+     documento. Aqui é pior: acontece sozinho, sem ninguém clicando.
+     Parcial porque telefone é opcional e vazios não podem colidir. */
+  uniqueIndex("customers_phone_e164_unique_idx")
+    .on(table.phoneE164)
+    .where(sql`coalesce(phone_e164, '') <> ''`),
 ]);
 
 /* ------------------------------------------------------------------ */
