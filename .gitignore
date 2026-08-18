@@ -1,0 +1,45 @@
+# dependencies
+node_modules/
+.npm/
+
+# next.js
+.next/
+out/
+next-env.d.ts
+
+# env & secrets
+.env
+.env.local
+.env.*.local
+
+# printflow runtime
+.printflow/
+
+# logs & debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.log
+.turbo/
+
+# typescript
+*.tsbuildinfo
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# test / coverage
+coverage/
+.nyc_output/
+
+# drizzle local
+drizzle/meta/
+
+# Dumps do banco — nunca versionar (contêm dados de clientes)
+backups/
+logs/
