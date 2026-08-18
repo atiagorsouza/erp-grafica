@@ -45,6 +45,8 @@ export type PosProduct = {
   trackStock: boolean | null;
   stock: string | number | null;
   minStock: string | number | null;
+  /** custo direto — usado para mostrar a margem real da venda (v3.28.0) */
+  costSnapshot?: string | number | null;
 };
 
 export type PosCategory = {
@@ -85,6 +87,14 @@ export type PdvConfig = {
   receiptFooter: string;
   /** peso da fonte no cupom impresso (400–800), ajustável no Painel */
   receiptBoldness?: number;
+  /* Regras de pagamento (v3.28.0) — todas vindas do Painel de Controle.
+     O preço de tabela já embute o pior meio aceito, então PIX e dinheiro
+     têm desconto e o parcelamento tem piso de valor. */
+  pixDiscountRate?: number;
+  installmentMin?: number;
+  installmentMax?: number;
+  minMarginRate?: number;
+  taxRate?: number;
 };
 
 export type CashSession = {
@@ -101,6 +111,8 @@ type CartLine = {
   unitPrice: number;
   quantity: number;
   unitLabel?: string;
+  /** custo unitário no momento da venda, para a análise de margem */
+  costSnapshot?: number;
 };
 
 /** Rascunho do carrinho espelhado no navegador (recuperação após F5/queda). */
@@ -413,10 +425,53 @@ export function PosClient({
   const total = round2(net + fee);
   const totalQty = cart.reduce((s, l) => s + l.quantity, 0);
 
+  /* ---------------- regras de pagamento (v3.28.0) ----------------
+   *
+   * O preço de tabela embute o pior meio aceito (3x sem juros). Quem
+   * paga PIX ou dinheiro não passa pela adquirente, então esse custo
+   * volta para o cliente como desconto à vista — em vez de "acréscimo
+   * no cartão", que irrita e é problema no Procon quando não informado.
+   */
+  const pixDiscountRate = Math.max(pdvConfig.pixDiscountRate ?? 0, 0);
+  const installmentMin = Math.max(pdvConfig.installmentMin ?? 0, 0);
+  const installmentMax = Math.max(pdvConfig.installmentMax ?? 1, 1);
+  const minMarginRate = Math.max(pdvConfig.minMarginRate ?? 0, 0);
+  const taxRate = Math.max(pdvConfig.taxRate ?? 0, 0);
+
+  const aVista = !splitOn && (payment === "PIX" || payment === "Dinheiro");
+  const cashDiscount = aVista && pixDiscountRate > 0 ? round2(net * pixDiscountRate) : 0;
+  /* total que o cliente realmente paga, já com o desconto à vista */
+  const totalDue = round2(total - cashDiscount);
+
+  /* Parcelamento sem juros: só acima do piso configurado. Abaixo disso a
+     parcela fica pequena demais para justificar o custo da operação. */
+  const canInstall = payment === "Crédito" && !splitOn && totalDue >= installmentMin && installmentMin > 0;
+  const installmentValue = canInstall ? round2(totalDue / installmentMax) : 0;
+
+  /* Margem real desta venda: o que sobra depois de imposto e taxa,
+     comparado ao custo dos itens. Responde "vale a pena?" na hora. */
+  const cartCost = round2(
+    cart.reduce((s, l) => s + toNumber(l.costSnapshot, 0) * l.quantity, 0)
+  );
+  const saleMargin = useMemo(() => {
+    if (totalDue <= 0 || cartCost <= 0) return null;
+    const taxAmount = totalDue * taxRate;
+    const netReceived = totalDue - fee - taxAmount;
+    const profit = netReceived - cartCost;
+    return {
+      netReceived: round2(netReceived),
+      profit: round2(profit),
+      rate: profit / totalDue,
+      belowFloor: minMarginRate > 0 && profit / totalDue < minMarginRate - 1e-9,
+    };
+  }, [totalDue, cartCost, fee, taxRate, minMarginRate]);
+
   /* Parcela em dinheiro: no split pode conviver com cartão/PIX. */
+  /* `totalDue`, não `total`: em dinheiro o desconto à vista já foi
+     aplicado, e cobrar/`trocar` pelo valor cheio daria troco errado. */
   const cashPortion = splitOn
     ? round2(splitParsed.filter((l) => l.method === "Dinheiro").reduce((s, l) => s + l.value, 0))
-    : total;
+    : totalDue;
   const isCash = splitOn
     ? splitParsed.some((l) => l.method === "Dinheiro" && l.value > 0)
     : payment === "Dinheiro";
@@ -444,6 +499,7 @@ export function PosClient({
           unitPrice: round2(price),
           quantity: 1,
           unitLabel: "UNI",
+          costSnapshot: toNumber(p.costSnapshot, 0),
         },
       ];
     });
@@ -665,11 +721,14 @@ export function PosClient({
     const paymentLabel = splitPayload
       ? splitPayload.map((p) => p.method).join(" + ")
       : payment;
+    /* O desconto à vista entra como desconto normal: o servidor
+       recalcula o total pelo catálogo e não conhece a regra do PIX.
+       Sem somar aqui, a venda fecharia pelo valor cheio. */
     const totalsSnapshot = {
       subtotal,
-      discount,
+      discount: round2(discount + cashDiscount),
       fee,
-      total,
+      total: totalDue,
       payment: paymentLabel,
       received,
       change,
@@ -1187,14 +1246,57 @@ export function PosClient({
                   </div>
                 )}
 
+                {/* Desconto à vista: o preço embute o custo do cartão,
+                    então PIX e dinheiro devolvem essa diferença. */}
+                {cashDiscount > 0 && (
+                  <div className="flex items-center justify-between font-mono text-[10.5px] text-emerald-300 tnum">
+                    <span>desconto à vista ({(pixDiscountRate * 100).toFixed(2)}%)</span>
+                    <span>−{formatBRL(cashDiscount)}</span>
+                  </div>
+                )}
+
                 <div className="flex items-baseline justify-between border-t border-dashed border-ink-700 pt-2">
                   <span className="font-mono text-[11px] tracking-[0.18em] text-ink-300 uppercase">
                     Total
                   </span>
                   <span className="font-mono text-[28px] leading-none font-semibold text-cyan-300 tnum">
-                    {formatBRL(total)}
+                    {formatBRL(totalDue)}
                   </span>
                 </div>
+
+                {/* Parcelamento sem juros, quando o valor permite. */}
+                {canInstall && (
+                  <div className="flex items-center justify-between font-mono text-[10.5px] text-ink-400 tnum">
+                    <span>ou {installmentMax}x sem juros</span>
+                    <span>{formatBRL(installmentValue)}/mês</span>
+                  </div>
+                )}
+                {payment === "Crédito" && !splitOn && !canInstall && installmentMin > 0 && (
+                  <div className="font-mono text-[10px] text-ink-500">
+                    parcelamento a partir de {formatBRL(installmentMin)}
+                  </div>
+                )}
+
+                {/* Margem real desta venda — responde "vale a pena?" na
+                    hora, em vez de descobrir no fechamento do mês. */}
+                {saleMargin && (
+                  <div
+                    className={cn(
+                      "mt-1 flex items-center justify-between rounded-md px-2 py-1 font-mono text-[10px] tnum",
+                      saleMargin.belowFloor
+                        ? "bg-red-500/10 text-red-300"
+                        : "bg-emerald-500/10 text-emerald-300"
+                    )}
+                    title="Sobra depois do custo dos itens, imposto e taxa da forma de pagamento"
+                  >
+                    <span>
+                      {saleMargin.belowFloor ? "margem abaixo do piso" : "margem desta venda"}
+                    </span>
+                    <span>
+                      {(saleMargin.rate * 100).toFixed(1)}% · {formatBRL(saleMargin.profit)}
+                    </span>
+                  </div>
+                )}
               </div>
 
               {/* PAGAMENTO */}
@@ -1471,7 +1573,7 @@ export function PosClient({
                   (isCash && received <= 0)
                 }
               >
-                Finalizar Venda · {formatBRL(total)}
+                Finalizar Venda · {formatBRL(totalDue)}
               </Button>
             </div>
           </div>

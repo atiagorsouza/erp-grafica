@@ -5,6 +5,50 @@ Versionamento: [SemVer](https://semver.org/lang/pt-BR/).
 
 ---
 
+## [3.28.0] — 2026-08-18
+
+Fecha a pendência da v3.27.0: as regras de pagamento saíram da biblioteca
+e chegaram à tela do PDV.
+
+### Adicionado — desconto à vista automático
+
+O preço de tabela embute o custo do 3x. Quando o cliente paga em PIX ou
+dinheiro, esse custo volta para ele como desconto, aplicado sozinho na
+tela: R$ 208,86 viram **R$ 196,08**.
+
+É a virada de discurso que a v3.27.0 propôs — em vez de avisar "tem juros
+no cartão" no fechamento, o balcão oferece "desconto à vista". Mesmo
+dinheiro, sem atrito e sem risco com o Procon.
+
+### Adicionado — parcelamento com piso de valor
+
+No crédito, o PDV mostra "ou 3x sem juros · R$ 69,62/mês" quando a venda
+alcança o mínimo (R$ 150). Abaixo disso avisa a partir de quanto o
+parcelamento é oferecido, em vez de simplesmente não aparecer.
+
+### Adicionado — margem real da venda na tela
+
+Ao lado do total, o operador vê quanto sobra depois do custo dos itens,
+do imposto e da taxa daquela forma de pagamento. Fica vermelho se a
+venda furar o piso configurado — antes isso só apareceria no fechamento
+do mês, quando já não dá para desfazer.
+
+Para isso o custo do produto passou a ser carregado pelo PDV
+(`costSnapshot` na projeção e na linha do carrinho).
+
+### Corrigido — troco em dinheiro ignorava o desconto
+
+`cashPortion` usava o total cheio. Com o desconto à vista, o operador
+cobraria R$ 208,86 de uma venda de R$ 196,08 e devolveria troco a menos.
+O desconto também passou a ser somado ao desconto enviado ao servidor —
+sem isso a venda seria gravada pelo valor sem desconto.
+
+### Testes
+
+`e2e:smoke` foi de 161 para **173 checks**.
+
+---
+
 ## [3.27.0] — 2026-08-18
 
 Motor de precificação corrigido, com as três decisões comerciais

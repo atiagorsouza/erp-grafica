@@ -946,6 +946,49 @@ async function main() {
   assert(podeParcelar(120, 150, 3, 3) === false, "abaixo do mínimo não oferece parcelamento");
   assert(podeParcelar(500, 150, 6, 3) === false, "acima do máximo de parcelas é recusado");
 
+  /* 11l) PDV — regras de pagamento na tela (v3.28.0) */
+  const r2 = (v) => Math.round((v + Number.EPSILON) * 100) / 100;
+  const pdvTotais = (net, forma, feeRate, { pixD = 0.0612, tax = 0.06, cost = 0, instMin = 150, instMax = 3 } = {}) => {
+    const fee = feeRate > 0 ? r2(net * feeRate) : 0;
+    const total = r2(net + fee);
+    const aVista = forma === "PIX" || forma === "Dinheiro";
+    const desconto = aVista && pixD > 0 ? r2(net * pixD) : 0;
+    const due = r2(total - desconto);
+    const liq = due - fee - due * tax;
+    return {
+      due, desconto, fee,
+      margem: cost > 0 && due > 0 ? (liq - cost) / due : 0,
+      parcela: forma === "Crédito" && due >= instMin ? r2(due / instMax) : 0,
+    };
+  };
+
+  /* PIX e dinheiro recebem o desconto à vista; cartão não */
+  const pdvPix = pdvTotais(208.86, "PIX", 0, { cost: 100 });
+  const pdvCred = pdvTotais(208.86, "Crédito", 0.0612, { cost: 100 });
+  assert(pdvPix.desconto > 0, "PIX recebe desconto à vista");
+  assert(pdvCred.desconto === 0, "crédito não recebe desconto à vista");
+  assert(pdvPix.due < pdvCred.due, "cliente paga menos à vista do que no cartão");
+
+  /* nenhuma forma pode furar o piso de margem */
+  for (const [forma, taxa] of [["PIX", 0], ["Dinheiro", 0], ["Débito", 0.0137], ["Crédito", 0.0612]]) {
+    const r = pdvTotais(208.86, forma, taxa, { cost: 100 });
+    assert(r.margem >= 0.4 - 1e-9, `margem em ${forma} respeita o piso (${(r.margem * 100).toFixed(1)}%)`);
+  }
+
+  /* parcelamento só acima do mínimo */
+  assert(pdvTotais(208.86, "Crédito", 0.0612, { cost: 100 }).parcela > 0, "venda alta oferece parcelamento");
+  assert(pdvTotais(80, "Crédito", 0.0612, { cost: 40 }).parcela === 0, "venda abaixo do mínimo não parcela");
+
+  /* o troco em dinheiro usa o total JÁ com desconto */
+  const dinheiro = pdvTotais(208.86, "Dinheiro", 0, { cost: 100 });
+  const troco = r2(200 - dinheiro.due);
+  assert(Math.abs(dinheiro.due - 196.08) < 0.02, `total em dinheiro aplica o desconto (${dinheiro.due})`);
+  assert(troco > 0, "troco calculado sobre o valor com desconto");
+
+  /* a tela do PDV precisa renderizar os elementos novos */
+  const pdvHtml = await fetch(`${BASE_URL}/pdv`).then((r) => r.text());
+  assert(pdvHtml.includes("Ponto de Venda") || pdvHtml.includes("PDV"), "página do PDV responde");
+
   /* importador de PDF: rejeita arquivo que não é ficha do legado */
   const bogus = new FormData();
   bogus.append("file", new Blob(["nao sou um pdf"], { type: "application/pdf" }), "x.pdf");

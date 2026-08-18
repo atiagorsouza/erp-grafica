@@ -39,6 +39,7 @@ export default async function PdvPage() {
           trackStock: p.trackStock,
           stock: p.stock,
           minStock: p.minStock,
+          costSnapshot: p.costSnapshot,
         }))}
       productCats={productCats.map((c) => ({
         id: c.id,
@@ -89,6 +90,11 @@ export default async function PdvPage() {
       cardFeeDebit={defaults.cardFeeRate}
       cardFeeCredit={defaults.cardFeeCreditRate}
       pdvConfig={{
+        pixDiscountRate: defaults.pixDiscountRate,
+        installmentMin: defaults.installmentMin,
+        installmentMax: defaults.installmentMax,
+        minMarginRate: defaults.minMarginRate,
+        taxRate: defaults.taxRate,
         sellerDefault: defaults.pdv_seller_default,
         deliveryDefault: defaults.pdv_delivery_default,
         allowNegativeStock: defaults.pdv_allow_negative_stock,
