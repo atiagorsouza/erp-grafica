@@ -16,6 +16,7 @@ const NAV: NavGroup[] = [
       { href: "/orcamentos", label: "Orçamentos", icon: "quote" },
       { href: "/pedidos", label: "Pedidos & OS", icon: "orders" },
       { href: "/clientes", label: "Clientes & CRM", icon: "users" },
+      { href: "/whatsapp", label: "WhatsApp", icon: "whatsapp" },
       { href: "/kanban", label: "Kanban Produção", icon: "kanban" },
       { href: "/calendario", label: "Calendário", icon: "calendar" },
     ],
