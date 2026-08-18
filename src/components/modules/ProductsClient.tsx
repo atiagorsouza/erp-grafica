@@ -55,6 +55,7 @@ export function ProductsClient({
   priceTiers = [],
   taxRate,
   cardFeeRate,
+  laborHourlyRate,
 }: {
   catalog: {
     categories: Row[];
@@ -73,6 +74,7 @@ export function ProductsClient({
   priceTiers?: Row[];
   taxRate: number;
   cardFeeRate: number;
+  laborHourlyRate: number;
 }) {
   const router = useRouter();
   const refresh = () => router.refresh();
@@ -129,6 +131,7 @@ export function ProductsClient({
         finishings: finLines,
         service,
         operationalRate: num(form.operationalRate, 0) / 100,
+        laborHourlyRate,
         taxRate,
         paymentRate: cardFeeRate,
         profitRate: num(form.margin, 40) / 100,
@@ -169,6 +172,7 @@ export function ProductsClient({
       extraMaterials: matLines,
       service,
       margin: num(form.margin, 40) / 100,
+      laborHourlyRate,
       taxRate,
       cardFeeRate,
     });
@@ -186,7 +190,7 @@ export function ProductsClient({
       feeAmount: r.cardFeeAmount,
       opAmount: 0,
     };
-  }, [printer, printerCat, consumables, format, baseMaterial, service, pricingTableRow, finLines, matLines, calcMode, colorMode, form, simQty, taxRate, cardFeeRate]);
+  }, [printer, printerCat, consumables, format, baseMaterial, service, pricingTableRow, finLines, matLines, calcMode, colorMode, form, simQty, taxRate, cardFeeRate, laborHourlyRate]);
 
   /* ── abrir editor ── */
   function openNew() {

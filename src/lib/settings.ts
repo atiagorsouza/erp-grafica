@@ -50,6 +50,9 @@ export interface PricingDefaults {
   installmentMin: number;    // valor mínimo para parcelar (R$)
   installmentMax: number;    // máximo de parcelas sem juros
   minMarginRate: number;     // piso de margem (fração)
+  /** Valor da hora de mão de obra (R$). Multiplica `estimatedHours` do
+   *  serviço e entra como custo. 0 = não cobra por hora (v3.46.0). */
+  laborHourlyRate: number;
 }
 
 /**
@@ -107,6 +110,7 @@ const DEFAULTS: PricingDefaults = {
   installmentMin: 150,
   installmentMax: 3,
   minMarginRate: 0.4,
+  laborHourlyRate: 0,
 };
 
 /**
@@ -211,6 +215,7 @@ export async function getPricingDefaults(): Promise<PricingDefaults> {
       paymentCostRate: percentToRate(map.get("pricing_payment_cost"), DEFAULTS.paymentCostRate),
       pixDiscountRate: percentToRate(map.get("pricing_pix_discount"), DEFAULTS.pixDiscountRate),
       installmentMin: Number(map.get("pricing_installment_min")) || DEFAULTS.installmentMin,
+      laborHourlyRate: Number(map.get("labor_hourly_rate")) || DEFAULTS.laborHourlyRate,
       installmentMax: Number(map.get("pricing_installment_max")) || DEFAULTS.installmentMax,
       minMarginRate: percentToRate(map.get("pricing_min_margin"), DEFAULTS.minMarginRate),
     };

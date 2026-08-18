@@ -179,6 +179,7 @@ async function buildCalculation(data: ProductPayload) {
       extraMaterials: materialLines,
       finishings: finishingLines,
       service,
+      laborHourlyRate: defaults.laborHourlyRate,
       operationalRate: data.operationalRate || defaults.operationalRate,
       taxRate: defaults.taxRate,
       /* pior meio de pagamento aceito (ex.: 3x sem juros), não a taxa
@@ -220,6 +221,7 @@ async function buildCalculation(data: ProductPayload) {
     finishings: finishingLines,
     extraMaterials: materialLines,
     service,
+    laborHourlyRate: defaults.laborHourlyRate,
     margin: data.margin,
     taxRate: defaults.taxRate,
     cardFeeRate: defaults.paymentCostRate,

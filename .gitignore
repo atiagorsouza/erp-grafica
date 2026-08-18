@@ -39,3 +39,7 @@ coverage/
 
 # drizzle local
 drizzle/meta/
+
+# Dumps do banco — nunca versionar (contêm dados de clientes)
+backups/
+logs/

@@ -93,13 +93,45 @@ export interface ServiceLike {
   name?: string | null;
   baseCost: string | number | null;
   type?: string | null;
+  /** Horas de trabalho do serviço. Vira custo quando combinada com
+   *  `laborHourlyRate` — ver `serviceTotal()` (v3.46.0). */
+  estimatedHours?: string | number | null;
 }
+
 
 const num = (v: unknown, fallback = 0): number => {
   if (v === null || v === undefined || v === "") return fallback;
   const n = typeof v === "number" ? v : parseFloat(String(v));
   return Number.isFinite(n) ? n : fallback;
 };
+
+/**
+ * Custo de um serviço = custo fixo + (horas × valor da hora).
+ *
+ * Até a v3.45.1 o campo "Horas estimadas" era gravado e exibido na tela,
+ * mas NUNCA entrava em cálculo nenhum: só o `baseCost` contava. Quem
+ * cadastrava "Arte final — 2h" via o campo aceitar o valor e supunha que
+ * as 2 horas seriam cobradas. Não eram.
+ *
+ * Agora as horas viram dinheiro, usando o valor-hora do Painel de
+ * Controle (`labor_hourly_rate`). Com a taxa em 0 — que é o default —
+ * o resultado é idêntico ao de antes, então nenhum produto já cadastrado
+ * muda de preço sozinho.
+ *
+ * Mesma ideia do tempo de máquina da v3.39.0, mas para mão de obra:
+ * lá é a impressora ocupada, aqui é a pessoa trabalhando.
+ */
+export function serviceTotal(
+  service: ServiceLike | null | undefined,
+  laborHourlyRate = 0
+): { total: number; base: number; labor: number; hours: number } {
+  if (!service) return { total: 0, base: 0, labor: 0, hours: 0 };
+  const base = num(service.baseCost);
+  const hours = Math.max(num(service.estimatedHours), 0);
+  const rate = Math.max(num(laborHourlyRate), 0);
+  const labor = hours * rate;
+  return { total: base + labor, base, labor, hours };
+}
 
 export type ColorMode = "mono" | "color";
 
@@ -189,6 +221,8 @@ export interface ProductCalcInput {
   finishings: FinishingLine[];
   extraMaterials: MaterialLine[];
   service?: ServiceLike | null;
+  /** valor da hora de mão de obra (R$); multiplica `service.estimatedHours` */
+  laborHourlyRate?: number;
   margin: number; // margem sobre o preço (0..1)
   taxRate: number; // impostos sobre venda (0..1)
   cardFeeRate: number; // taxa maquininha (0..1)
@@ -376,12 +410,20 @@ export function computeProduct(input: ProductCalcInput): ProductCalcResult {
   // 5) SERVIÇO ------------------------------------------------------
   let serviceCost = 0;
   if (input.service) {
-    serviceCost = num(input.service.baseCost);
+    const svc = serviceTotal(input.service, input.laborHourlyRate);
+    serviceCost = svc.total;
     lines.push({
       label: `Serviço: ${input.service.name}`,
       detail: input.service.type === "terceirizado" ? "Terceirizado" : "Próprio",
-      amount: serviceCost,
+      amount: svc.base,
     });
+    if (svc.labor > 0) {
+      lines.push({
+        label: `Mão de obra: ${input.service.name}`,
+        detail: `${svc.hours}h × ${formatMoney(num(input.laborHourlyRate))}/h`,
+        amount: svc.labor,
+      });
+    }
   }
 
   const baseCost = printing + materials + finishing + serviceCost;
@@ -487,6 +529,8 @@ export interface BatchCalcInput {
   extraMaterials: MaterialLine[];
   finishings: BatchFinishingLine[];
   service?: ServiceLike | null;
+  /** valor da hora de mão de obra (R$); multiplica `service.estimatedHours` */
+  laborHourlyRate?: number;
   /** matriz de marginalização / markup divisor */
   operationalRate: number;
   taxRate: number;
@@ -695,12 +739,21 @@ export function computeBatchProduct(input: BatchCalcInput): BatchCalcResult {
     });
   }
 
-  const service = input.service ? num(input.service.baseCost) : 0;
-  if (input.service && service > 0) {
+  const svc = serviceTotal(input.service, input.laborHourlyRate);
+  const service = svc.total;
+  if (input.service && svc.base > 0) {
     lines.push({
       label: `Serviço: ${input.service.name}`,
       detail: "Custo fixo do lote",
-      amount: service,
+      amount: svc.base,
+    });
+  }
+  // Linha própria: o operador precisa ver quanto do preço é mão de obra.
+  if (input.service && svc.labor > 0) {
+    lines.push({
+      label: `Mão de obra: ${input.service.name}`,
+      detail: `${svc.hours}h × ${formatMoney(num(input.laborHourlyRate))}/h`,
+      amount: svc.labor,
     });
   }
 

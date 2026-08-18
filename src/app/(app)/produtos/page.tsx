@@ -28,6 +28,7 @@ export default async function ProdutosPage() {
       priceTiers={tiers}
       taxRate={defaults.taxRate}
       cardFeeRate={defaults.cardFeeRate}
+      laborHourlyRate={defaults.laborHourlyRate}
     />
   );
 }

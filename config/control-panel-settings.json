@@ -192,6 +192,14 @@
           "defaultValue": "15"
         },
         {
+          "key": "labor_hourly_rate",
+          "label": "Valor da hora de mão de obra",
+          "type": "number",
+          "prefix": "R$",
+          "hint": "Multiplica as \"Horas estimadas\" do serviço e entra como custo. Deixe 0 para não cobrar por hora.",
+          "defaultValue": "0"
+        },
+        {
           "key": "card_fee_debit",
           "label": "Taxa maquininha — Débito",
           "type": "number",
