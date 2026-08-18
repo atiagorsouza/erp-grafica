@@ -1300,7 +1300,8 @@ export function PosClient({
                     value={discountInput}
                     onChange={(e) => setDiscountInput(e.target.value)}
                     onFocus={(e) => e.target.select()}
-                    className="h-8 w-20 border-ink-700 bg-ink-850 text-right text-white"
+                    tone="dark"
+                    className="h-8 w-20 text-right"
                   />
                   {discount > 0 && (
                     <span className="ml-auto font-mono text-[10.5px] text-emerald-300 tnum">
@@ -1426,7 +1427,8 @@ export function PosClient({
                       <Select
                         value={line.method}
                         onChange={(e) => updateSplitLine(line.key, { method: e.target.value })}
-                        className="h-8 w-[104px] shrink-0 border-ink-700 bg-ink-900 text-[11px] text-white"
+                        tone="dark"
+                        className="h-8 w-[104px] shrink-0 text-[11px]"
                       >
                         {PAYMENTS.map((p) => (
                           <option key={p.id} value={p.id}>
@@ -1440,7 +1442,8 @@ export function PosClient({
                         onChange={(e) => updateSplitLine(line.key, { amount: e.target.value })}
                         onFocus={(e) => e.target.select()}
                         placeholder="0,00"
-                        className="h-8 flex-1 border-ink-700 bg-ink-900 text-right text-white"
+                        tone="dark"
+                        className="h-8 flex-1 text-right"
                       />
                       <button
                         type="button"
@@ -1520,7 +1523,8 @@ export function PosClient({
                       onChange={(e) => setReceivedInput(e.target.value)}
                       onFocus={(e) => e.target.select()}
                       placeholder="0,00"
-                      className="h-8 flex-1 border-ink-700 bg-ink-900 text-right text-white"
+                      tone="dark"
+                        className="h-8 flex-1 text-right"
                     />
                   </div>
                   <div className="mt-2 flex flex-wrap gap-1">
@@ -1575,7 +1579,8 @@ export function PosClient({
                         value={sellerName}
                         onChange={(e) => handleSellerChange(e.target.value)}
                         placeholder="Ex.: TIAGO SOUZA"
-                        className="h-7 border-ink-700 bg-ink-850 text-white text-[11px]"
+                        tone="dark"
+                        className="h-7 text-[11px]"
                       />
                     </div>
                     <div>
@@ -1583,7 +1588,8 @@ export function PosClient({
                       <Select
                         value={deliveryMode}
                         onChange={(e) => setDeliveryMode(e.target.value)}
-                        className="h-7 border-ink-700 bg-ink-850 text-white text-[11px]"
+                        tone="dark"
+                        className="h-7 text-[11px]"
                       >
                         {DELIVERY_OPTIONS.map((opt) => (
                           <option key={opt} value={opt}>
@@ -1598,7 +1604,8 @@ export function PosClient({
                         value={deliveryDate}
                         onChange={(e) => setDeliveryDate(e.target.value)}
                         placeholder="Deixe em branco para Data/Hora da venda"
-                        className="h-7 border-ink-700 bg-ink-850 text-white text-[11px]"
+                        tone="dark"
+                        className="h-7 text-[11px]"
                       />
                     </div>
                     <div>
@@ -1607,7 +1614,8 @@ export function PosClient({
                         value={notes}
                         onChange={(e) => setNotes(e.target.value)}
                         placeholder="Ex.: Não deixe de aproveitar nossas promoções!"
-                        className="h-7 border-ink-700 bg-ink-850 text-white text-[11px]"
+                        tone="dark"
+                        className="h-7 text-[11px]"
                       />
                     </div>
 
