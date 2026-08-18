@@ -263,3 +263,50 @@ o mesmo bug. `d.cart.map(repriceLine)` refaz a conta.
 Nada mudou no `createSale`: ele recalcula tudo e recusa venda abaixo do
 mínimo com 422. O cliente **nunca** define preço — `repriceLine` existe
 só para a tela não mentir.
+
+---
+
+## Adendo 3 — rolo confirmado a R$ 60,00 (v3.38.0)
+
+O usuário confirmou o preço do rolo de 1.000 etiquetas 5×5: **R$ 60,00**
+(eu havia estimado R$ 48,00).
+
+### 🔴 Bug encontrado ao revisar: ribbon cobrado duas vezes
+
+Ao conferir o custo depois do reajuste, o breakdown não fechava com a
+conta manual. Causa: o consumível genérico **"Ribbon cera/resina
+110×300m"** (id 15) tinha sobrado na categoria Térmica quando os ribbons
+viraram material de estoque na v3.34.0.
+
+Resultado: toda etiqueta pagava **dois ribbons** — o genérico da
+categoria (escalado por `areaFactor`) e o real escolhido no produto.
+
+O consumível foi removido. A categoria Térmica agora tem só a **cabeça
+térmica**, que é o que de fato independe do ribbon usado.
+
+### Custo final
+
+| Componente | R$/etiqueta | % |
+|---|---|---|
+| Etiqueta adesiva (R$ 60 ÷ 1.000) | 0,060000 | 46% |
+| Ribbon resina rosê (26 mm × R$ 2,50/m) | 0,065000 | 50% |
+| Impressão (cabeça + fixo + perda) | 0,004285 | 3% |
+| **Custo** | **0,129285** | |
+
+Etiqueta e ribbon são quase metade cada; a impressão em si é 3%.
+
+### Faixas atualizadas
+
+| Qtd | Antes (rolo R$ 48) | **Agora (rolo R$ 60)** | Total |
+|---|---|---|---|
+| 50+ | R$ 0,75 | **R$ 0,78** | R$ 39,00 |
+| 100+ | R$ 0,54 | **R$ 0,57** | R$ 57,00 |
+| 250+ | R$ 0,41 | **R$ 0,45** | R$ 112,50 |
+| 500+ | R$ 0,37 | **R$ 0,40** | R$ 200,00 |
+| 1.000+ | R$ 0,35 | **R$ 0,38** | R$ 380,00 |
+
+Verificado no PDV: as 5 faixas cobram o valor certo e 20 un continua
+sendo recusado pelo mínimo.
+
+O produto foi religado ao formato **Etiqueta 50×50mm (2 colunas)**
+(`feedMm` 52, `columns` 2), que é a geometria real do rolo.
