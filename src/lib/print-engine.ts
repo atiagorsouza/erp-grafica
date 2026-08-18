@@ -248,5 +248,18 @@ export async function getPrinterEngineHealth() {
     inactivePrinters: printerRows.filter((p) => p.status !== "ativa").length,
     categoriesWithoutPrinter: catRows.filter((c) => !printerRows.some((p) => p.categoryId === c.id)).length,
     categoriesWithoutFormat: catRows.filter((c) => !formatRows.some((f) => f.categoryId === c.id)).length,
+
+    /* Consumíveis que parecem peça de desgaste (cilindro, fusor, cabeça,
+       correia, lâmina) mas estão marcados como colorante.
+       `costRole` tem default "colorant": quem cadastra sem escolher acaba
+       fazendo o cilindro escalar com a cobertura de tinta, o que não
+       acontece na máquina — ele se desgasta por passagem de papel.
+       O erro é invisível na cobertura de referência e só aparece em
+       trabalho com muita ou pouca tinta. */
+    consumablesMaybeMechanical: consRows.filter(
+      (c) =>
+        (c.costRole || "colorant") === "colorant" &&
+        /cilindro|fusor|fus[oó]ra|cabe[çc]a|correia|belt|drum|l[âa]mina|rolo/i.test(c.name || "")
+    ).length,
   };
 }

@@ -5,6 +5,36 @@ Versionamento: [SemVer](https://semver.org/lang/pt-BR/).
 
 ---
 
+## [3.30.0] — 2026-08-18
+
+Auditoria de **lógica** das impressoras (a anterior cobriu validação e
+aritmética). Documentado em `docs/AUDIT-IMPRESSORAS-LOGICA.md`.
+
+### Adicionado — aviso de peça de desgaste cadastrada como colorante
+
+`costRole` tem default `"colorant"`. Quem cadastra um cilindro, fusor ou
+correia sem trocar o campo faz essa peça **escalar com a cobertura de
+tinta** — o que não acontece na máquina: ela se gasta por folha que
+passa, independente da arte.
+
+O erro é invisível na cobertura de referência (os dois cálculos batem) e
+só aparece em trabalho com muita ou pouca tinta. Numa arte de 20% de
+cobertura o custo saía **R$ 0,4186/folha em vez de R$ 0,3643** — 15% a
+mais, sem nada parecer errado na tela.
+
+A tela de Impressoras agora detecta pelo nome (cilindro, fusor, cabeça,
+correia, lâmina, rolo) e avisa, explicando o motivo. `getPrinterEngineHealth`
+ganhou o contador `consumablesMaybeMechanical`.
+
+### Nota
+
+Foi encontrado porque o próprio cadastro de teste da v3.29.1 tinha esse
+erro: o cilindro ficou como colorante e o número publicado na auditoria
+estava certo apenas por coincidência — na cobertura de referência os dois
+modelos dão o mesmo valor.
+
+---
+
 ## [3.29.1] — 2026-08-18
 
 ### Auditoria — Impressoras e custo por página: sem achados

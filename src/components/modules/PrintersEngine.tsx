@@ -256,6 +256,22 @@ export function PrintersEngine({ categories, consumables, printers, formats }: {
   const [prtModal, setPrtModal] = useState<null | { categoryId: number; mode: string; edit?: Row }>(null);
   const [fmtModal, setFmtModal] = useState<null | { categoryId: number; edit?: Row }>(null);
 
+  /* Peças de desgaste marcadas como colorante.
+     `costRole` tem default "colorant": quem cadastra sem escolher faz o
+     cilindro escalar com a cobertura de tinta, o que não acontece na
+     máquina — ele se gasta por passagem de papel. O erro é invisível na
+     cobertura de referência e só aparece em arte com muita ou pouca
+     tinta, então precisa de aviso explícito. */
+  const suspeitasMecanicas = useMemo(
+    () =>
+      consumables.filter(
+        (c) =>
+          String(c.costRole || "colorant") === "colorant" &&
+          /cilindro|fusor|fus[oó]ra|cabe[çc]a|correia|belt|drum|l[âa]mina|rolo/i.test(String(c.name || ""))
+      ),
+    [consumables]
+  );
+
   const [form, setForm] = useState<Record<string, string>>({});
   const open = (data: Record<string, string>) => setForm(data);
   const set = (k: string) => (e: { target: { value: string } }) => setForm((f) => ({ ...f, [k]: e.target.value }));
@@ -361,6 +377,29 @@ export function PrintersEngine({ categories, consumables, printers, formats }: {
           </Button>
         }
       />
+
+      {/* Aviso de cadastro: peça de desgaste marcada como colorante
+          distorce o custo sem que nada pareça errado na tela. */}
+      {suspeitasMecanicas.length > 0 && (
+        <Card className="mb-4 border-amber-300 bg-amber-50/60">
+          <div className="flex items-start gap-2.5">
+            <Icon name="alert" size={16} className="mt-0.5 shrink-0 text-amber-600" />
+            <div className="min-w-0">
+              <p className="text-[12.5px] font-semibold text-amber-900">
+                {suspeitasMecanicas.length === 1
+                  ? "1 consumível parece peça de desgaste, mas está como colorante"
+                  : `${suspeitasMecanicas.length} consumíveis parecem peça de desgaste, mas estão como colorantes`}
+              </p>
+              <p className="mt-0.5 text-[11.5px] text-amber-800">
+                {suspeitasMecanicas.map((c) => String(c.name)).join(", ")} — cilindro, fusor e
+                correia se gastam por folha que passa, não pela quantidade de tinta. Como
+                colorante, o custo sobe em arte pesada e cai em texto leve, o que não acontece na
+                máquina. Edite e marque “Mecânica (fixo por folha)”.
+              </p>
+            </div>
+          </div>
+        </Card>
+      )}
 
       <EngineFlow />
       <Simulator categories={categories} consumables={consumables} printers={printers} formats={formats} />
