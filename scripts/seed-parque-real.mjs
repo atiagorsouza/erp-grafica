@@ -131,10 +131,16 @@ for (const [slug, name, cost, y, ap, role, notes] of cons) {
 /* FORMATOS — térmica usa feed_mm/columns (geometria do rolo)          */
 /* ------------------------------------------------------------------ */
 const fmts = [
+  /* Faixas reais da Konica, confirmadas pelo usuário: na prática só
+     existem TEXTO, MEIA COBERTURA e CHAPADO. Não há trabalho
+     "fotográfico" nessa máquina — o antigo formato de 60% descrevia
+     algo que não acontece na operação. */
   ["laser-colorida", "A4 texto (5%)", "210", "297", "1", "0.05", "0", 1],
-  ["laser-colorida", "A4 gráfico/foto (60%)", "210", "297", "1", "0.60", "0", 1],
+  ["laser-colorida", "A4 meia cobertura (50%)", "210", "297", "1", "0.50", "0", 1],
+  ["laser-colorida", "A4 chapado (100%)", "210", "297", "1", "1.00", "0", 1],
   ["laser-colorida", "A3 texto (5%)", "297", "420", "2", "0.05", "0", 1],
-  ["laser-colorida", "A3 gráfico/foto (60%)", "297", "420", "2", "0.60", "0", 1],
+  ["laser-colorida", "A3 meia cobertura (50%)", "297", "420", "2", "0.50", "0", 1],
+  ["laser-colorida", "A3 chapado (100%)", "297", "420", "2", "1.00", "0", 1],
 
   ["jato-de-tinta", "A4", "210", "297", "1", "0.10", "0", 1],
   ["jato-de-tinta", "A3", "297", "420", "2", "0.10", "0", 1],
