@@ -7,7 +7,11 @@ set -euo pipefail
 
 APP_NAME="erp-grafica"
 APP_LABEL="PrintFlow ERP"
-APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Este arquivo mora em scripts/lib/, então a raiz do app está DOIS níveis
+# acima — não um. Com "/.." o APP_DIR virava .../scripts e backup.sh,
+# restore.sh, db-reset.sh e healthcheck.sh morriam com ".env não
+# encontrado" (e mostravam a versão como 0.0.0, por ler o VERSION errado).
+APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 ENV_FILE="$APP_DIR/.env"
 VERSION_FILE="$APP_DIR/VERSION"
 BACKUP_DIR="$APP_DIR/backups"
