@@ -10,20 +10,22 @@ Medida: `pagina` (folha) · cobertura de referência **5%** · perda 3% · fixo 
 
 Consumíveis:
 
-- Cilindro DR512 (jogo) — R$ 1400.00 / 120.000 = R$ 0,01167 · `mechanical` · `both`
-- Unidade de revelacao DV512 — R$ 900.00 / 600.000 = R$ 0,00150 · `mechanical` · `both`
 - Toner Preto TN512K (kit CMYK R$800/4) — R$ 200.00 / 27.500 = R$ 0,00727 · `colorant` · `both`
 - Toner Ciano TN512C (kit CMYK R$800/4) — R$ 200.00 / 26.000 = R$ 0,00769 · `colorant` · `color`
 - Toner Magenta TN512M (kit CMYK R$800/4) — R$ 200.00 / 26.000 = R$ 0,00769 · `colorant` · `color`
 - Toner Amarelo TN512Y (kit CMYK R$800/4) — R$ 200.00 / 26.000 = R$ 0,00769 · `colorant` · `color`
+- Unidade de imagem PRETO (compativel) — R$ 599.90 / 95.000 = R$ 0,00631 · `mechanical` · `both`
+- Unidade de imagem CIANO (compativel) — R$ 599.90 / 95.000 = R$ 0,00631 · `mechanical` · `color`
+- Unidade de imagem MAGENTA (compativel) — R$ 599.90 / 95.000 = R$ 0,00631 · `mechanical` · `color`
+- Unidade de imagem AMARELO (compativel) — R$ 599.90 / 95.000 = R$ 0,00631 · `mechanical` · `color`
 
 | Formato | mm | Cobertura | Área | Colorido | P&B |
 |---|---|---|---|---|---|
-| A4 | 210×297 | 5% | 1 | **R$ 0,06542** | R$ 0,04165 |
-| A3 | 297×420 | 5% | 2 | **R$ 0,13084** | R$ 0,08331 |
-| A4 texto (5% cobertura) | 210×297 | 5% | 1 | **R$ 0,06542** | R$ 0,04165 |
-| A4 grafico/foto (60%) | 210×297 | 60% | 1 | **R$ 0,40928** | R$ 0,12405 |
-| A3 grafico/foto (60%) | 297×420 | 60% | 2 | **R$ 0,81857** | R$ 0,24811 |
+| A4 | 210×297 | 5% | 1 | **R$ 0,07788** | R$ 0,03460 |
+| A3 | 297×420 | 5% | 2 | **R$ 0,15575** | R$ 0,06919 |
+| A4 texto (5% cobertura) | 210×297 | 5% | 1 | **R$ 0,07788** | R$ 0,03460 |
+| A4 grafico/foto (60%) | 210×297 | 60% | 1 | **R$ 0,42174** | R$ 0,11700 |
+| A3 grafico/foto (60%) | 297×420 | 60% | 2 | **R$ 0,84348** | R$ 0,23399 |
 
 ## Jato de Tinta — Epson L18050
 
@@ -107,62 +109,53 @@ Consumíveis:
 
 ---
 
-## O que foi corrigido nesta revisão
+## Konica C284e — insumos confirmados pelo anúncio
 
-### 🔴 1. O preto não entrava no colorido
+**Unidade de imagem completa compatível** — R$ 599,90/un, ~95.000
+impressões a 5% de cobertura, vendida **por cor** ("selecionar cor
+desejada na hora da compra").
 
-O toner preto estava marcado `applies_to = mono`, então o motor o
-excluía do cálculo colorido — impressão colorida era custeada só com
-C, M e Y.
+Cadastradas as 4 separadamente, com a mesma lógica dos toners:
 
-Você disse: *"uso sempre CMYK as 4 cores"*. Corrigido para `both` na
-Konica e na L18050. O preto agora entra nos dois modos, como na
-prática: composição de preto em CMYK gasta os quatro.
+| Item | Vale para | Motivo |
+|---|---|---|
+| Unidade de imagem PRETO | `both` | O cilindro preto gira em P&B **e** em colorido |
+| Unidade CIANO / MAGENTA / AMARELO | `color` | Só desgastam quando há cor na página |
 
-### 🔴 2. Térmica com área errada
+Assim uma página P&B carrega **um** cilindro (R$ 0,006315/pg) e uma
+colorida carrega **quatro** (R$ 0,025259/pg) — que é o desgaste real.
 
-`areaFactor` da pulseira estava **1,25**. Mas o ribbon avança o
-**comprimento** da etiqueta, não a área: a pulseira consome 250 mm
-contra 50 mm da etiqueta base → fator **5**, não 1,25. O custo da
-pulseira estava **4× subestimado**.
+### ⚠️ Decisão tomada: DV512 removida
 
-Regra da categoria térmica: **`areaFactor` = avanço em mm ÷ 50 mm**.
+O anúncio diz **"Unidade de Imagem COMPLETA"**. Na linha Bizhub
+C224/C284/C364 esse conjunto já traz cilindro + revelador + carcaça —
+não é o drum nu. Como a "Unidade de revelação DV512" (R$ 900 / 600.000)
+estava cadastrada à parte, mantê-la **contaria o revelador duas vezes**.
 
-### 🔴 3. Rendimento do ribbon não considerava o tamanho
+Ela foi **removida**. Se na sua compra o revelador vier separado,
+recadastre: `/impressoras` → Laser Colorida → novo consumível
+`mechanical`. O impacto é pequeno (+R$ 0,0015/pg).
 
-Estava 15.000 etiquetas, número genérico. Um ribbon de 300 m
-rende 300.000 mm ÷ 50 mm = **6.000 etiquetas** de 100×50.
-Com o `areaFactor` acima, os outros tamanhos derivam sozinhos.
+### Custo final da Konica
 
-### 🟡 4. Kit CMYK de R$ 800 aplicado
+Composição da A4 colorida a 5%:
 
-Estava com preço de toner original (R$ 420 preto / R$ 560 cor =
-R$ 2.100 o jogo). Agora R$ 800 rateado em R$ 200/cor.
+| Componente | R$/página |
+|---|---|
+| Toners CMYK (kit R$ 800) | 0,030350 |
+| Unidades de imagem ×4 | 0,025259 |
+| Custo fixo (energia/manutenção) | 0,020000 |
+| *subtotal × perda 3%* | |
+| **Total** | **0,077880** |
 
-Efeito na Konica A4 colorida: **R$ 0,11645 → R$ 0,06542** (−44%).
+Evolução ao longo da revisão:
 
-⚠️ **Rendimento não confirmado.** Mantive as 26.000–27.500 páginas do
-TN512 original. Kit compatível costuma render menos; se o real for
-15.000, o custo colorido sobe para cerca de R$ 0,09/folha. Vale
-cronometrar um kit: anote o contador da máquina na troca.
+| Konica A4 | Estimativa inicial | Kit R$ 800 | + cilindros reais |
+|---|---|---|---|
+| Colorida | R$ 0,11645 | R$ 0,06542 | **R$ 0,07788** |
+| P&B | R$ 0,04989 | R$ 0,04165 | **R$ 0,03460** |
 
-### 🟡 5. Cobertura como formato, não como chute
+O cilindro real custa **2,17× mais** que minha estimativa (R$ 2.399,60 /
+95.000 contra R$ 1.400 / 120.000), o que devolveu parte da economia do
+kit de toner. O número agora é de anúncio, não de chute.
 
-A cobertura mudou de "campo que ninguém ajusta" para a variável que
-mais pesa. Na Konica, A4 a 5% custa R$ 0,065 e a 60% custa R$ 0,409 —
-**6,3× mais caro**. Por isso agora existem formatos separados de
-texto e de gráfico/foto: cobrar folha cheia com preço de texto é
-prejuízo direto.
-
----
-
-## Pendências
-
-1. **Rendimento real do kit CMYK de R$ 800** — o número mais frágil da tabela.
-2. **Cilindros**: R$ 1.400 / 120.000 é estimativa. Você comprou em kit de 4?
-3. **Base de corte da Silhouette**: R$ 90 / 500 usos domina o custo do
-   recorte (R$ 0,18 dos R$ 0,248). Vida útil real muda tudo.
-4. **Tempo de máquina** continua fora do motor — crítico na 3D
-   (peça de 50 g pode ocupar 8 h) e relevante na sublimação (prensa).
-5. **Sublimação**: papel sublimático e o próprio blank (caneca, azulejo)
-   não estão no custo — entram como material do produto, não da impressora.
