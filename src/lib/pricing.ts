@@ -63,6 +63,8 @@ export interface CategoryLike {
 }
 export interface PrinterLike {
   costMultiplier?: string | number | null;
+  /** valor da hora de máquina — 3D/recorte cobram tempo (v3.39.0) */
+  hourlyRate?: string | number | null;
 }
 export interface MaterialLike {
   name?: string | null;
@@ -162,6 +164,8 @@ export interface ProductCalcInput {
   colorMode: ColorMode;
   pagesPerUnit: number; // páginas/impressões por unidade de produto
   copies: number; // vias/copias por unidade
+  /** minutos de máquina por unidade; com `printer.hourlyRate` vira custo */
+  machineMinutes?: number;
   baseMaterial?: MaterialLike | null;
   baseMaterialQty: number;
   finishings: FinishingLine[];
@@ -236,6 +240,24 @@ export function computeProduct(input: ProductCalcInput): ProductCalcResult {
         perPage
       )}/pg`,
       amount: printing,
+    });
+  }
+
+  /* 1b) TEMPO DE MÁQUINA -------------------------------------------
+     Em 3D e recorte o insumo é barato e a ocupação é o custo real.
+     Só entra quando a impressora tem valor-hora E o produto declara
+     minutos — assim nenhuma impressora por página é afetada. */
+  const hourlyRate = num(input.printer?.hourlyRate, 0);
+  const machineMinutes = num(input.machineMinutes, 0);
+  if (hourlyRate > 0 && machineMinutes > 0) {
+    const timeCost = (machineMinutes / 60) * hourlyRate * num(input.copies, 1);
+    printing += timeCost;
+    const h = Math.floor(machineMinutes / 60);
+    const m = Math.round(machineMinutes % 60);
+    lines.push({
+      label: "Tempo de máquina",
+      detail: `${h > 0 ? `${h}h` : ""}${m > 0 ? `${m}min` : ""} × ${formatMoney(hourlyRate)}/h`,
+      amount: timeCost,
     });
   }
 

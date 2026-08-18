@@ -52,6 +52,8 @@ const printerSchema = z.object({
   model: z.string().trim().max(120).nullable().optional(),
   status: z.enum(printerStatuses).default("ativa"),
   costMultiplier: finite.min(0.01).max(100).optional().default(1),
+  /** valor da hora de máquina — 3D/recorte (v3.39.0) */
+  hourlyRate: finite.min(0).max(100000).optional().default(0),
   maxFormat: z.string().trim().max(60).nullable().optional(),
   buildVolume: z.string().trim().max(100).nullable().optional(),
   notes: z.string().trim().max(500).nullable().optional(),
@@ -185,6 +187,7 @@ export async function savePrinter(raw: unknown, id?: number) {
     model: d.model || null,
     status: d.status,
     costMultiplier: dec(d.costMultiplier, 4),
+    hourlyRate: dec(d.hourlyRate, 4),
     maxFormat: isGram ? null : d.maxFormat || null,
     buildVolume: isGram ? d.buildVolume || null : null,
     notes: d.notes || null,

@@ -252,6 +252,18 @@ export const printers = pgTable("printers", {
   maxFormat: text("max_format").default("A4"),
   /** 3D: volume de construção (ex: 220x220x250mm) — não usa formato de papel */
   buildVolume: text("build_volume"),
+  /* --------------------------------------------------------------
+   * TEMPO DE MÁQUINA (v3.39.0)
+   *
+   * Em impressão 3D e recorte o insumo é barato e o TEMPO é o custo
+   * real. Uma peça de 50 g gasta R$ 6,17 de filamento — e ocupa a
+   * Bambu Lab por 8 horas. Sem cobrar a hora, o motor precificava a
+   * peça em R$ 6,17 e a máquina trabalhava de graça o dia inteiro.
+   *
+   * Zerado, nada muda: as impressoras que cobram por página seguem
+   * exatamente como antes.
+   * ------------------------------------------------------------- */
+  hourlyRate: numeric("hourly_rate", { precision: 12, scale: 4 }).default("0"),
   notes: text("notes"),
   createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
 });
@@ -512,6 +524,8 @@ export const products = pgTable("products", {
   defaultQuantity: numeric("default_quantity", { precision: 12, scale: 3 }).default("1"),
   piecesPerSheet: numeric("pieces_per_sheet", { precision: 12, scale: 3 }).default("1"),
   printSides: integer("print_sides").default(1),
+  /** minutos de máquina por unidade — 3D/recorte cobram tempo (v3.39.0) */
+  machineMinutes: numeric("machine_minutes", { precision: 10, scale: 2 }).default("0"),
   wastePercent: numeric("waste_percent", { precision: 6, scale: 4 }).default("0"),
   setupSheets: integer("setup_sheets").default(0),
   minOrderQty: numeric("min_order_qty", { precision: 12, scale: 3 }).default("1"),

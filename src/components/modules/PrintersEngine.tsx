@@ -333,6 +333,7 @@ export function PrintersEngine({ categories, consumables, printers, formats }: {
         model: form.model,
         status: form.status || "ativa",
         costMultiplier: Number(form.costMultiplier || 1).toFixed(4),
+        hourlyRate: Number(form.hourlyRate || 0).toFixed(4),
         maxFormat: mode === "grama" ? null : form.maxFormat || null,
         buildVolume: mode === "grama" ? form.buildVolume || null : null,
         notes: form.notes,
@@ -511,7 +512,7 @@ export function PrintersEngine({ categories, consumables, printers, formats }: {
                             <Icon name="printer" size={13} />
                             Máquinas
                           </h3>
-                          <Button size="xs" variant="outline" icon="plus" onClick={() => { open({ status: "ativa", costMultiplier: "1" }); setPrtModal({ categoryId: Number(cat.id), mode }); }}>
+                          <Button size="xs" variant="outline" icon="plus" onClick={() => { open({ status: "ativa", costMultiplier: "1", hourlyRate: "0" }); setPrtModal({ categoryId: Number(cat.id), mode }); }}>
                             Impressora
                           </Button>
                         </div>
@@ -536,7 +537,7 @@ export function PrintersEngine({ categories, consumables, printers, formats }: {
                                 </span>
                               </div>
                               <span className="absolute right-2 bottom-2 flex gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
-                                <IconButton size="sm" name="pencil" label="Editar" onClick={() => { open({ name: String(p.name), brand: String(p.brand || ""), model: String(p.model || ""), status: String(p.status), costMultiplier: String(p.costMultiplier), maxFormat: String(p.maxFormat || ""), buildVolume: String(p.buildVolume || ""), notes: String(p.notes || "") }); setPrtModal({ categoryId: Number(cat.id), mode, edit: p }); }} />
+                                <IconButton size="sm" name="pencil" label="Editar" onClick={() => { open({ name: String(p.name), brand: String(p.brand || ""), model: String(p.model || ""), status: String(p.status), costMultiplier: String(p.costMultiplier), hourlyRate: String(p.hourlyRate ?? 0), maxFormat: String(p.maxFormat || ""), buildVolume: String(p.buildVolume || ""), notes: String(p.notes || "") }); setPrtModal({ categoryId: Number(cat.id), mode, edit: p }); }} />
                                 <IconButton size="sm" name="trash" label="Excluir" tone="danger" onClick={del("printers", Number(p.id), "Excluir impressora?")} />
                               </span>
                             </div>
@@ -744,6 +745,9 @@ export function PrintersEngine({ categories, consumables, printers, formats }: {
           </Field>
           <Field label="Fator de ajuste" hint="1.00 = custo padrão da categoria">
             <Input mono value={form.costMultiplier || ""} onChange={set("costMultiplier")} placeholder="1.00" />
+          </Field>
+          <Field label="Valor da hora (R$)" hint="3D e recorte: o tempo é o custo real. 0 = não cobra tempo">
+            <Input mono value={form.hourlyRate || ""} onChange={set("hourlyRate")} placeholder="0,00" />
           </Field>
           {prtModal?.mode === "grama" ? (
             <Field label="Volume de construção" hint="3D não usa formato de papel">

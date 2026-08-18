@@ -158,6 +158,7 @@ export function ProductsClient({
       colorMode,
       pagesPerUnit: num(form.pagesPerUnit, 1),
       copies: num(form.copies, 1),
+      machineMinutes: num(form.machineMinutes, 0),
       baseMaterial,
       baseMaterialQty: num(form.baseMaterialQty, 1),
       finishings: finLines,
@@ -227,6 +228,7 @@ export function ProductsClient({
       defaultQuantity: String(p.defaultQuantity ?? 1),
       piecesPerSheet: String(p.piecesPerSheet ?? 1),
       printSides: String(p.printSides ?? 1),
+      machineMinutes: String(p.machineMinutes ?? 0),
       wastePercent: String(num(p.wastePercent) * 100),
       setupSheets: String(p.setupSheets ?? 0),
       minOrderQty: String(p.minOrderQty ?? 1),
@@ -263,6 +265,7 @@ export function ProductsClient({
         defaultQuantity: form.defaultQuantity || 1,
         piecesPerSheet: form.piecesPerSheet || 1,
         printSides: Number(form.printSides || 1),
+        machineMinutes: num(form.machineMinutes, 0),
         wastePercent: String(num(form.wastePercent, 0) / 100),
         setupSheets: Number(form.setupSheets || 0),
         minOrderQty: form.minOrderQty || 1,
@@ -525,6 +528,15 @@ export function ProductsClient({
                     <Field label="Vias / cópias">
                       <Input mono value={form.copies || ""} onChange={set("copies")} />
                     </Field>
+                    {num(printer?.hourlyRate, 0) > 0 && (
+                      <Field
+                        label="Minutos de máquina"
+                        hint={`${formatMoney(num(printer?.hourlyRate, 0))}/h nesta impressora`}
+                        className="sm:col-span-2"
+                      >
+                        <Input mono value={form.machineMinutes || ""} onChange={set("machineMinutes")} placeholder="480" />
+                      </Field>
+                    )}
                   </>
                 ) : (
                   <>
