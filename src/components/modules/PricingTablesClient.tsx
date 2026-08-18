@@ -39,6 +39,9 @@ export function PricingTablesClient({ tables }: { tables: Row[] }) {
         widthCm: form.widthCm || null,
         heightCm: form.heightCm || null,
         minQty: form.minQty || "1",
+        piecesPerSheet: form.piecesPerSheet || "1",
+        minCharge: form.minCharge || "0",
+        minChargeSell: form.minChargeSell || "0",
         notes: form.notes || null,
         active: form.active !== "false",
       };
@@ -101,12 +104,20 @@ export function PricingTablesClient({ tables }: { tables: Row[] }) {
                         <td className="px-5 py-3 font-mono text-[11.5px] text-ink-500 tnum">
                           {r.widthCm && r.heightCm ? `${Number(r.widthCm)}×${Number(r.heightCm)}cm` : "—"}
                         </td>
-                        <td className="px-5 py-3"><Badge tone="neutral">{Number(r.minQty || 1)}+</Badge></td>
+                        <td className="px-5 py-3">
+                          {Number(r.piecesPerSheet || 1) > 1 ? (
+                            <Badge tone="cyan">{Number(r.piecesPerSheet)}/folha</Badge>
+                          ) : Number(r.minCharge || 0) > 0 ? (
+                            <Badge tone="amber">mín {formatMoney(Number(r.minCharge))}</Badge>
+                          ) : (
+                            <Badge tone="neutral">{Number(r.minQty || 1)}+</Badge>
+                          )}
+                        </td>
                         <td className="px-5 py-3 font-mono text-[11px] text-ink-500 uppercase">{String(r.unit)}</td>
                         <td className="px-2 py-3">
                           <span className="flex gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
                             <IconButton size="sm" name="pencil" label="Editar" onClick={() => {
-                              setForm({ type: String(r.type), label: String(r.label), unitCost: String(r.unitCost), sellPrice: String(r.sellPrice ?? 0), unit: String(r.unit), widthCm: String(r.widthCm || ""), heightCm: String(r.heightCm || ""), minQty: String(r.minQty || 1), notes: String(r.notes || ""), active: String(r.active ?? true) });
+                              setForm({ type: String(r.type), label: String(r.label), unitCost: String(r.unitCost), sellPrice: String(r.sellPrice ?? 0), unit: String(r.unit), widthCm: String(r.widthCm || ""), heightCm: String(r.heightCm || ""), minQty: String(r.minQty || 1), piecesPerSheet: String(r.piecesPerSheet ?? 1), minCharge: String(r.minCharge ?? 0), minChargeSell: String(r.minChargeSell ?? 0), notes: String(r.notes || ""), active: String(r.active ?? true) });
                               setModal({ edit: r });
                             }} />
                             <IconButton size="sm" name="trash" label="Arquivar" tone="danger" onClick={async () => { if (confirm("Arquivar linha da tabela?")) { await mutate("pricing-tables", "delete", { reason: "Arquivada" }, Number(r.id)); refresh(); } }} />
@@ -160,6 +171,15 @@ export function PricingTablesClient({ tables }: { tables: Row[] }) {
           <Field label="Largura útil (cm)"><Input mono value={form.widthCm || ""} onChange={set("widthCm")} /></Field>
           <Field label="Altura útil (cm)"><Input mono value={form.heightCm || ""} onChange={set("heightCm")} /></Field>
           <Field label="Quantidade mínima"><Input mono value={form.minQty || "1"} onChange={set("minQty")} /></Field>
+          <Field label="Peças por folha" hint="DTF: quantas cabem na folha comprada (1 = folha inteira)">
+            <Input mono value={form.piecesPerSheet || "1"} onChange={set("piecesPerSheet")} placeholder="6" />
+          </Field>
+          <Field label="Mínimo de custo (R$)" hint="o piso que o fornecedor cobra por peça">
+            <Input mono value={form.minCharge || ""} onChange={set("minCharge")} placeholder="26,00" />
+          </Field>
+          <Field label="Mínimo de venda (R$)" hint="seu piso ao cliente — com margem">
+            <Input mono value={form.minChargeSell || ""} onChange={set("minChargeSell")} placeholder="60,00" />
+          </Field>
           <Field label="Observações"><Input value={form.notes || ""} onChange={set("notes")} placeholder="Desconto volume…" /></Field>
         </div>
       </Modal>

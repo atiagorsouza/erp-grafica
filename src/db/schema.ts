@@ -458,6 +458,32 @@ export const pricingTables = pgTable("pricing_tables", {
   widthCm: numeric("width_cm", { precision: 8, scale: 2 }),   // largura útil em cm (28cm para metro linear)
   heightCm: numeric("height_cm", { precision: 8, scale: 2 }), // altura útil em cm
   minQty: numeric("min_qty", { precision: 10, scale: 3 }).default("1"),
+  /* --------------------------------------------------------------
+   * FOLHA FECHADA E MÍNIMO EM REAIS (v3.43.0)
+   *
+   * Dois modelos de cobrança que os fornecedores usam de verdade:
+   *
+   * 1. DTF (UV e têxtil) — folha de tamanho FIXO e preço FIXO. O que
+   *    varia é quantas peças cabem: a 20×28 custa R$ 23,22 e comporta
+   *    6 canecas (R$ 3,87 cada). A folha é INDIVISÍVEL: 8 canecas
+   *    consomem 2 folhas, e a sobra é perda.
+   *    → `piecesPerSheet` = quantas peças cabem.
+   *
+   * 2. Lona/Vinil — preço por m², mas com MÍNIMO EM REAIS por peça
+   *    (banner R$ 26, vinil R$ 30). Um adesivo de 30×30 cm dá 0,09 m²
+   *    = R$ 4,05, mas o fornecedor cobra os R$ 26.
+   *    → `minCharge` = piso em reais.
+   *
+   * O `minQty` continua sendo mínimo de QUANTIDADE; estes dois campos
+   * cobrem o que ele não conseguia expressar. Zerados, o
+   * comportamento é o anterior.
+   * ------------------------------------------------------------- */
+  /** DTF: peças que cabem na folha. 0/1 = folha inteira por peça */
+  piecesPerSheet: numeric("pieces_per_sheet", { precision: 10, scale: 3 }).default("1"),
+  /** piso de CUSTO em R$ por peça — o mínimo que o fornecedor cobra */
+  minCharge: numeric("min_charge", { precision: 12, scale: 4 }).default("0"),
+  /** piso de VENDA em R$ por peça — seu mínimo ao cliente, com margem */
+  minChargeSell: numeric("min_charge_sell", { precision: 12, scale: 4 }).default("0"),
   notes: text("notes"),
   active: boolean("active").default(true),
   createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),

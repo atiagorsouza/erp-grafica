@@ -79,6 +79,10 @@ export interface PricingTableLike {
   minQty?: string | number | null;
   widthCm?: string | number | null;
   heightCm?: string | number | null;
+  /** DTF: peças que cabem na folha comprada */
+  piecesPerSheet?: string | number | null;
+  /** piso de cobrança em R$ por peça (lona/vinil) */
+  minCharge?: string | number | null;
 }
 export interface FinishingLike {
   name?: string | null;
@@ -310,25 +314,41 @@ export function computeProduct(input: ProductCalcInput): ProductCalcResult {
     const t = input.basePricingTable;
     const qty = num(input.basePricingTableQty, 1);
     const unit = String(t.unit || "unidade");
-    let billable = qty;
+    const tableCost = num(t.unitCost);
+    const minCharge = num(t.minCharge, 0);
+    let v = 0;
+    let detail = "";
+
     if (unit === "m2") {
-      /* Em m² a quantidade é o número de peças e o mínimo é faturável
-         POR PEÇA — o fornecedor não vende 0,3 m² de lona. */
+      /* Lona/Vinil: área da peça × preço do m², com piso em reais.
+         Banner 1,20×0,90 = 1,08 m²; adesivo 30×30 cai no mínimo. */
       const area = (num(t.widthCm) * num(t.heightCm)) / 10000;
-      billable = Math.max(area, num(t.minQty, 1)) * qty;
+      const perPiece = Math.max(area * tableCost, minCharge);
+      v = perPiece * qty;
+      const noMin = area * tableCost;
+      detail =
+        minCharge > 0 && noMin < minCharge
+          ? `${area.toFixed(3)} m² × ${formatMoney(tableCost)} = ${formatMoney(noMin)} → mínimo ${formatMoney(minCharge)}`
+          : `${area.toFixed(3)} m² × ${formatMoney(tableCost)}`;
     } else {
-      /* Metro/unidade: o `minQty` da linha é o mínimo do PEDIDO ao
-         fornecedor, não o consumo de uma peça. Aplicá-lo aqui cobrava
-         1 metro inteiro numa estampa que usa 0,40 m — inviabilizando
-         justamente o caso de compor produto, onde a bobina é
-         partilhada entre várias peças. */
-      billable = qty;
+      /* DTF: a folha é indivisível. `basePricingTableQty` aqui é
+         quantas PEÇAS do produto saem por folha comprada — a caneca
+         usa 1/6 de uma folha 20×28, então o custo dela é a folha
+         dividida pelo que cabe. */
+      const perSheet = num(t.piecesPerSheet, 1);
+      if (perSheet > 1) {
+        v = (tableCost / perSheet) * qty;
+        detail = `${formatMoney(tableCost)} ÷ ${perSheet} por folha × ${qty}`;
+      } else {
+        v = Math.max(tableCost * qty, minCharge);
+        detail = `${qty} ${unit} × ${formatMoney(tableCost)}`;
+      }
     }
-    const v = billable * num(t.unitCost);
+
     materials += v;
     lines.push({
       label: `Tabela: ${t.label || "terceirizado"}`,
-      detail: `${billable.toFixed(3).replace(/\.?0+$/, "")} ${unit} × ${formatMoney(num(t.unitCost))}`,
+      detail,
       amount: v,
     });
   }
