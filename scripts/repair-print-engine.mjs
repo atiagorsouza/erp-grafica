@@ -76,8 +76,26 @@ async function main() {
        WHERE area_factor IS NULL OR area_factor::numeric <= 0 OR ink_coverage IS NULL OR ink_coverage::numeric < 0 OR ink_coverage::numeric > 1 OR print_cost_override IS NULL OR print_cost_override::numeric < 0
     `);
 
+    /* v3.46.4 — remove o custo comercial de exemplo dos formatos laser.
+       O seed antigo gravava 1,50 / 2,50 / 3,50 em print_cost_override, e
+       esse campo SUBSTITUI o cálculo técnico inteiro: toner, cilindro,
+       fusor, técnico, cobertura de tinta, área e desperdício deixavam de
+       contar. Numa agenda de 92 faces dava R$ 138,00 contra R$ 21,14 de
+       custo real.
+
+       Só zera os valores que vieram do exemplo. Se o usuário digitou
+       outro número, é decisão dele e fica. */
+    const overrideFix = await client.query(`
+      UPDATE print_formats f
+         SET print_cost_override = 0
+        FROM printer_categories c
+       WHERE f.category_id = c.id
+         AND c.slug IN ('laser', 'laser-colorida')
+         AND f.print_cost_override::numeric IN (1.50, 2.50, 3.50)
+    `);
+
     await client.query("COMMIT");
-    console.log(`✅ Impressoras & Tintas reparado: ${catFix} categorias, ${consFix.rowCount} rendimentos, ${consRoleFix.rowCount} papéis de custo, ${printerFix.rowCount} impressoras, ${formatFix.rowCount} formatos.`);
+    console.log(`✅ Impressoras & Tintas reparado: ${catFix} categorias, ${consFix.rowCount} rendimentos, ${consRoleFix.rowCount} papéis de custo, ${printerFix.rowCount} impressoras, ${formatFix.rowCount} formatos, ${overrideFix.rowCount} custos de exemplo removidos.`);
   } catch (e) {
     await client.query("ROLLBACK");
     throw e;
