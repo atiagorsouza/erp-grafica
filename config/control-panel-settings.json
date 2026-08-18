@@ -1,5 +1,5 @@
 {
-  "version": "3.21.0",
+  "version": "3.27.0",
   "groups": [
     {
       "id": "empresa",
@@ -206,6 +206,50 @@
           "suffix": "%",
           "mono": true,
           "defaultValue": "4.99"
+        },
+        {
+          "key": "pricing_payment_cost",
+          "label": "Custo de pagamento embutido no preço",
+          "type": "number",
+          "suffix": "%",
+          "mono": true,
+          "hint": "Pior meio que você aceita (ex.: 3x sem juros = 6,12%). Garante a margem mínima em qualquer forma de pagamento.",
+          "defaultValue": "6.12"
+        },
+        {
+          "key": "pricing_pix_discount",
+          "label": "Desconto à vista no PIX",
+          "type": "number",
+          "suffix": "%",
+          "mono": true,
+          "hint": "Devolve ao cliente o que você economiza sem a maquininha. Sugerido igual ao custo embutido.",
+          "defaultValue": "6.12"
+        },
+        {
+          "key": "pricing_installment_min",
+          "label": "Valor mínimo para parcelar sem juros",
+          "type": "number",
+          "prefix": "R$",
+          "mono": true,
+          "hint": "Abaixo disso o PDV não oferece 3x — parcela pequena demais compensa pouco.",
+          "defaultValue": "150"
+        },
+        {
+          "key": "pricing_installment_max",
+          "label": "Máximo de parcelas sem juros",
+          "type": "number",
+          "suffix": "x",
+          "mono": true,
+          "defaultValue": "3"
+        },
+        {
+          "key": "pricing_min_margin",
+          "label": "Margem mínima (piso)",
+          "type": "number",
+          "suffix": "%",
+          "mono": true,
+          "hint": "O sistema avisa se um desconto derrubar a margem abaixo deste valor.",
+          "defaultValue": "40"
         }
       ]
     },

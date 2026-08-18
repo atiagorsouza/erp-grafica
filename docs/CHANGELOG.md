@@ -5,6 +5,58 @@ Versionamento: [SemVer](https://semver.org/lang/pt-BR/).
 
 ---
 
+## [3.27.0] — 2026-08-18
+
+Motor de precificação corrigido, com as três decisões comerciais
+definidas. Documentado em `docs/PROPOSTA-PRECIFICACAO.md`.
+
+### Corrigido — a margem informada não era a margem recebida
+
+O modo unitário aplicava a margem por divisor e **somava imposto e taxa
+por fora**. Mas as duas incidem sobre o valor que o cliente paga, não
+sobre o subtotal: pedindo 40% sobravam 39,27%.
+
+Pior: o modo tiragem sempre usou divisor, então o mesmo produto custava
+R$ 184,98 num modo e R$ 204,04 no outro — **10,3% de diferença conforme
+a tela usada**. Agora os dois usam a mesma fórmula e a margem informada é
+o piso real sobre a receita.
+
+### Adicionado — preço embute o pior meio de pagamento
+
+Novo `pricing_payment_cost` (padrão 6,12%, o 3x sem juros da InfinitePay
+na faixa até R$ 20 mil/mês). O preço de tabela passa a garantir a margem
+mínima **em qualquer forma de pagamento** — quem paga PIX gera folga, e é
+dela que sai o desconto à vista, sem tirar do lucro.
+
+Substitui a prática de avisar "tem juros do cartão" no fechamento, que
+além de irritar o cliente é problema com o Procon quando não informada.
+
+Também no painel: desconto do PIX, valor mínimo para parcelar (R$ 150),
+máximo de parcelas (3x) e piso de margem (40%).
+
+### Corrigido — acerto de máquina e refugo agora somam
+
+O cálculo pegava o **maior** entre perda percentual e folhas de setup,
+o que não corresponde a nada que acontece na máquina: são custos
+independentes. Numa tiragem de 1000 peças (4/folha, acerto 10, perda 5%)
+cobrava 263 folhas enquanto a produção consumia 273.
+
+Em tiragem pequena era pior — o refugo era simplesmente descartado
+quando o setup fosse maior.
+
+### Adicionado — análise de forma de pagamento e simulador
+
+`src/lib/payment-analysis.ts` calcula a margem real de cada forma de
+pagamento, respeitando o mínimo para parcelar.
+`scripts/simular-precos.mjs` mostra preço atual vs novo de cada produto
+sem gravar nada.
+
+### Testes
+
+`e2e:smoke` foi de 150 para **161 checks**.
+
+---
+
 ## [3.26.0] — 2026-08-18
 
 Auditoria dos 6 módulos restantes — Produtos, Serviços, Tabelas de Preço,

@@ -276,16 +276,46 @@ export function computeProduct(input: ProductCalcInput): ProductCalcResult {
 
   const baseCost = printing + materials + finishing + serviceCost;
 
-  // 6) MARGEM -------------------------------------------------------
-  // preço de venda = baseCost / (1 - margin)
-  const margin = Math.min(Math.max(num(input.margin), 0), 0.99);
-  const sellPrice = baseCost > 0 ? baseCost / (1 - margin) : 0;
-  const marginAmount = sellPrice - baseCost;
+  /* 6/7) MARGEM + IMPOSTO + CUSTO DE PAGAMENTO ----------------------
+   *
+   * Tudo num divisor único, igual ao modo tiragem.
+   *
+   * Antes a margem usava divisor e as taxas eram SOMADAS por fora:
+   *
+   *     sell  = custo / (1 - margem)
+   *     final = sell + sell*imposto + sell*taxa
+   *
+   * O erro: imposto e maquininha incidem sobre o valor efetivamente
+   * cobrado (o final), não sobre o subtotal. Com custo 100, margem 40%,
+   * imposto 6% e cartão 4,99%, o preço saía R$ 184,98 e sobravam
+   * R$ 164,65 — margem real de 39,27%, não os 40% pedidos. Pior: o modo
+   * tiragem, que sempre usou divisor, dava R$ 204,04 no mesmo produto.
+   * Dez por cento de diferença dependendo do modo escolhido.
+   *
+   * Com o divisor, a margem informada é o piso REAL sobre a receita:
+   *
+   *     final = custo / (1 - margem - imposto - pagamento)
+   *
+   * `paymentRate` deve trazer o PIOR meio de pagamento aceito (ex.: 3x
+   * sem juros). Assim toda venda respeita a margem mínima, e quem paga
+   * PIX gera a folga que banca o desconto à vista.
+   */
+  const margin = Math.max(num(input.margin), 0);
+  const taxRate = Math.max(num(input.taxRate), 0);
+  const paymentRate = Math.max(num(input.cardFeeRate), 0);
+  const rateTotal = margin + taxRate + paymentRate;
 
-  // 7) IMPOSTOS + TAXA DE MAQUININHA (sobre o preço de venda) -------
-  const taxAmount = sellPrice * num(input.taxRate);
-  const cardFeeAmount = sellPrice * num(input.cardFeeRate);
-  const finalPrice = sellPrice + taxAmount + cardFeeAmount;
+  /* Acima de 99% o divisor zera ou inverte o sinal: sem trava, um
+     cadastro errado geraria preço negativo ou absurdo. */
+  const divisor = 1 - Math.min(rateTotal, 0.99);
+  const finalPrice = baseCost > 0 ? baseCost / divisor : 0;
+
+  const taxAmount = finalPrice * taxRate;
+  const cardFeeAmount = finalPrice * paymentRate;
+  /* o que sobra depois de custo, imposto e taxa — o lucro de verdade */
+  const marginAmount = finalPrice - baseCost - taxAmount - cardFeeAmount;
+  /* mantido para compatibilidade: receita antes das deduções variáveis */
+  const sellPrice = finalPrice - taxAmount - cardFeeAmount;
 
   return {
     lines,
@@ -463,9 +493,28 @@ export function computeBatchProduct(input: BatchCalcInput): BatchCalcResult {
   const qty = Math.max(num(input.requestedQuantity), 0);
   const pieces = Math.max(num(input.piecesPerSheet, 1), 1);
   const baseSheets = qty > 0 ? Math.ceil(qty / pieces) : 0;
-  const sheetsByWaste = Math.ceil(baseSheets * (1 + Math.max(num(input.wastePercent), 0)));
-  const sheetsBySetup = baseSheets + Math.max(Math.floor(num(input.setupSheets)), 0);
-  const finalSheets = Math.max(sheetsByWaste, sheetsBySetup);
+
+  /* Acerto e refugo são custos INDEPENDENTES e somam.
+   *
+   * Antes: `Math.max(sheetsByWaste, sheetsBySetup)` — pegava o maior,
+   * o que não corresponde a nada que acontece na máquina. Numa tiragem
+   * de 1000 peças (4/folha, acerto 10, perda 5%) cobrava 263 folhas
+   * enquanto a produção consumia 273. Em tiragem pequena era pior: o
+   * refugo era simplesmente descartado quando o setup fosse maior.
+   *
+   *   setup  = folhas queimadas até a cor entrar no registro.
+   *            FIXO por serviço — independe do tamanho da tiragem.
+   *   waste  = refugo ao longo da rodagem (puxada dupla, corte torto).
+   *            PROPORCIONAL ao volume.
+   *
+   * O refugo incide sobre as folhas efetivamente rodadas, o que inclui
+   * as de acerto: elas também passam pela máquina.
+   */
+  const setupSheets = Math.max(Math.floor(num(input.setupSheets)), 0);
+  const wastePercent = Math.max(num(input.wastePercent), 0);
+  const sheetsBySetup = baseSheets + setupSheets;
+  const sheetsByWaste = Math.ceil(sheetsBySetup * wastePercent);
+  const finalSheets = baseSheets > 0 ? sheetsBySetup + sheetsByWaste : 0;
   const lines: BreakdownLine[] = [];
 
   const printCostPerSheet = computePrintSheetCost({

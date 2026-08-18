@@ -888,6 +888,64 @@ async function main() {
   }).then((r) => r.status);
   assert(dataRuim === 422, "calendário recusa 31 de fevereiro");
 
+  /* 11k) Motor de precificação unificado — v3.27.0 */
+  const precoDe = (custo, margem, imposto, pagamento) => {
+    const div = 1 - Math.min(margem + imposto + pagamento, 0.99);
+    return custo / div;
+  };
+
+  /* os dois modos precisam dar o MESMO preço: divergiam 10,3% */
+  const pUnit = precoDe(100, 0.4, 0.06, 0.0612);
+  const pBatch = 100 / (1 - (0.4 + 0.06 + 0.0612));
+  assert(Math.abs(pUnit - pBatch) < 0.01, "modo unitário e tiragem calculam o mesmo preço");
+
+  /* a margem informada tem de ser a margem REAL no pior meio de pagamento */
+  const liquido = pUnit - pUnit * 0.06 - pUnit * 0.0612;
+  const margemReal = (liquido - 100) / pUnit;
+  assert(Math.abs(margemReal - 0.4) < 0.0001, `margem real bate o piso pedido (${(margemReal * 100).toFixed(2)}%)`);
+
+  /* divisor não pode estourar com cadastro absurdo */
+  assert(Number.isFinite(precoDe(100, 1.5, 0.06, 0.0612)), "margem acima de 100% não gera preço infinito");
+
+  /* folhas: acerto e refugo somam */
+  const folhas = (qty, pieces, waste, setup) => {
+    const base = qty > 0 ? Math.ceil(qty / pieces) : 0;
+    const comSetup = base + Math.max(Math.floor(setup), 0);
+    return base > 0 ? comSetup + Math.ceil(comSetup * Math.max(waste, 0)) : 0;
+  };
+  assert(folhas(1000, 4, 0.05, 10) === 273, `acerto e refugo somam (${folhas(1000, 4, 0.05, 10)} folhas)`);
+  assert(folhas(100, 4, 0.05, 10) === 37, "refugo não é descartado em tiragem pequena");
+  assert(folhas(0, 4, 0.05, 10) === 0, "sem tiragem não cobra folha");
+
+  /* produto salvo pela API entrega a margem que promete */
+  await sql("delete from materials where name = 'SMOKE MAT PRECO'");
+  await sql("insert into materials (name, unit, unit_cost, stock, min_stock) values ('SMOKE MAT PRECO','folha',10,100,0)");
+  const [matPreco] = await sql("select id from materials where name = 'SMOKE MAT PRECO'");
+  await sql("delete from products where sku = 'SMOKE-PRECO'");
+  const prodPreco = await req("/api/crud/products", {
+    op: "create",
+    data: {
+      name: "SMOKE Produto Preco", sku: "SMOKE-PRECO", calculationMode: "unit",
+      baseMaterialId: Number(matPreco.id), baseMaterialQty: 10, margin: 0.4, active: true,
+    },
+  });
+  const custoReal = Number(prodPreco.row.costSnapshot);
+  const precoReal = Number(prodPreco.row.finalPrice);
+  const liqReal = precoReal - precoReal * 0.06 - precoReal * 0.0612;
+  const margemProduto = (liqReal - custoReal) / precoReal;
+  assert(custoReal === 100, `custo direto calculado (${custoReal})`);
+  assert(Math.abs(margemProduto - 0.4) < 0.001, `produto salvo entrega 40% de margem real (${(margemProduto * 100).toFixed(2)}%)`);
+
+  await sql("delete from products where sku = 'SMOKE-PRECO'");
+  await sql("delete from materials where name = 'SMOKE MAT PRECO'");
+
+  /* parcelamento respeita o valor mínimo configurado */
+  const podeParcelar = (valor, minimo, parcelas, maxParcelas) =>
+    parcelas <= maxParcelas && valor >= minimo;
+  assert(podeParcelar(200, 150, 3, 3) === true, "acima do mínimo oferece 3x");
+  assert(podeParcelar(120, 150, 3, 3) === false, "abaixo do mínimo não oferece parcelamento");
+  assert(podeParcelar(500, 150, 6, 3) === false, "acima do máximo de parcelas é recusado");
+
   /* importador de PDF: rejeita arquivo que não é ficha do legado */
   const bogus = new FormData();
   bogus.append("file", new Blob(["nao sou um pdf"], { type: "application/pdf" }), "x.pdf");

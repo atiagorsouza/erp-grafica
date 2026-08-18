@@ -44,6 +44,12 @@ export interface PricingDefaults {
   company_city_code: string;
   company_complement: string;
   company_crt: string;
+  /* Precificação (v3.27.0) */
+  paymentCostRate: number;   // pior meio de pagamento aceito (fração)
+  pixDiscountRate: number;   // desconto à vista (fração)
+  installmentMin: number;    // valor mínimo para parcelar (R$)
+  installmentMax: number;    // máximo de parcelas sem juros
+  minMarginRate: number;     // piso de margem (fração)
 }
 
 /**
@@ -96,6 +102,11 @@ const DEFAULTS: PricingDefaults = {
   company_city_code: "",
   company_complement: "",
   company_crt: "1",
+  paymentCostRate: 0.0612,
+  pixDiscountRate: 0.0612,
+  installmentMin: 150,
+  installmentMax: 3,
+  minMarginRate: 0.4,
 };
 
 /**
@@ -197,6 +208,11 @@ export async function getPricingDefaults(): Promise<PricingDefaults> {
       company_city_code: map.get("company_city_code") || DEFAULTS.company_city_code,
       company_complement: map.get("company_complement") || DEFAULTS.company_complement,
       company_crt: map.get("company_crt") || DEFAULTS.company_crt,
+      paymentCostRate: percentToRate(map.get("pricing_payment_cost"), DEFAULTS.paymentCostRate),
+      pixDiscountRate: percentToRate(map.get("pricing_pix_discount"), DEFAULTS.pixDiscountRate),
+      installmentMin: Number(map.get("pricing_installment_min")) || DEFAULTS.installmentMin,
+      installmentMax: Number(map.get("pricing_installment_max")) || DEFAULTS.installmentMax,
+      minMarginRate: percentToRate(map.get("pricing_min_margin"), DEFAULTS.minMarginRate),
     };
     return cache;
   } catch {

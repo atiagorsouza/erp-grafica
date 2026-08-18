@@ -162,7 +162,9 @@ async function buildCalculation(data: ProductPayload) {
       service,
       operationalRate: data.operationalRate || defaults.operationalRate,
       taxRate: defaults.taxRate,
-      paymentRate: defaults.cardFeeRate,
+      /* pior meio de pagamento aceito (ex.: 3x sem juros), não a taxa
+         de débito — é o que garante a margem mínima em qualquer forma */
+      paymentRate: defaults.paymentCostRate,
       profitRate: data.margin,
       roundingStep: data.roundingStep,
     });
@@ -196,7 +198,7 @@ async function buildCalculation(data: ProductPayload) {
     service,
     margin: data.margin,
     taxRate: defaults.taxRate,
-    cardFeeRate: defaults.cardFeeRate,
+    cardFeeRate: defaults.paymentCostRate,
   });
 
   return {
