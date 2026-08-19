@@ -42,6 +42,8 @@ tar --exclude="./node_modules" \
     --exclude="./backups" \
     --exclude="./logs" \
     --exclude="./.printflow" \
+    --exclude="./services/*/node_modules" \
+    --exclude="./services/*/.env" \
     -czf "$PKG" -C "$ROOT" .
 
 # ---- validação: o pacote NÃO pode levar dado de produção ----
@@ -59,6 +61,18 @@ for PROIBIDO in "./backups/" "./logs/"; do
     exit 1
   fi
 done
+
+# Um .env em QUALQUER profundidade leva senha de banco e token embutidos.
+# Os excludes com "./" só pegam a raiz — services/whatsapp/.env passava.
+# `grep -E '/\.env$'` casa o arquivo em qualquer subpasta e não confunde
+# com .env.example.
+if tar -tzf "$PKG" | grep -qE '/\.env$'; then
+  echo "✖ O pacote contém um arquivo .env:"
+  tar -tzf "$PKG" | grep -E '/\.env$' | sed 's/^/    /'
+  echo "  Senha de banco e tokens não podem ser publicados."
+  rm -f "$PKG"
+  exit 1
+fi
 if tar -tzf "$PKG" | grep -qx "\./\.env"; then
   echo "✖ O pacote contém './.env' — credenciais não podem ser publicadas."
   rm -f "$PKG"
