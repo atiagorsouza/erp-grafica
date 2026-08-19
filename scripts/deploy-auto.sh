@@ -273,6 +273,20 @@ if [ -n "${DATABASE_URL:-}" ]; then
   ok "reparos executados"
   [ -f scripts/ensure-settings.mjs ] && node scripts/ensure-settings.mjs >/dev/null 2>&1 \
     && ok "configurações garantidas"
+
+  # Migrações pontuais de configuração (v3.51.0+).
+  #
+  # `ensure-settings` só CRIA chave que falta — nunca sobrescreve, e
+  # está certo: senão todo deploy apagaria o ajuste de quem
+  # configurou. Quando um PADRÃO MEU estava errado (o corte era 15h,
+  # o real é 17h), a correção precisa de um script próprio, que só
+  # troca se o valor ainda for o padrão antigo.
+  for m in scripts/migrar-*.mjs; do
+    [ -e "$m" ] || continue
+    node "$m" --aplicar >/dev/null 2>&1 \
+      && ok "$(basename "$m" .mjs) aplicado" \
+      || warn "$(basename "$m") reclamou — rode na mão para ver o motivo"
+  done
 else
   warn "DATABASE_URL ausente — pulando banco"
 fi
