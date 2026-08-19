@@ -32,6 +32,8 @@ export const PADRAO = {
   "bot.quer_humano": "Claro! Já estou chamando alguém da equipe. Um instante 🙂",
   "bot.opt_out":
     "Pronto, não envio mais mensagens automáticas. Se precisar, é só escrever.",
+  "bot.ausencia":
+    "Recebi sua mensagem! 🙂\n\nEstamos fora do atendimento automático agora, mas já anotei aqui e a equipe responde assim que possível.",
 };
 
 /** Troca {chave} pelos valores. Chave desconhecida fica literal. */

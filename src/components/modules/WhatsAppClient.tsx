@@ -16,12 +16,22 @@ type Estado = {
   tentativas: number;
   mensagensRecebidas: number;
   mensagensEnviadas: number;
+  /* Conexão e bot são independentes: dá para estar conectado com o
+     bot desligado (v3.53.0). */
+  bot?: {
+    pausado: boolean;
+    pausadoAte: string | null;
+    pausadoPor: string | null;
+    motivo: string | null;
+    ausenciaAtiva: boolean;
+  };
 };
 
 const VAZIO: Estado = {
   status: "desconectado", qrDataUrl: null, qrExpiraEm: null, numero: null,
   nome: null, conectadoDesde: null, ultimoErro: null, tentativas: 0,
   mensagensRecebidas: 0, mensagensEnviadas: 0,
+  bot: { pausado: false, pausadoAte: null, pausadoPor: null, motivo: null, ausenciaAtiva: false },
 };
 
 const ROTULO: Record<Estado["status"], { texto: string; tone: "green" | "amber" | "red" | "neutral" | "cyan" }> = {
@@ -96,6 +106,12 @@ export function WhatsAppClient() {
       const j = await r.json();
       if (!r.ok) throw new Error(j.erro || "falhou");
       if (msg) toast.success(msg);
+      /* Pausar/retomar não geram evento SSE (o Baileys não mudou de
+         estado). Relemos o status para a tela refletir na hora. */
+      try {
+        const s = await fetch("/api/whatsapp/status");
+        if (s.ok) setE(await s.json());
+      } catch { /* a próxima leitura corrige */ }
     } catch (err) {
       toast.error((err as Error).message);
     } finally {
@@ -165,6 +181,13 @@ export function WhatsAppClient() {
           </div>
         }
       />
+
+      {/* ── Liga/desliga do bot ────────────────────────────────────
+          Fica ACIMA das colunas, atravessando a tela: é a informação
+          que muda o comportamento do sistema inteiro, e escondê-la
+          numa coluna faria alguém achar que o bot está respondendo
+          quando não está. */}
+      {e.status === "conectado" && <ControleBot e={e} acao={acao} ocupado={ocupado} />}
 
       <div className="grid gap-5 lg:grid-cols-[minmax(0,380px)_1fr]">
         {/* ── Conexão ── */}
@@ -297,4 +320,147 @@ function formatarNumero(e164: string | null) {
   if (s.length === 11) return `+55 (${s.slice(0, 2)}) ${s.slice(2, 7)}-${s.slice(7)}`;
   if (s.length === 10) return `+55 (${s.slice(0, 2)}) ${s.slice(2, 6)}-${s.slice(6)}`;
   return `+${d}`;
+}
+
+/* ──────────────────────────────────────────────────────────────────
+   Liga/desliga do bot.
+
+   A distinção que esta faixa precisa deixar óbvia: DESLIGAR O BOT não
+   é desconectar o WhatsApp. O número continua no ar, recebendo e
+   guardando tudo — só as respostas automáticas param.
+
+   Sem isso, a única forma de calar o bot era "Desconectar", que
+   derruba a sessão e exige ler o QR de novo no celular.
+   ────────────────────────────────────────────────────────────────── */
+function ControleBot({
+  e,
+  acao,
+  ocupado,
+}: {
+  e: Estado;
+  acao: (rota: string, corpo?: unknown, msg?: string) => void;
+  ocupado: boolean;
+}) {
+  const bot = e.bot ?? {
+    pausado: false, pausadoAte: null, pausadoPor: null, motivo: null, ausenciaAtiva: false,
+  };
+  const ativo = !bot.pausado;
+
+  const ate = bot.pausadoAte ? new Date(bot.pausadoAte) : null;
+  const ateTexto =
+    ate && !Number.isNaN(ate.getTime())
+      ? ate.toLocaleString("pt-BR", {
+          day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit",
+        })
+      : null;
+
+  return (
+    <Card className={`mb-5 ${ativo ? "" : "border-amber-300 bg-amber-50/40"}`}>
+      <div className="flex flex-wrap items-start gap-4">
+        <div
+          className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full ${
+            ativo ? "bg-ok-500/15 text-ok-600" : "bg-amber-100 text-amber-700"
+          }`}
+        >
+          <Icon name={ativo ? "whatsapp" : "clock"} size={21} />
+        </div>
+
+        <div className="min-w-[240px] grow">
+          <p className="flex flex-wrap items-center gap-2 text-[14.5px] font-semibold text-ink-900">
+            Respostas automáticas
+            <Badge tone={ativo ? "green" : "amber"} dot>
+              {ativo ? "Ligadas" : "Desligadas"}
+            </Badge>
+          </p>
+
+          {ativo ? (
+            <p className="mt-0.5 text-[12.5px] text-ink-500">
+              O robô responde quem escreve, pré-cadastra e passa para a equipe.
+            </p>
+          ) : (
+            <p className="mt-0.5 text-[12.5px] text-amber-800">
+              O WhatsApp <strong>continua conectado</strong> e toda mensagem segue
+              sendo recebida e gravada — mas ninguém recebe resposta automática.
+              {ateTexto ? (
+                <> Religa sozinho em <strong>{ateTexto}</strong>.</>
+              ) : (
+                <> Só volta quando você ligar de novo.</>
+              )}
+              {bot.motivo ? <> · {bot.motivo}</> : null}
+            </p>
+          )}
+
+          {!ativo && (
+            <label className="mt-2.5 flex cursor-pointer items-start gap-2 text-[12.5px] text-ink-600">
+              <input
+                type="checkbox"
+                className="mt-0.5"
+                checked={bot.ausenciaAtiva}
+                disabled={ocupado}
+                onChange={(ev) =>
+                  acao(
+                    "ausencia",
+                    { ativa: ev.target.checked },
+                    ev.target.checked ? "Aviso de ausência ligado." : "Aviso desligado."
+                  )
+                }
+              />
+              <span>
+                Avisar quem escrever que estamos fora do atendimento automático
+                <span className="block text-[11.5px] text-ink-400">
+                  Uma vez por conversa. O texto está em Mensagens automáticas.
+                </span>
+              </span>
+            </label>
+          )}
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          {ativo ? (
+            <>
+              {/* Pausas curtas são o caso comum: almoço, uma reunião,
+                  o fim do expediente. Prazo evita o esquecimento. */}
+              {[
+                { r: "1 hora", m: 60 },
+                { r: "Até amanhã", m: 15 * 60 },
+              ].map((o) => (
+                <Button
+                  key={o.m}
+                  variant="outline"
+                  size="sm"
+                  disabled={ocupado}
+                  onClick={() =>
+                    acao("pausar", { minutos: o.m, motivo: `pausa de ${o.r.toLowerCase()}` },
+                      `Bot desligado por ${o.r.toLowerCase()}.`)
+                  }
+                >
+                  {o.r}
+                </Button>
+              ))}
+              <Button
+                variant="danger"
+                size="sm"
+                icon="x"
+                disabled={ocupado}
+                onClick={() =>
+                  acao("pausar", { minutos: null, motivo: "desligado manualmente" },
+                    "Bot desligado. O WhatsApp continua conectado.")
+                }
+              >
+                Desligar
+              </Button>
+            </>
+          ) : (
+            <Button
+              icon="check"
+              disabled={ocupado}
+              onClick={() => acao("retomar", {}, "Bot ligado de novo.")}
+            >
+              Ligar respostas
+            </Button>
+          )}
+        </div>
+      </div>
+    </Card>
+  );
 }
