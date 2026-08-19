@@ -10,7 +10,7 @@
 
    Decisões da prévia aprovada:
      - nome e telefone já vêm preenchidos, destacados como confirmados
-     - poucos campos: só o que a nota exige
+     - poucos campos: só o que o documento exige
      - CEP preenche endereço
      - PF/PJ troca o formulário
      - aviso de privacidade em português de gente
@@ -32,7 +32,13 @@ type Tipo = "pf" | "pj";
 
 export interface CadastroInicial {
   type: Tipo;
+  /** PF: montado de primeiro+sobrenome no envio. PJ: razão social. */
   name: string;
+  /* Dois campos para PF. "Nome completo" num campo só faz muita gente
+     digitar apenas o primeiro nome e seguir — e aí o cadastro fica pela metade.
+     Separar obriga o sobrenome sem precisar explicar nada. */
+  firstName: string;
+  lastName: string;
   tradeName: string;
   document: string;
   email: string;
@@ -115,7 +121,9 @@ export function CadastroPublicoForm({
 
   /* Nome e telefone vieram da conversa real. Marcamos como confirmados
       só enquanto o cliente não mexe — depois vira campo comum. */
-  const nomeConfirmado = f.name === inicial.name && !!inicial.name;
+  const nomeConfirmado = pj
+    ? f.name === inicial.name && !!inicial.name
+    : f.firstName === inicial.firstName && !!inicial.firstName;
   const foneConfirmado = f.whatsapp === inicial.whatsapp && !!inicial.whatsapp;
 
   const prazo = useMemo(() => {
@@ -147,10 +155,19 @@ export function CadastroPublicoForm({
     }
   }, [f.cep]);
 
+  /* PF monta o nome dos dois campos; PJ usa a razão social direto. */
+  const nomeCompleto = pj
+    ? f.name.trim()
+    : [f.firstName.trim(), f.lastName.trim()].filter(Boolean).join(" ");
+
   function validar(): boolean {
     const e: Record<string, string> = {};
-    if (f.name.trim().length < 3) e.name = pj ? "Informe a razão social" : "Escreva seu nome completo";
-    else if (!pj && !f.name.trim().includes(" ")) e.name = "Falta o sobrenome";
+    if (pj) {
+      if (f.name.trim().length < 3) e.name = "Informe a razão social";
+    } else {
+      if (f.firstName.trim().length < 2) e.firstName = "Informe seu primeiro nome";
+      if (f.lastName.trim().length < 2) e.lastName = "Informe seu sobrenome";
+    }
 
     const doc = onlyDigits(f.document);
     if (!doc) e.document = pj ? "CNPJ é obrigatório" : "CPF é obrigatório";
@@ -174,11 +191,15 @@ export function CadastroPublicoForm({
     setFalha("");
     if (!validar()) return;
     setEnviando(true);
+    const { firstName: _fn, lastName: _ln, ...semNomeSeparado } = f;
     try {
       const r = await fetch(`/api/cadastro/${token}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(f),
+        /* `firstName`/`lastName` são só da tela: o cadastro guarda
+           um `name` só. A rota pública ignora chave desconhecida,
+           mas mandar lixo é pedir confusão futura. */
+        body: JSON.stringify({ ...semNomeSeparado, name: nomeCompleto }),
       });
       const d = (await r.json().catch(() => ({}))) as { error?: string; campo?: string };
       if (!r.ok) {
@@ -205,8 +226,8 @@ export function CadastroPublicoForm({
           </div>
           <h1 className="mt-5 text-[21px] font-bold text-ink-900">Cadastro concluído!</h1>
           <p className="mt-2 text-[14px] leading-relaxed text-ink-500">
-            Obrigado, {f.name.trim().split(/\s+/)[0]}. Já está tudo certo para emitirmos seu
-            orçamento e a nota fiscal.
+            Obrigado, {(pj ? f.name : f.firstName).trim().split(/\s+/)[0]}. Já está tudo certo para emitirmos seu
+            orçamento e seus documentos.
           </p>
           <p className="mt-4 text-[13px] text-ink-400">
             Pode voltar para a conversa no WhatsApp
@@ -227,7 +248,7 @@ export function CadastroPublicoForm({
 
         <div className="rounded-b-2xl border border-t-0 border-paper-200 bg-white px-6 py-6 shadow-card">
           <p className="mb-5 text-[13.5px] leading-relaxed text-ink-500">
-            Leva 1 minuto. Pedimos só o que a nota fiscal exige.
+            Leva 1 minuto. Pedimos só o essencial.
             {prazo && <> Este link vale até <strong className="text-ink-800">{prazo}</strong> ({validadeDias} dias).</>}
           </p>
 
@@ -248,22 +269,56 @@ export function CadastroPublicoForm({
           </div>
 
           <div className="space-y-4">
-            <div data-erro={erros.name ? "1" : undefined}>
-              <Campo
-                label={pj ? "Razão social" : "Nome completo"}
-                obrigatorio
-                erro={erros.name}
-                hint={nomeConfirmado && !erros.name ? "✓ preenchido — confira e complete" : undefined}
-              >
-                <input
-                  className={nomeConfirmado ? inputOkCls : inputCls}
-                  value={f.name}
-                  autoComplete="name"
-                  onChange={(e) => set("name", e.target.value)}
-                  placeholder={pj ? "Nome na receita federal" : "Nome e sobrenome"}
-                />
-              </Campo>
-            </div>
+            {/* PJ tem razão social num campo só (é como está na
+                Receita). PF tem dois campos: nome completo num campo
+                só faz muita gente digitar apenas o primeiro nome. */}
+            {pj ? (
+              <div data-erro={erros.name ? "1" : undefined}>
+                <Campo label="Razão social" obrigatorio erro={erros.name}>
+                  <input
+                    className={inputCls}
+                    value={f.name}
+                    autoComplete="organization"
+                    onChange={(e) => set("name", e.target.value)}
+                    placeholder="Nome na Receita Federal"
+                  />
+                </Campo>
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 gap-3">
+                <div data-erro={erros.firstName ? "1" : undefined}>
+                  <Campo
+                    label="Primeiro nome"
+                    obrigatorio
+                    erro={erros.firstName}
+                    hint={
+                      nomeConfirmado && !erros.firstName
+                        ? "✓ veio da conversa"
+                        : undefined
+                    }
+                  >
+                    <input
+                      className={nomeConfirmado ? inputOkCls : inputCls}
+                      value={f.firstName}
+                      autoComplete="given-name"
+                      onChange={(e) => set("firstName", e.target.value)}
+                      placeholder="Tiago"
+                    />
+                  </Campo>
+                </div>
+                <div data-erro={erros.lastName ? "1" : undefined}>
+                  <Campo label="Sobrenome" obrigatorio erro={erros.lastName}>
+                    <input
+                      className={inputCls}
+                      value={f.lastName}
+                      autoComplete="family-name"
+                      onChange={(e) => set("lastName", e.target.value)}
+                      placeholder="Souza"
+                    />
+                  </Campo>
+                </div>
+              </div>
+            )}
 
             {pj && (
               <Campo label="Nome fantasia" hint="como a empresa é conhecida">
@@ -276,7 +331,7 @@ export function CadastroPublicoForm({
                 label={pj ? "CNPJ" : "CPF"}
                 obrigatorio
                 erro={erros.document}
-                hint="necessário para emitir a nota fiscal"
+                hint="para emitir seus documentos"
               >
                 <input
                   className={inputCls}
@@ -329,7 +384,7 @@ export function CadastroPublicoForm({
             </div>
 
             <div data-erro={erros.email ? "1" : undefined}>
-              <Campo label="E-mail" erro={erros.email} hint="para receber orçamento e nota fiscal">
+              <Campo label="E-mail" erro={erros.email} hint="para receber seu orçamento">
                 <input
                   className={inputCls}
                   type="email"
@@ -420,7 +475,7 @@ export function CadastroPublicoForm({
           </button>
 
           <p className="mt-4 text-[11.5px] leading-relaxed text-ink-400">
-            Seus dados são usados só para emitir orçamentos, notas fiscais e falar sobre seus
+            Seus dados são usados só para emitir seus documentos e falar sobre seus
             pedidos. Não compartilhamos com ninguém e você pode pedir correção ou exclusão
             quando quiser{telefoneEmpresa ? `, pelo ${telefoneEmpresa}` : ""}.
           </p>

@@ -24,6 +24,7 @@
      da janela de 24h — a categoria mais segura da política.
    ────────────────────────────────────────────────────────────────── */
 import { doJid, bonito } from "./telefone.mjs";
+import { criarMensagens } from "./mensagens.mjs";
 
 const PEDIR_NOME = "pedir_nome";
 const PEDIR_TIPO = "pedir_tipo";
@@ -77,9 +78,14 @@ function enfileirar(chave, tarefa) {
 }
 
 export function criarPreCadastro({ pool, empresa = "VTDIGITAL", contarEnviada }) {
+  /* Todo texto que o bot manda vem daqui. O padrão está no código;
+     o banco só guarda o que o operador customizou pela web. */
+  const msgs = criarMensagens({ pool });
+
   /* Estado da conversa vive no banco: reiniciar o serviço não pode
      fazer o bot perguntar o nome de novo para quem já respondeu. */
   async function garantirTabela() {
+    await msgs.garantirTabela();
     await pool.query(`
       CREATE TABLE IF NOT EXISTS whatsapp_conversas (
         phone_e164   text PRIMARY KEY,
@@ -209,17 +215,17 @@ export function criarPreCadastro({ pool, empresa = "VTDIGITAL", contarEnviada })
         [cliente.id]
       );
       await mudarEtapa(fone, HUMANO);
-      const t = "Pronto, não envio mais mensagens automáticas. Se precisar, é só escrever.";
-      await responder(sock, jid, t, contarEnviada);
-      await registrar(fone, "enviada", t);
+      const t = await msgs.texto("bot.opt_out");
+      if (t) await responder(sock, jid, t, contarEnviada);
+      if (t) await registrar(fone, "enviada", t);
       return;
     }
 
     if (QUER_HUMANO.test(texto)) {
       await mudarEtapa(fone, HUMANO);
-      const t = "Claro! Já estou chamando alguém da equipe. Um instante 🙂";
-      await responder(sock, jid, t, contarEnviada);
-      await registrar(fone, "enviada", t);
+      const t = await msgs.texto("bot.quer_humano");
+      if (t) await responder(sock, jid, t, contarEnviada);
+      if (t) await registrar(fone, "enviada", t);
       return;
     }
 
@@ -228,9 +234,9 @@ export function criarPreCadastro({ pool, empresa = "VTDIGITAL", contarEnviada })
       if (conversa.etapa !== HUMANO) await mudarEtapa(fone, HUMANO);
       if (conversa.recebidas <= 1) {
         const primeiro = String(cliente.name || "").split(" ")[0];
-        const t = `Oi, ${primeiro}! Que bom te ver por aqui 🙂\nJá estou chamando a equipe para te atender.`;
-        await responder(sock, jid, t, contarEnviada);
-        await registrar(fone, "enviada", t);
+        const t = await msgs.texto("bot.cliente_conhecido", { nome: primeiro, empresa });
+        if (t) await responder(sock, jid, t, contarEnviada);
+        if (t) await registrar(fone, "enviada", t);
       }
       return;
     }
@@ -247,18 +253,16 @@ export function criarPreCadastro({ pool, empresa = "VTDIGITAL", contarEnviada })
             `UPDATE whatsapp_conversas SET saudou = true WHERE phone_e164 = $1`,
             [fone]
           );
-          const t =
-            `Olá! Aqui é da ${empresa} 🙂\n\n` +
-            `Para te atender direitinho, como posso te chamar?`;
-          await responder(sock, jid, t, contarEnviada);
-          await registrar(fone, "enviada", t);
+          const t = await msgs.texto("bot.saudacao", { empresa });
+          if (t) await responder(sock, jid, t, contarEnviada);
+          if (t) await registrar(fone, "enviada", t);
           return;
         }
         const nome = limparNome(texto);
         if (!nome) {
-          const t = "Desculpe, não entendi. Pode me dizer só o seu nome?";
-          await responder(sock, jid, t, contarEnviada);
-          await registrar(fone, "enviada", t);
+          const t = await msgs.texto("bot.nome_invalido", { empresa });
+          if (t) await responder(sock, jid, t, contarEnviada);
+          if (t) await registrar(fone, "enviada", t);
           return;
         }
         await pool.query(
@@ -266,12 +270,9 @@ export function criarPreCadastro({ pool, empresa = "VTDIGITAL", contarEnviada })
           [cliente.id, nome]
         );
         await mudarEtapa(fone, PEDIR_TIPO);
-        const t =
-          `Prazer, ${nome.split(" ")[0]}! 😊\n\n` +
-          `É para você ou para uma empresa?\n\n` +
-          `1️⃣ Para mim\n2️⃣ Para minha empresa`;
-        await responder(sock, jid, t, contarEnviada);
-        await registrar(fone, "enviada", t);
+        const t = await msgs.texto("bot.pede_tipo", { nome: nome.split(" ")[0], empresa });
+        if (t) await responder(sock, jid, t, contarEnviada);
+        if (t) await registrar(fone, "enviada", t);
         return;
       }
 
@@ -279,9 +280,9 @@ export function criarPreCadastro({ pool, empresa = "VTDIGITAL", contarEnviada })
         const ehEmpresa = /\b(2|empresa|cnpj|companhia|loja|neg[oó]cio)\b/i.test(texto);
         const ehPessoa = /\b(1|pra mim|para mim|pessoa|pessoal|cpf|eu)\b/i.test(texto);
         if (!ehEmpresa && !ehPessoa) {
-          const t = "Só para eu registrar certo: responda *1* para você ou *2* para empresa.";
-          await responder(sock, jid, t, contarEnviada);
-          await registrar(fone, "enviada", t);
+          const t = await msgs.texto("bot.tipo_invalido", { empresa });
+          if (t) await responder(sock, jid, t, contarEnviada);
+          if (t) await registrar(fone, "enviada", t);
           return;
         }
         await pool.query(
@@ -289,11 +290,9 @@ export function criarPreCadastro({ pool, empresa = "VTDIGITAL", contarEnviada })
           [cliente.id, ehEmpresa ? "pj" : "pf"]
         );
         await mudarEtapa(fone, CONCLUIDO);
-        const t =
-          `Perfeito, anotado! ✅\n\n` +
-          `Me conta o que você precisa que já encaminho para a equipe.`;
-        await responder(sock, jid, t, contarEnviada);
-        await registrar(fone, "enviada", t);
+        const t = await msgs.texto("bot.concluido", { nome: String(cliente.name || "").split(" ")[0], empresa });
+        if (t) await responder(sock, jid, t, contarEnviada);
+        if (t) await registrar(fone, "enviada", t);
         return;
       }
 
@@ -301,9 +300,9 @@ export function criarPreCadastro({ pool, empresa = "VTDIGITAL", contarEnviada })
         /* Ficha montada. A partir daqui é assunto de gente — avisamos
            uma vez e passamos para o humano. */
         await mudarEtapa(fone, HUMANO);
-        const t = "Recebi! Já estou passando para a equipe te responder 🙂";
-        await responder(sock, jid, t, contarEnviada);
-        await registrar(fone, "enviada", t);
+        const t = await msgs.texto("bot.passa_equipe", { nome: String(cliente.name || "").split(" ")[0], empresa });
+        if (t) await responder(sock, jid, t, contarEnviada);
+        if (t) await registrar(fone, "enviada", t);
         return;
       }
 

@@ -1356,3 +1356,33 @@ export const registrationLinks = pgTable("registration_links", {
 ]);
 
 export type RegistrationLink = typeof registrationLinks.$inferSelect;
+
+/* ------------------------------------------------------------------ */
+/*  MENSAGENS EDITÁVEIS DO WHATSAPP (v3.52.0)                          */
+/*                                                                     */
+/*  Todo texto que o bot manda vive aqui, editável pela web. O padrão  */
+/*  continua no código: se a linha não existir ou vier vazia, o        */
+/*  sistema usa o texto de fábrica. Nunca fica mudo.                   */
+/*                                                                     */
+/*  Por que tabela e não arquivo de configuração: o serviço do         */
+/*  WhatsApp roda em OUTRO processo. Arquivo exigiria reiniciar o bot  */
+/*  a cada correção de vírgula; o banco os dois já compartilham.       */
+/*                                                                     */
+/*  As variáveis {nome}, {link} etc. são trocadas na hora do envio.    */
+/*  A lista do que existe em cada mensagem está em lib/mensagens.ts —  */
+/*  a tela mostra ao operador quais ele pode usar.                     */
+/* ------------------------------------------------------------------ */
+export const messageTemplates = pgTable("message_templates", {
+  id: serial("id").primaryKey(),
+  /** Identificador estável, é por ele que o código busca. */
+  slug: text("slug").notNull().unique(),
+  /** Texto com as variáveis. Vazio = usa o padrão do código. */
+  body: text("body"),
+  /** Desligada, o bot pula esta mensagem (quando fizer sentido pular). */
+  active: boolean("active").default(true).notNull(),
+  /** Quem editou por último — a tela mostra para dar rastro. */
+  updatedBy: text("updated_by"),
+  updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
+});
+
+export type MessageTemplate = typeof messageTemplates.$inferSelect;

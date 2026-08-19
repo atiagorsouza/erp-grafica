@@ -1333,6 +1333,56 @@ async function main() {
     await sql("delete from registration_links where customer_id=$1", [customerId]);
   }
 
+  // 11.6) Mensagens editáveis (v3.52.0)
+  //
+  // O padrão mora no código e a tabela só guarda customização. O que
+  // não pode acontecer: bot mudo por causa de texto salvo errado.
+  {
+    const tpl = (body) =>
+      fetch(`${BASE_URL}/api/crud/message-templates`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+    const ok = await tpl({ op: "save", slug: "bot.saudacao", body: "Oi! Aqui é a {empresa}." });
+    assert(ok.ok, "mensagem customizada é salva");
+
+    const [gravado] = await sql("select body from message_templates where slug='bot.saudacao'");
+    assert(
+      String(gravado?.body || "").includes("{empresa}"),
+      "customização guarda a variável sem expandir"
+    );
+
+    /* Variável inventada viraria "{nomee}" literal na conversa do
+       cliente. Recusar no salvamento é mais barato que descobrir
+       depois. */
+    const ruim = await tpl({ op: "save", slug: "bot.saudacao", body: "Oi {nomee}!" });
+    assert(ruim.status === 422, "variável inexistente é recusada");
+
+    const fantasma = await tpl({ op: "save", slug: "bot.nao_existe", body: "x" });
+    assert(fantasma.status === 404, "slug desconhecido é recusado");
+
+    /* Restaurar devolve ao texto de fábrica: `body` volta a NULL, não
+       vira cópia do padrão. Assim, se o padrão melhorar no futuro,
+       quem restaurou recebe a melhora. */
+    const rest = await tpl({ op: "restore", slug: "bot.saudacao" });
+    assert(rest.ok, "restaurar o original responde ok");
+    const [limpo] = await sql("select body from message_templates where slug='bot.saudacao'");
+    assert(limpo?.body === null, "restaurar apaga a customização (volta ao padrão do código)");
+
+    /* A tela vive na página do WhatsApp e precisa abrir mesmo com o
+       serviço do bot desligado — que é o caso aqui no smoke. */
+    const pag = await fetch(`${BASE_URL}/whatsapp`);
+    const html = await pag.text();
+    assert(
+      pag.ok && html.includes("Mensagens automáticas"),
+      "editor de mensagens abre com o bot offline"
+    );
+
+    await sql("delete from message_templates where slug like 'bot.%' or slug like 'cadastro.%'");
+  }
+
   // 12) Páginas principais respondem
   for (const path of ["/clientes", "/orcamentos", "/pedidos", "/kanban", "/estoque", "/relatorios", "/financeiro", "/envios", "/cobrancas"]) {
     const res = await fetch(`${BASE_URL}${path}`);

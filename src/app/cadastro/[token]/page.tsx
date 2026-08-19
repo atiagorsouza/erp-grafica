@@ -104,6 +104,14 @@ export default async function CadastroPublicoPage({
 
   const info = await empresa();
 
+  const partes = String(cliente.name || "").trim().split(/\s+/).filter(Boolean);
+  /* Nome genérico criado pelo bot antes de a pessoa responder
+     ("WhatsApp (21) 99999-9999") não deve ir para o formulário como
+     se fosse o nome dela. */
+  const nomeGenerico = /^whatsapp\b/i.test(String(cliente.name || ""));
+  const primeiroNome = nomeGenerico ? "" : partes[0] || "";
+  const sobrenome = nomeGenerico ? "" : partes.slice(1).join(" ");
+
   return (
     <CadastroPublicoForm
       token={link.token}
@@ -114,6 +122,13 @@ export default async function CadastroPublicoPage({
       inicial={{
         type: (cliente.type as "pf" | "pj") || "pf",
         name: cliente.name || "",
+        /* O bot grava um nome só ("Tiago" ou "Tiago Souza"). A tela
+           de PF tem dois campos, então quebramos aqui: primeira
+           palavra vira o nome, o resto vira sobrenome. Quem só disse
+           "Tiago" ao bot recebe o sobrenome em branco — que é
+           exatamente o que queremos que ele complete. */
+        firstName: primeiroNome,
+        lastName: sobrenome,
         tradeName: cliente.tradeName || "",
         document: cliente.document || "",
         email: cliente.email || "",
