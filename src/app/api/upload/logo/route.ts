@@ -31,6 +31,62 @@ const TIPOS_ACEITOS = ["image/png", "image/jpeg", "image/webp", "image/svg+xml"]
 const CHAVES = ["company_logo", "company_logo_dark", "company_logo_icon"] as const;
 type Chave = (typeof CHAVES)[number];
 
+/* ──────────────────────────────────────────────────────────────────
+   GET — serve a logo como imagem de verdade.
+
+   Existe por causa de um bug real (v3.53.1): o Painel embutia o data
+   URI inteiro no HTML. Com as três logos preenchidas a 2 MB cada, a
+   página passava de 200 KB para 12 MB — cada imagem ia DUAS vezes (no
+   HTML e no payload RSC do Next) — e o navegador travava ou desistia.
+
+   Guardar no banco continua certo (backup, tunnel, PDF). O erro era
+   TRAFEGAR o conteúdo para montar a tela. Agora a tela referencia
+   esta URL e o navegador baixa a imagem como qualquer outra: em
+   paralelo, com cache, sem bloquear o HTML.
+   ────────────────────────────────────────────────────────────────── */
+export async function GET(req: Request) {
+  const { searchParams } = new URL(req.url);
+  const chave = String(searchParams.get("key") || "company_logo") as Chave;
+
+  if (!CHAVES.includes(chave)) {
+    return new Response("chave inválida", { status: 400 });
+  }
+
+  const [linha] = await db
+    .select({ value: settings.value, updatedAt: settings.updatedAt })
+    .from(settings)
+    .where(eq(settings.key, chave))
+    .limit(1);
+
+  const uri = String(linha?.value || "");
+  const m = /^data:([\w/+.-]+);base64,([\s\S]*)$/.exec(uri);
+  if (!m) return new Response("sem logo", { status: 404 });
+
+  const [, tipo, b64] = m;
+  let bin: Buffer;
+  try {
+    bin = Buffer.from(b64, "base64");
+  } catch {
+    return new Response("logo corrompida", { status: 422 });
+  }
+
+  /* ETag pelo timestamp: trocou a logo, o navegador rebaixa. Não
+     trocou, responde 304 e não transfere nada. */
+  const etag = `"${chave}-${linha?.updatedAt?.getTime() ?? 0}"`;
+  if (req.headers.get("if-none-match") === etag) {
+    return new Response(null, { status: 304, headers: { etag } });
+  }
+
+  return new Response(new Uint8Array(bin), {
+    headers: {
+      "content-type": tipo,
+      "content-length": String(bin.byteLength),
+      "cache-control": "private, max-age=0, must-revalidate",
+      etag,
+    },
+  });
+}
+
 export async function POST(req: Request) {
   let form: FormData;
   try {
@@ -108,11 +164,15 @@ export async function POST(req: Request) {
     await db.insert(settings).values({ key: chave, value: dataUri, category: "empresa" });
   }
 
+  /* Não devolvemos o data URI: o cliente já tem o arquivo e a prévia
+     passa a vir da URL do GET. Mandar de volta 2 MB que o navegador
+     acabou de enviar é desperdício puro. `versao` força a prévia a
+     recarregar sem depender de cache. */
   return Response.json({
     ok: true,
     key: chave,
     bytes: bytes.byteLength,
-    dataUri,
+    versao: Date.now(),
   });
 }
 

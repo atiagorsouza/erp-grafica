@@ -24,8 +24,17 @@ async function upsertSetting(data: Record<string, unknown>) {
   return row;
 }
 
+/* As logos são data URIs de até 2 MB cada. Devolvê-las aqui fazia
+   este endpoint responder 4 MB — o mesmo problema que travou o Painel
+   (v3.53.1). Quem precisa da imagem busca em /api/upload/logo?key=...
+   Devolvemos só o indicador de que existe. */
+const CHAVES_LOGO = new Set(["company_logo", "company_logo_dark", "company_logo_icon"]);
+
 export async function GET() {
-  const rows = await db.select().from(settings).orderBy(asc(settings.category), asc(settings.key));
+  const linhas = await db.select().from(settings).orderBy(asc(settings.category), asc(settings.key));
+  const rows = linhas.map((r) =>
+    CHAVES_LOGO.has(r.key) && (r.value?.length ?? 0) > 0 ? { ...r, value: "__SET__" } : r
+  );
   return Response.json({
     ok: true,
     rows,
@@ -50,6 +59,22 @@ export async function POST(req: Request) {
 
   const op = String(body.op || "");
   const data = (body.data as Record<string, unknown>) || {};
+
+  /* Trava de servidor: "__SET__" é o marcador que a tela recebe no
+     lugar do base64 da logo. Se ele voltasse num save, gravaria a
+     string por cima da imagem e ela sumiria dos documentos.
+
+     A tela já pula esses campos, mas a regra tem de morar aqui: é o
+     servidor que protege o dado, não a interface. */
+  if (String(data.value ?? "") === "__SET__") {
+    return Response.json(
+      {
+        error: "Este campo é gravado pelo upload de imagem, não pelo formulário.",
+        details: { code: "LOGO_PLACEHOLDER" },
+      },
+      { status: 422 }
+    );
+  }
 
   try {
     if (op === "save" || op === "create") {

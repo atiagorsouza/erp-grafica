@@ -40,6 +40,15 @@ type Group = {
 const GROUPS = controlPanelConfig.groups as Group[];
 const CANONICAL_KEYS = new Set(GROUPS.flatMap((g) => g.fields.map((f) => f.key)));
 
+/* As logos NÃO passam por este formulário.
+
+   A página serve "__SET__" no lugar do base64 (senão o HTML vai a
+   12 MB — bug v3.53.1). Quem grava a imagem é /api/upload/logo, na
+   hora do upload. Se o "Salvar alterações" tratasse esses campos como
+   texto comum, escreveria a string "__SET__" por cima da logo real e
+   ela sumiria dos documentos. */
+const CHAVES_LOGO = new Set(["company_logo", "company_logo_dark", "company_logo_icon"]);
+
 const categoryOf = (key: string): string => {
   const group = GROUPS.find((g) => g.fields.some((f) => f.key === key));
   return group?.id || "geral";
@@ -79,6 +88,7 @@ export function SettingsClient({ rows }: { rows: Row[] }) {
 
   const dirty = Object.entries(form).filter(([key, value]) => {
     if (!CANONICAL_KEYS.has(key)) return false;
+    if (CHAVES_LOGO.has(key)) return false;
     const row = rowsByKey.get(key);
     const original = row ? String(row.value ?? "") : defaultOf(key);
     return original !== value;
@@ -89,6 +99,8 @@ export function SettingsClient({ rows }: { rows: Row[] }) {
     try {
       for (const [key, value] of Object.entries(form)) {
         if (!CANONICAL_KEYS.has(key)) continue;
+        /* Gravadas pelo upload, nunca por aqui. */
+        if (CHAVES_LOGO.has(key)) continue;
         const existing = rowsByKey.get(key);
         const original = existing ? String(existing.value ?? "") : defaultOf(key);
         if (original === value) continue;
