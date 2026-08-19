@@ -59,7 +59,24 @@ if (process.env.DATABASE_URL) {
       [process.env.DATABASE_URL, "-qAt", "-c", "select value from settings where key='app_version' limit 1"],
       { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }
     ).trim();
-    if (out && out !== version) {
+    /* `out` vazio = a chave NUNCA existiu.
+    
+       Bug v3.53.2: a condição era `out && out !== version`, então a
+       primeira gravação nunca acontecia — e o banco ficava sem
+       `app_version` para sempre. Com isso /api/version devolvia
+       installedVersion:null e não havia como saber, olhando o
+       sistema, qual update já tinha entrado.
+    
+       Gravar quando está AUSENTE não precisa de --fix: não há valor
+       do usuário para sobrescrever, só um vazio para preencher. */
+    if (!out) {
+      execFileSync("psql", [
+        process.env.DATABASE_URL, "-qAt", "-c",
+        "insert into settings (key,value,category) values ('app_version','" + version + "','sistema') " +
+        "on conflict (key) do update set value=excluded.value, updated_at=now()",
+      ], { stdio: "ignore" });
+      console.log(`↻ settings.app_version gravado pela primeira vez: ${version}`);
+    } else if (out !== version) {
       if (!fix) die(`Banco gravado em ${out}, VERSION é ${version}. Rode scripts/update.sh ou --fix`);
       execFileSync("psql", [
         process.env.DATABASE_URL, "-qAt", "-c",

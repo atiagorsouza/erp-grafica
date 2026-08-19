@@ -287,6 +287,38 @@ if [ -n "${DATABASE_URL:-}" ]; then
       && ok "$(basename "$m" .mjs) aplicado" \
       || warn "$(basename "$m") reclamou — rode na mão para ver o motivo"
   done
+
+  # Prazos sugeridos por tipo de trabalho.
+  #
+  # Só toca em produto que ainda está no padrão de fábrica (criação 0,
+  # produção 1, acabamento 0). Quem já ajustou o prazo na tela não é
+  # tocado — por isso é seguro rodar em todo deploy, e não faz sentido
+  # exigir um comando manual que o usuário vai esquecer.
+  if [ -f scripts/seed-prazos.mjs ]; then
+    saida="$(node scripts/seed-prazos.mjs --aplicar 2>&1 || true)"
+    ajustados="$(printf '%s' "$saida" | grep -oE '^✅ [0-9]+' | grep -oE '[0-9]+' || true)"
+    if [ -n "${ajustados:-}" ] && [ "${ajustados:-0}" != "0" ]; then
+      ok "prazos aplicados em ${ajustados} produto(s) que estavam no padrão"
+    else
+      ok "prazos conferidos (nada a mudar)"
+    fi
+  fi
+
+  # ── Carimbo da versão no banco ──────────────────────────────────
+  #
+  # BUG v3.53.2: isto nunca era feito. `settings.app_version` ficava
+  # NULL para sempre, então /api/version devolvia installedVersion:null
+  # e upToDate:null — e não havia como saber, olhando o sistema, qual
+  # update já tinha entrado. Eu mesmo me confundi por causa disso e
+  # fiquei repetindo que o servidor estava numa versão antiga.
+  #
+  # check-version.mjs compara VERSION, package.json, lib/version.ts e
+  # o banco, e grava quando o banco está diferente.
+  if [ -f scripts/check-version.mjs ]; then
+    node scripts/check-version.mjs >/tmp/version.log 2>&1 \
+      && ok "versão carimbada no banco (v$ALVO)" \
+      || warn "check-version reclamou (veja /tmp/version.log)"
+  fi
 else
   warn "DATABASE_URL ausente — pulando banco"
 fi
@@ -337,11 +369,35 @@ if [ -f scripts/e2e-smoke.mjs ]; then
   fi
 fi
 
+# Varredura de saúde: não reprova o deploy, mas mostra o que precisa
+# de atenção. Vale mais aqui, com o sistema recém-subido, do que num
+# comando manual que ninguém lembra de rodar.
+DIAG=""
+if [ -f scripts/diagnosticar-sistema.mjs ]; then
+  if BASE_URL="http://127.0.0.1:${PORTA}" node scripts/diagnosticar-sistema.mjs >/tmp/diag.log 2>&1; then
+    DIAG="$(grep -oE '[0-9]+ problema\(s\) · [0-9]+ aviso\(s\)|Sistema saudável' /tmp/diag.log | tail -1)"
+    ok "varredura: ${DIAG:-sem problemas}"
+  else
+    DIAG="$(grep -oE '[0-9]+ problema\(s\) · [0-9]+ aviso\(s\)' /tmp/diag.log | tail -1)"
+    warn "varredura encontrou algo: ${DIAG:-veja /tmp/diag.log}"
+    grep -E '^  ✖' /tmp/diag.log | head -8
+  fi
+fi
+
 trap - EXIT
 echo
 hr
 echo "  ${VERDE}✔ v$ALVO NO AR${FIM}   (antes: ${ANTES:-nenhuma})"
 hr
 echo "  backup .......... $(basename "$BACKUP_DIR")"
+[ -n "$DIAG" ] && echo "  varredura ....... $DIAG"
+echo "  detalhes ........ node scripts/diagnosticar-sistema.mjs"
 echo "  se algo estranhar no navegador, é cache: Ctrl+Shift+R"
 hr
+
+# Avisos que dependem de decisão sua — nunca aplicados sozinhos.
+if [ -f /tmp/diag.log ] && grep -q '^  ⚠' /tmp/diag.log; then
+  echo "  ${AMAR}Pendências${FIM} (não impedem o uso):"
+  grep -E '^  ⚠' /tmp/diag.log | head -6 | sed 's/^  ⚠/   ·/'
+  hr
+fi

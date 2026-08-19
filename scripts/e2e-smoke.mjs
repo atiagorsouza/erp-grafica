@@ -1449,6 +1449,19 @@ async function main() {
     }
   }
 
+  // 11.8) Versão carimbada no banco (v3.53.2)
+  //
+  // `settings.app_version` era NULL para sempre: check-version só
+  // gravava quando o valor JÁ existia e estava diferente — a primeira
+  // gravação nunca acontecia. Sem isso não há como saber, olhando o
+  // sistema, qual update entrou.
+  {
+    const v = await req("/api/version");
+    assert(v.installedVersion === v.version,
+      `banco carimbado com a versão do código (${v.installedVersion} = ${v.version})`);
+    assert(v.upToDate === true, "sistema se reconhece atualizado");
+  }
+
   // 12) Páginas principais respondem
   for (const path of ["/clientes", "/orcamentos", "/pedidos", "/kanban", "/estoque", "/relatorios", "/financeiro", "/envios", "/cobrancas"]) {
     const res = await fetch(`${BASE_URL}${path}`);
