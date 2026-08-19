@@ -456,7 +456,12 @@ export function ClientsClient({ customers, leads, activities, quotes, orders, sa
                   <Td mono>{String(c.document || "—")}</Td>
                   <Td>
                     <p className="flex items-center gap-1.5 text-[12px]">
-                      {String(c.phone || "—")}
+                      {/* Cliente que veio do bot tem número só em
+                          `whatsapp` — `phone` fica vazio. Ler só
+                          `phone` mostrava "—" para quem TEM telefone,
+                          e o operador achava que precisava perguntar
+                          de novo. */}
+                      {String(c.phone || c.whatsapp || "—")}
                       {/* aviso na própria lista: evita o disparo antes
                           mesmo de abrir a ficha */}
                       {c.whatsappOptOut === true && (
@@ -969,7 +974,7 @@ export function ClientsClient({ customers, leads, activities, quotes, orders, sa
             {/* Contato */}
             <div className="grid grid-cols-2 gap-3">
               {[
-                { icon: "phone" as const, k: "Telefone", v: drawer.phone },
+                { icon: "phone" as const, k: "Telefone", v: drawer.phone || drawer.whatsapp },
                 { icon: "mail" as const, k: "E-mail", v: drawer.email },
                 { icon: "building" as const, k: "Cidade", v: [drawer.district, drawer.city, drawer.state].filter(Boolean).join(" · ") },
               ].map((x) => (

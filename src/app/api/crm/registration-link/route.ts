@@ -17,6 +17,7 @@ import {
   VALIDADE_DIAS,
 } from "@/lib/registration-links";
 import { getPricingDefaults } from "@/lib/settings";
+import { mensagem } from "@/lib/mensagens";
 import { isWhatsAppBlocked, whatsappNumber } from "@/lib/validators";
 
 export const dynamic = "force-dynamic";
@@ -49,21 +50,17 @@ async function baseUrl(req: Request): Promise<string> {
   return `${proto}://${host}`;
 }
 
-function mensagemPadrao(nome: string, url: string, empresa: string) {
+/* O texto sai do catálogo editável (Painel → Mensagens). O padrão
+   mora em `lib/mensagens.ts`; aqui só passamos as variáveis. */
+async function textoDoPedido(nome: string, url: string, empresa: string) {
   const primeiro = String(nome || "").trim().split(/\s+/)[0] || "";
-  return [
-    primeiro ? `Oi, ${primeiro}!` : "Oi!",
-    "",
-    `Para emitir seu orçamento e a nota fiscal, preciso do seu cadastro completo. Leva 1 minuto:`,
-    url,
-    "",
-    `Já deixei seu nome e telefone preenchidos. O link vale ${VALIDADE_DIAS} dias.`,
-    "",
-    empresa ? `— ${empresa}` : "",
-  ]
-    .filter((l, i, a) => !(l === "" && a[i - 1] === ""))
-    .join("\n")
-    .trim();
+  const m = await mensagem("cadastro.pedir", {
+    nome: primeiro,
+    link: url,
+    empresa,
+    validade: String(VALIDADE_DIAS),
+  });
+  return m.texto;
 }
 
 export async function POST(req: Request) {
@@ -128,12 +125,12 @@ export async function POST(req: Request) {
     const url = `${base}/cadastro/${criado.row.token}`;
     const cfg = await getPricingDefaults().catch(() => null);
     const empresa = cfg?.company_trade_name || cfg?.company_name || "";
-    const mensagem = String(body.mensagem || "").trim() || mensagemPadrao(cliente.name, url, empresa);
+    const texto = String(body.mensagem || "").trim() || (await textoDoPedido(cliente.name, url, empresa));
 
     /* "criar" apenas devolve link + prévia da mensagem. O envio é um
        segundo clique, depois que o operador leu o texto. */
     if (op !== "enviar") {
-      return Response.json({ ok: true, link: criado.row, url, mensagem });
+      return Response.json({ ok: true, link: criado.row, url, mensagem: texto });
     }
 
     /* ── envio ── */
@@ -173,7 +170,7 @@ export async function POST(req: Request) {
           "content-type": "application/json",
           ...(WA_TOKEN ? { "x-wa-token": WA_TOKEN } : {}),
         },
-        body: JSON.stringify({ para: numero, texto: mensagem }),
+        body: JSON.stringify({ para: numero, texto }),
         signal: AbortSignal.timeout(20_000),
       });
       const payload = await r.json().catch(() => ({}));
@@ -183,13 +180,13 @@ export async function POST(req: Request) {
             error: (payload as { erro?: string }).erro || "O WhatsApp recusou o envio.",
             link: criado.row,
             url,
-            mensagem,
+            mensagem: texto,
           },
           { status: r.status }
         );
       }
       await marcarEnviado(criado.row.id, "whatsapp");
-      return Response.json({ ok: true, enviado: true, link: criado.row, url, mensagem });
+      return Response.json({ ok: true, enviado: true, link: criado.row, url, mensagem: texto });
     } catch {
       /* Serviço fora do ar não pode perder o link já gerado: devolvemos
          para o operador copiar e mandar do celular. */
@@ -199,7 +196,7 @@ export async function POST(req: Request) {
           offline: true,
           link: criado.row,
           url,
-          mensagem,
+          mensagem: texto,
         },
         { status: 503 }
       );
