@@ -1293,3 +1293,66 @@ export const paymentLinks = pgTable("payment_links", {
 });
 
 export type PaymentLink = typeof paymentLinks.$inferSelect;
+
+/* ------------------------------------------------------------------ */
+/*  LINKS DE CADASTRO PÚBLICO (v3.50.0)                                */
+/*                                                                     */
+/*  O operador clica "Pedir cadastro por WhatsApp" na ficha do cliente */
+/*  e o sistema gera UMA linha aqui. O token é o segredo: quem não     */
+/*  tem o link não alcança dado nenhum.                                */
+/*                                                                     */
+/*  Por que uma tabela e não um JWT assinado?                          */
+/*   - precisa expirar ao ser usado (JWT não revoga sem lista);        */
+/*   - o CRM precisa mostrar "enviado, ainda não abriu";               */
+/*   - fica o rastro de quem abriu, quando e de qual IP — LGPD pede    */
+/*     saber quando o próprio titular atualizou os dados.              */
+/* ------------------------------------------------------------------ */
+export const registrationLinkStatusEnum = pgEnum("registration_link_status", [
+  "pendente",   // criado, ainda não aberto
+  "aberto",     // cliente abriu o formulário
+  "concluido",  // cliente enviou — link queimado
+  "expirado",   // passou da validade sem concluir
+  "cancelado",  // operador revogou na mão
+]);
+
+export const registrationLinks = pgTable("registration_links", {
+  id: serial("id").primaryKey(),
+  /* Segredo da URL: /cadastro/<token>. 22 chars base58, ~128 bits.
+     Único porque é a chave de busca pública. */
+  token: text("token").notNull().unique(),
+  customerId: integer("customer_id")
+    .references(() => customers.id, { onDelete: "cascade" })
+    .notNull(),
+  status: registrationLinkStatusEnum("status").default("pendente").notNull(),
+
+  /* Cópia do nome/telefone no momento da criação. Se o cadastro mudar
+     depois, ainda sabemos o que foi prometido ao cliente. */
+  snapshotName: text("snapshot_name"),
+  snapshotPhone: text("snapshot_phone"),
+
+  /* Quem pediu e por onde saiu (whatsapp | copiado | manual). */
+  createdBy: text("created_by"),
+  sentVia: text("sent_via"),
+  sentAt: timestamp("sent_at", { mode: "date" }),
+
+  expiresAt: timestamp("expires_at", { mode: "date" }).notNull(),
+  openedAt: timestamp("opened_at", { mode: "date" }),
+  completedAt: timestamp("completed_at", { mode: "date" }),
+
+  /* Prova de aceite: quem preencheu, de onde. Guardamos o IP como
+     texto porque pode vir IPv6 ou lista do proxy. */
+  ip: text("ip"),
+  userAgent: text("user_agent"),
+
+  createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
+}, (table) => [
+  /* Um link vivo por cliente. Reenviar não deve criar fila de tokens
+     válidos: o código revoga o anterior antes de gerar o novo, e este
+     índice garante isso mesmo em corrida (dois cliques no botão). */
+  uniqueIndex("registration_links_one_active_idx")
+    .on(table.customerId)
+    .where(sql`status in ('pendente','aberto')`),
+]);
+
+export type RegistrationLink = typeof registrationLinks.$inferSelect;
