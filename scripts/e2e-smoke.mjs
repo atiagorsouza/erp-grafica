@@ -1202,6 +1202,61 @@ async function main() {
   await sql("delete from deliveries where order_id=$1", [kbOrderId]);
   await sql("delete from orders where id=$1", [kbOrderId]);
 
+  // 11.4) Expediente e prazo (v3.51.0)
+  //
+  // O corte é 17h e o sábado NÃO produz — só atende. Estes checks
+  // existem porque errar aqui significa prometer data que não se
+  // cumpre, que é o pior tipo de erro deste sistema.
+  {
+    const prazo = (apartirDe, productId) =>
+      fetch(`${BASE_URL}/api/prazo`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ itens: [{ productId }], apartirDe }),
+      }).then((r) => r.json());
+
+    /* Produto de 1 dia útil, para medir o efeito do relógio. */
+    const [pz] = await sql(
+      `INSERT INTO products (name, lead_time_creation, lead_time_production, lead_time_finishing)
+       VALUES ($1, 0, 1, 0) RETURNING id`,
+      [`SMOKE PRAZO ${stamp}`]
+    );
+    const pzId = Number(pz.id);
+
+    /* Quarta-feira 19/08/2026. Antes das 17h a produção começa hoje e
+       entrega quinta; depois das 17h escorrega para sexta. */
+    const antes = await prazo("2026-08-19T16:30:00", pzId);
+    assert(antes.data === "2026-08-20", `antes do corte entrega quinta (${antes.data})`);
+
+    const noCorte = await prazo("2026-08-19T17:00:00", pzId);
+    assert(noCorte.data === "2026-08-21", `às 17h em ponto já conta amanhã (${noCorte.data})`);
+
+    const depois = await prazo("2026-08-19T17:01:00", pzId);
+    assert(depois.data === "2026-08-21", `depois do corte entrega sexta (${depois.data})`);
+
+    /* Sexta 21/08 às 18h: não começa hoje, e sábado/domingo não
+       produzem. A contagem só começa na segunda, então entrega terça.
+       (Escrevi 24 na primeira versão deste teste e o código me
+       corrigiu: segunda é o INÍCIO, não a entrega.) */
+    const sexta = await prazo("2026-08-21T18:00:00", pzId);
+    assert(sexta.data === "2026-08-25", `sexta após o corte só começa segunda, entrega terça (${sexta.data})`);
+
+    /* Sábado atende, mas não produz: pedido de sábado começa segunda
+       e entrega terça. */
+    const sabado = await prazo("2026-08-22T10:00:00", pzId);
+    assert(sabado.data === "2026-08-25", `sábado não produz, entrega terça (${sabado.data})`);
+
+    /* Ficando pronto na sexta, o sábado é oferecido para retirada —
+       sem mudar a data prometida. */
+    const proSabado = await prazo("2026-08-20T10:00:00", pzId);
+    assert(
+      proSabado.data === "2026-08-21" && proSabado.retiradaSabado === "2026-08-22",
+      `pronto na sexta oferece retirada no sábado (${proSabado.retiradaSabado})`
+    );
+
+    await sql("DELETE FROM products WHERE id=$1", [pzId]);
+  }
+
   // 11.5) Link de cadastro público (v3.50.0)
   //
   // O que precisa ser verdade: o link nasce válido, a página pública

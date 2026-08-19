@@ -24,40 +24,61 @@ const APLICAR = process.argv.includes("--aplicar");
 
 /* Casamento por palavra no nome do produto. Ordem importa: a primeira
    regra que casar vence, então o específico vem antes do genérico. */
+/* Prazos REAIS, ditados pelo dono em 19/08/2026. Onde ele deu faixa
+   ("1 a 2 dias"), fica o MAIOR: prometer o melhor caso é combinar
+   atraso. Entregar antes é presente; prometer antes é dívida.
+
+   As três parcelas: criação (arte/modelagem) · produção (máquina) ·
+   acabamento (cura, montagem, recorte). Terceirizado entra em
+   "produção" porque é tempo de espera do fornecedor. */
 const REGRAS = [
-  // ── 3D: o que mais demora, e quase nada é máquina ──
+  // ── 3D ── "Peças 3D 1 a 2 dias" ────────────────────────────────
   { re: /\b(3d|impress[aã]o 3d|pla|filamento)\b.*\b(model|projeto|desenh)/i,
-    c: 3, p: 2, a: 1, nota: "3D com modelagem" },
+    c: 2, p: 2, a: 0, nota: "3D com modelagem (arte + 2d)" },
   { re: /\b(3d|pla|filamento)\b/i,
-    c: 0, p: 2, a: 1, nota: "3D sem modelagem (peça pronta)" },
+    c: 0, p: 2, a: 0, nota: "3D com arte pronta (1 a 2d → 2)" },
 
-  // ── Papelaria personalizada e encadernados ──
-  { re: /\b(agenda|caderno|encaderna|bloco|planner)\b/i,
-    c: 1, p: 2, a: 1, nota: "encadernado", serie: true },
-  { re: /\b(papelaria|kit festa|convite)\b/i,
-    c: 2, p: 2, a: 1, nota: "papelaria personalizada" },
+  // ── Agenda ── "depende do volume; 1 und 1 a 2 dias" ────────────
+  /* Em série: encadernação só começa com capa e miolo prontos. O
+     volume o operador ajusta na tela — o seeder não adivinha
+     tiragem. */
+  { re: /\b(agenda|caderno|encaderna|planner)\b/i,
+    c: 0, p: 2, a: 0, nota: "agenda avulsa (revisar p/ volume)", serie: true },
+  { re: /\b(bloco)\b/i,
+    c: 0, p: 1, a: 0, nota: "bloco" },
 
-  // ── Brindes: prensa depois da impressão ──
+  // ── Papelaria personalizada ── "3 dias" ────────────────────────
+  { re: /\b(papelaria|kit festa|convite|lembrancinha)\b/i,
+    c: 1, p: 2, a: 0, nota: "papelaria personalizada (3d)" },
+
+  // ── Brindes: prensa depois da impressão ────────────────────────
   { re: /\b(copo|caneca|ta[çc]a|squeeze|garrafa|chaveiro|brinde|eco ?copo|long ?drink)\b/i,
     c: 0, p: 1, a: 1, nota: "brinde com transfer + prensa" },
 
-  // ── Recorte e aplicação ──
-  { re: /\b(recorte|vinil|adesiv|m[aá]scara|silhouette|cameo)\b/i,
-    c: 0, p: 1, a: 1, nota: "recorte + aplicação" },
+  /* ── Adesivo/vinil: O QUE MAIS SAI ──────────────────────────────
+     "quando o cliente me dá a arte, 1 dia". Produção da casa, o
+     recorte entra no mesmo dia — não é etapa separada de espera. */
+  { re: /\b(recorte|vinil|adesiv|m[aá]scara|silhouette|cameo|plotter)\b/i,
+    c: 0, p: 1, a: 0, nota: "adesivo/vinil, arte do cliente (1d)" },
 
-  /* Grande formato e DTF: 3 dias úteis, confirmado pelo usuário.
-     São itens de fornecedor — o prazo inclui o tempo de ida e volta,
-     não só a produção. Por isso 2 dias em "produção": um é a
-     terceirização. */
+  /* ── Banner e lona: TERCEIRIZADO ────────────────────────────────
+     "da empresa que terceirizo, geralmente de um dia para o outro,
+     e do 2 a 3 dias para o cliente". O fornecedor entrega em 1 dia;
+     o que o cliente ouve é 3, porque entre receber e entregar tem
+     conferência, acabamento e a viagem. Prometemos 3. */
   { re: /\b(lona|banner|faixa|backdrop|wind|painel)\b/i,
-    c: 0, p: 2, a: 1, nota: "grande formato (fornecedor + acabamento)" },
+    c: 0, p: 2, a: 1, nota: "banner/lona terceirizado (3d ao cliente)" },
 
   { re: /\b(dtf|camisa|camiseta|t[êe]xtil|tecido|uniforme)\b/i,
     c: 0, p: 2, a: 1, nota: "DTF/têxtil (fornecedor + prensa)" },
 
-  // ── Impressão simples ──
+  /* ── Cartão de visita ── "1 dia, para 100 a 200 und" ────────────
+     Vale para a tiragem pequena feita na casa. Milheiro é compra na
+     Atual Card e tem outro prazo — cadastre como produto separado,
+     de fornecedor. */
   { re: /\b(cart[aã]o de visita|cart[aã]o)\b/i,
-    c: 0, p: 1, a: 0, nota: "cartão (arte pronta)" },
+    c: 0, p: 1, a: 0, nota: "cartão 100-200un, arte pronta (1d)" },
+
   { re: /\b(etiqueta|adesivo r[oó]tulo|r[oó]tulo)\b/i,
     c: 0, p: 1, a: 0, nota: "etiqueta" },
   { re: /\b(panfleto|flyer|folder|folheto|c[oó]pia|impress[aã]o|xerox|a4|a3)\b/i,

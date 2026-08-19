@@ -28,13 +28,22 @@ export async function getConfigPrazo(): Promise<ConfigPrazo> {
     .map((s) => s.trim())
     .filter((s) => /^\d{4}-\d{2}-\d{2}$/.test(s));
 
-  const corte = (map.get("prazo_horario_corte") || "15:00").trim();
+  const corte = (map.get("prazo_horario_corte") || "17:00").trim();
+
+  const atendimento = (map.get("prazo_dias_atendimento") || "1,2,3,4,5,6")
+    .split(",")
+    .map((s) => Number(s.trim()))
+    .filter((n) => Number.isInteger(n) && n >= 0 && n <= 6);
+
+  const sabadoAte = (map.get("prazo_sabado_ate") ?? "13:00").trim();
 
   return {
     diasUteis: dias.length ? dias : CONFIG_PADRAO.diasUteis,
     horarioCorte: /^\d{1,2}:\d{2}$/.test(corte) ? corte : CONFIG_PADRAO.horarioCorte,
     fechamentos,
     usarFeriados: (map.get("prazo_usar_feriados") ?? "true") !== "false",
+    diasAtendimento: atendimento.length ? atendimento : CONFIG_PADRAO.diasAtendimento,
+    sabadoAte: /^\d{1,2}:\d{2}$/.test(sabadoAte) ? sabadoAte : "",
   };
 }
 
@@ -59,6 +68,8 @@ export interface ItemComPrazo {
 export interface PrevisaoEntrega extends ResultadoPrazo {
   /** "sexta, 22/08" */
   porExtenso: string;
+  /** "sábado, 23/08" quando a retirada de sábado está disponível. */
+  retiradaSabadoPorExtenso: string | null;
   /** Quebra por etapa, para mostrar a conta ao cliente. */
   etapas: { criacao: number; producao: number; acabamento: number };
   /** Nome do produto que puxou o prazo — o gargalo. */
@@ -128,6 +139,7 @@ export async function preverEntrega(
   return {
     ...base,
     porExtenso: dataPorExtenso(base.data),
+    retiradaSabadoPorExtenso: base.retiradaSabado ? dataPorExtenso(base.retiradaSabado) : null,
     etapas: {
       criacao: Math.max(0, ...prazos.map((p) => p.diasCriacao || 0)),
       producao: Math.max(0, ...prazos.map((p) => p.diasProducao || 0)),
