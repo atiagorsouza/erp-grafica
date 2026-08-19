@@ -795,6 +795,23 @@ export const orders = pgTable("orders", {
   shippingFee: numeric("shipping_fee", { precision: 12, scale: 4 }).default("0"),
   total: numeric("total", { precision: 12, scale: 4 }).default("0"),
   paymentMethod: text("payment_method"),
+  /* ── Entrada e saldo (política 50/50 da VTDIGITAL) ──────────────
+     "50% no ato do fechamento e 50% na entrega, sendo PIX. Cartão de
+     crédito, valor integral." É regra desde a fundação da empresa e
+     não existia no sistema — o controle era de cabeça, e dinheiro se
+     perde no esquecimento.
+
+     Guardamos VALORES, não percentuais: 50% de um total que muda
+     depois viraria conta errada. O percentual é só a sugestão na
+     hora de criar o pedido.
+
+     Enquanto depositPaidAt for null, o pedido não entra em produção. */
+  depositAmount: numeric("deposit_amount", { precision: 12, scale: 2 }).default("0").notNull(),
+  depositPaidAt: timestamp("deposit_paid_at", { mode: "date" }),
+  depositMethod: text("deposit_method"),
+  balanceAmount: numeric("balance_amount", { precision: 12, scale: 2 }).default("0").notNull(),
+  balancePaidAt: timestamp("balance_paid_at", { mode: "date" }),
+  balanceMethod: text("balance_method"),
   channel: text("channel").default("Atendimento"),
   sellerName: text("seller_name"),
   notes: text("notes"),

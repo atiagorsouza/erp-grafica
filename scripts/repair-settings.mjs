@@ -145,10 +145,32 @@ async function main() {
     }
   }
 
+  /* 4) desconto PIX: 6,12% era a TAXA DO CARTÃO usada por engano como
+     desconto. A política da VTDIGITAL é 5%. Num pedido de R$ 500 a
+     diferença é R$ 5,60 saindo sem intenção.
+
+     Só corrige quem está exatamente em 6.12 (o valor errado herdado).
+     Qualquer outro número foi escolha do usuário e fica. */
+  let pixFix = 0;
+  {
+    const r = await q(`SELECT value FROM settings WHERE key = 'pricing_pix_discount'`);
+    const atual = r.rows[0]?.value;
+    if (atual && ["6.12", "6,12", "6.1200"].includes(String(atual).trim())) {
+      console.log(`↓ desconto PIX  ${atual}% → 5%  (era a taxa do cartão, não a política)`);
+      pixFix = 1;
+      if (!DRY) {
+        await q(
+          `UPDATE settings SET value = '5', updated_at = now() WHERE key = 'pricing_pix_discount'`
+        );
+      }
+    }
+  }
+
   console.log(
     `\n✅ ${DRY ? "Simulação" : "Reparo"} concluído: ` +
     `${inserted} inserida(s), ${migrations.length} migração(ões), ` +
-    `${recategorized} recategorização(ões), ${removed} removida(s).`
+    `${recategorized} recategorização(ões), ${removed} removida(s)` +
+    `${pixFix ? ", desconto PIX ajustado" : ""}.`
   );
   await pool.end();
 }

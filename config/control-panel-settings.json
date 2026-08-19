@@ -254,8 +254,8 @@
           "type": "number",
           "suffix": "%",
           "mono": true,
-          "hint": "Devolve ao cliente o que você economiza sem a maquininha. Sugerido igual ao custo embutido.",
-          "defaultValue": "6.12"
+          "hint": "Desconto da política da empresa para pagamento à vista com cadastro em dia. NÃO confundir com a taxa do cartão: o padrão antigo (6,12%) era o custo da maquininha e dava mais desconto do que se pretendia.",
+          "defaultValue": "5"
         },
         {
           "key": "pricing_installment_min",

@@ -76,6 +76,17 @@ const orderPayloadSchema = z.object({
   shippingFee: finiteNumber.min(0).optional(),
   taxes: finiteNumber.min(0).optional(),
   paymentMethod: z.string().trim().max(80).optional(),
+  /* Entrada e saldo — política 50/50 da casa. Valores absolutos, não
+     percentuais: o total pode mudar depois e 50% de outro número
+     viraria conta errada. */
+  depositAmount: finiteNumber.min(0).optional(),
+  depositPaid: z.boolean().optional(),
+  depositMethod: z.string().trim().max(40).nullable().optional(),
+  balancePaid: z.boolean().optional(),
+  balanceMethod: z.string().trim().max(40).nullable().optional(),
+  /* Escape consciente da trava de produção. Exige motivo — a regra
+     tem exceção, mas a exceção fica registrada. */
+  liberarSemEntrada: z.string().trim().min(3).max(120).optional(),
   channel: z.string().trim().max(80).optional(),
   sellerName: z.string().trim().max(100).optional(),
   notes: z.string().trim().max(1000).nullable().optional(),
@@ -385,6 +396,30 @@ export async function updateOrder(orderId: number, raw: unknown) {
     return cancelOrder(orderId, d.notes || "Cancelamento solicitado");
   }
 
+  /* ── Trava da entrada ────────────────────────────────────────────
+     Política da casa: "50% no ato do fechamento". Sem isso o trabalho
+     começa, o material é consumido, e a cobrança fica para depois —
+     que é quando se esquece.
+
+     A exceção existe e é registrada: `liberarSemEntrada` com motivo
+     destrava e grava a justificativa nas observações. Regra com
+     escape anotado vale mais que regra que o atendente contorna por
+     fora do sistema. */
+  const entrandoEmProducao =
+    d.productionStatus === "em_producao" && current.productionStatus !== "em_producao";
+  const entradaCombinada = toNumber(current.depositAmount) > 0;
+  const entradaPaga = !!current.depositPaidAt || d.depositPaid === true;
+
+  if (entrandoEmProducao && entradaCombinada && !entradaPaga && !d.liberarSemEntrada) {
+    return {
+      error:
+        `A entrada de R$ ${toDecimalString(current.depositAmount, 2)} ainda não foi paga. ` +
+        `Registre o pagamento ou informe um motivo para liberar assim mesmo.`,
+      status: 409,
+      details: { code: "DEPOSIT_REQUIRED", depositAmount: toDecimalString(current.depositAmount, 2) },
+    } satisfies SaleError;
+  }
+
   const policy = await getOrderPolicy();
   const hasItemsPatch = Array.isArray(d.items);
   const items = hasItemsPatch
@@ -430,6 +465,10 @@ export async function updateOrder(orderId: number, raw: unknown) {
     if (d.customerId !== undefined) patch.customerId = customerId;
     if (d.status !== undefined) patch.status = d.status;
     if (d.productionStatus !== undefined) {
+      if (entrandoEmProducao && d.liberarSemEntrada) {
+        const marca = `[${new Date().toLocaleDateString("pt-BR")}] Liberado sem entrada: ${d.liberarSemEntrada}`;
+        patch.notes = current.notes ? `${current.notes}\n${marca}` : marca;
+      }
       patch.productionStatus = d.productionStatus;
       if (d.productionStatus === "concluido") patch.status = "concluido";
       else if (!d.status) patch.status = "confirmado";
@@ -440,6 +479,20 @@ export async function updateOrder(orderId: number, raw: unknown) {
     if (d.priority !== undefined) patch.priority = d.priority;
     if (d.dueDate !== undefined) patch.dueDate = d.dueDate ? String(d.dueDate) : null;
     if (d.paymentMethod !== undefined) patch.paymentMethod = d.paymentMethod || "A definir";
+
+    /* Entrada e saldo. O saldo é sempre derivado do total — nunca
+       digitado — para não existir pedido em que entrada + saldo ≠ total. */
+    if (d.depositAmount !== undefined) {
+      patch.depositAmount = toDecimalString(Math.max(0, d.depositAmount), 2);
+    }
+    if (d.depositPaid !== undefined) {
+      patch.depositPaidAt = d.depositPaid ? (current.depositPaidAt ?? new Date()) : null;
+    }
+    if (d.depositMethod !== undefined) patch.depositMethod = d.depositMethod || null;
+    if (d.balancePaid !== undefined) {
+      patch.balancePaidAt = d.balancePaid ? (current.balancePaidAt ?? new Date()) : null;
+    }
+    if (d.balanceMethod !== undefined) patch.balanceMethod = d.balanceMethod || null;
     if (d.channel !== undefined) patch.channel = d.channel || policy.defaultChannel;
     if (d.sellerName !== undefined) patch.sellerName = d.sellerName || policy.defaultSeller;
     if (d.notes !== undefined) patch.notes = d.notes ? String(d.notes) : null;
@@ -451,6 +504,19 @@ export async function updateOrder(orderId: number, raw: unknown) {
       patch.taxes = toDecimalString(totals.taxes);
       patch.shippingFee = toDecimalString(totals.shippingFee);
       patch.total = toDecimalString(totals.total);
+    }
+
+    /* O saldo NUNCA é digitado: é sempre total − entrada, recalculado
+       aqui, num ponto só. Se fosse campo livre, bastaria alguém mexer
+       no total depois para o pedido ficar com entrada + saldo ≠ total
+       — e a diferença só apareceria na hora de cobrar. */
+    {
+      const totalFinal = toNumber(patch.total ?? current.total);
+      const entradaFinal = Math.min(toNumber(patch.depositAmount ?? current.depositAmount), totalFinal);
+      if (patch.depositAmount !== undefined) {
+        patch.depositAmount = toDecimalString(entradaFinal, 2);
+      }
+      patch.balanceAmount = toDecimalString(Math.max(0, round2(totalFinal - entradaFinal)), 2);
     }
 
     const [order] = await tx.update(orders).set(patch).where(eq(orders.id, orderId)).returning();
