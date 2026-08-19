@@ -50,6 +50,32 @@ async function responder(sock, jid, texto, contar) {
   contar?.();
 }
 
+/* ── Uma conversa por vez ──────────────────────────────────────────
+   Quem digita rápido manda duas mensagens em menos de um segundo. As
+   duas entram em `tratar()` ao mesmo tempo, LEEM O MESMO ESTADO e
+   respondem as duas — foi o que produziu, num teste real:
+
+     você: "Tiago"
+     bot : "Desculpe, não entendi. Pode me dizer só o seu nome?"
+     você: "Tiago"
+     bot : "Desculpe, não entendi..."     ← execução atrasada
+     bot : "Prazer, Tiago! É para você ou empresa?"
+     bot : "responda 1 ou 2"              ← as duas responderam
+
+   A correção é serializar por telefone: a segunda mensagem espera a
+   primeira terminar e então lê o estado já atualizado. Fila em
+   memória basta porque só existe um processo do serviço.        */
+const filas = new Map();
+
+function enfileirar(chave, tarefa) {
+  const anterior = filas.get(chave) || Promise.resolve();
+  const atual = anterior.then(tarefa, tarefa);
+  // Libera a chave quando esta for a última da fila (evita vazamento).
+  filas.set(chave, atual);
+  atual.finally(() => { if (filas.get(chave) === atual) filas.delete(chave); });
+  return atual;
+}
+
 export function criarPreCadastro({ pool, empresa = "VTDIGITAL", contarEnviada }) {
   /* Estado da conversa vive no banco: reiniciar o serviço não pode
      fazer o bot perguntar o nome de novo para quem já respondeu. */
@@ -62,10 +88,16 @@ export function criarPreCadastro({ pool, empresa = "VTDIGITAL", contarEnviada })
         ultima_msg   timestamptz NOT NULL DEFAULT now(),
         primeira_msg timestamptz NOT NULL DEFAULT now(),
         recebidas    integer NOT NULL DEFAULT 0,
+        saudou       boolean NOT NULL DEFAULT false,
         assumida_por text,
         assumida_em  timestamptz
       )
     `);
+    /* Instalações da 3.47.0/3.47.1 já têm a tabela sem esta coluna. */
+    await pool.query(
+      `ALTER TABLE whatsapp_conversas
+         ADD COLUMN IF NOT EXISTS saudou boolean NOT NULL DEFAULT false`
+    );
     await pool.query(`
       CREATE TABLE IF NOT EXISTS whatsapp_mensagens (
         id          bigserial PRIMARY KEY,
@@ -137,7 +169,13 @@ export function criarPreCadastro({ pool, empresa = "VTDIGITAL", contarEnviada })
   const mudarEtapa = (fone, etapa) =>
     pool.query(`UPDATE whatsapp_conversas SET etapa = $2 WHERE phone_e164 = $1`, [fone, etapa]);
 
-  async function tratar({ sock, msg, jid, texto }) {
+  /* Ponto de entrada: serializa por telefone antes de processar. */
+  async function tratar(ctx) {
+    const chave = String(ctx.jid || "").split("@")[0];
+    return enfileirar(chave, () => tratarSerial(ctx));
+  }
+
+  async function tratarSerial({ sock, msg, jid, texto }) {
     /* Defesa em profundidade: conexao.mjs já filtra, mas se alguém
        chamar esta função direto (teste, replay, futura fila), grupo
        não pode virar cliente. Um JID de grupo é "12345-67890@g.us" e
@@ -199,7 +237,16 @@ export function criarPreCadastro({ pool, empresa = "VTDIGITAL", contarEnviada })
 
     switch (conversa.etapa) {
       case PEDIR_NOME: {
-        if (conversa.recebidas <= 1) {
+        /* A saudação é decidida pela ETAPA, não por contador de
+           mensagens. Com `recebidas <= 1` o bot cumprimentava, mudava
+           para a etapa seguinte só depois — e se a pessoa respondesse
+           rápido, a segunda mensagem ainda via o contador antigo e a
+           saudação saía duas vezes. */
+        if (!conversa.saudou) {
+          await pool.query(
+            `UPDATE whatsapp_conversas SET saudou = true WHERE phone_e164 = $1`,
+            [fone]
+          );
           const t =
             `Olá! Aqui é da ${empresa} 🙂\n\n` +
             `Para te atender direitinho, como posso te chamar?`;
