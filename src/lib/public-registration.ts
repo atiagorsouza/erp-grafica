@@ -77,8 +77,15 @@ export async function salvarCadastroPublico(customerId: number, raw: unknown) {
 
   /* O telefone do link é a verdade sobre o WhatsApp: veio da conversa
      real. Se o cliente digitou outro, respeitamos — mas garantimos que
-     um dos dois exista. */
+     um dos dois exista.
+
+     Espelhamos nos DOIS campos porque metade do sistema lê `phone` e a
+     outra metade lê `whatsapp`. Cliente que veio do bot só tinha
+     `whatsapp`, e a coluna Telefone do CRM mostrava "—" para quem tem
+     número. Aqui é o momento certo de completar: o próprio titular
+     acabou de confirmar que aquele número é dele. */
   if (!patch.whatsapp && patch.phone) patch.whatsapp = patch.phone;
+  if (!patch.phone && patch.whatsapp) patch.phone = patch.whatsapp;
 
   const result = await updateCustomer(customerId, patch);
   if ("error" in result) {
