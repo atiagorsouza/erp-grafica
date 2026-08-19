@@ -142,7 +142,11 @@ export function criarPreCadastro({ pool, empresa = "VTDIGITAL", contarEnviada })
        chamar esta função direto (teste, replay, futura fila), grupo
        não pode virar cliente. Um JID de grupo é "12345-67890@g.us" e
        os dígitos dele passam por telefone válido — o descarte tem de
-       ser pelo sufixo, não pelo número. */
+       ser pelo sufixo, não pelo número.
+
+       Aceita só "@s.whatsapp.net": um "@lid" já foi convertido para o
+       número real em conexao.mjs. Se chegasse aqui, viraria cliente
+       com um LID no lugar do telefone. */
     if (!String(jid).endsWith("@s.whatsapp.net")) return;
 
     const fone = doJid(jid);
