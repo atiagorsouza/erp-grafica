@@ -25,6 +25,7 @@
    ────────────────────────────────────────────────────────────────── */
 import { doJid, bonito } from "./telefone.mjs";
 import { criarMensagens } from "./mensagens.mjs";
+import { criarEstadoBot } from "./bot-estado.mjs";
 
 const PEDIR_NOME = "pedir_nome";
 const PEDIR_TIPO = "pedir_tipo";
@@ -81,6 +82,9 @@ export function criarPreCadastro({ pool, empresa = "VTDIGITAL", contarEnviada })
   /* Todo texto que o bot manda vem daqui. O padrão está no código;
      o banco só guarda o que o operador customizou pela web. */
   const msgs = criarMensagens({ pool });
+  /* Liga/desliga do bot. Pausado, ele continua ouvindo e gravando —
+     só para de responder. Ver bot-estado.mjs. */
+  const estadoBot = criarEstadoBot({ pool });
 
   /* Estado da conversa vive no banco: reiniciar o serviço não pode
      fazer o bot perguntar o nome de novo para quem já respondeu. */
@@ -103,6 +107,11 @@ export function criarPreCadastro({ pool, empresa = "VTDIGITAL", contarEnviada })
     await pool.query(
       `ALTER TABLE whatsapp_conversas
          ADD COLUMN IF NOT EXISTS saudou boolean NOT NULL DEFAULT false`
+    );
+    /* Aviso de ausência é uma vez por conversa, não por mensagem. */
+    await pool.query(
+      `ALTER TABLE whatsapp_conversas
+         ADD COLUMN IF NOT EXISTS avisou_ausencia boolean NOT NULL DEFAULT false`
     );
     await pool.query(`
       CREATE TABLE IF NOT EXISTS whatsapp_mensagens (
@@ -209,6 +218,32 @@ export function criarPreCadastro({ pool, empresa = "VTDIGITAL", contarEnviada })
        tudo para o histórico aparecer no chat do ERP. */
     if (conversa.assumida_por) return;
 
+    /* ── Bot desligado no painel ────────────────────────────────────
+       A mensagem JÁ FOI gravada acima e o cliente já foi vinculado:
+       nada se perde, só não respondemos.
+
+       O opt-out é a exceção deliberada. "Sair"/"parar" é pedido do
+       titular sob a LGPD, não recurso do bot — atender isso não pode
+       depender de o operador ter ligado ou desligado alguma coisa. */
+    const bot = await estadoBot.ler();
+    if (bot.pausado && !QUER_SAIR.test(texto)) {
+      /* Aviso de ausência: uma única vez por conversa, para o cliente
+         não achar que falou com o vazio. Repetir a cada mensagem seria
+         pior que o silêncio. */
+      if (bot.ausenciaAtiva && !conversa.avisou_ausencia) {
+        await pool.query(
+          `UPDATE whatsapp_conversas SET avisou_ausencia = true WHERE phone_e164 = $1`,
+          [fone]
+        );
+        const t = await msgs.texto("bot.ausencia", { empresa });
+        if (t) {
+          await responder(sock, jid, t, contarEnviada);
+          await registrar(fone, "enviada", t);
+        }
+      }
+      return;
+    }
+
     if (QUER_SAIR.test(texto)) {
       await pool.query(
         `UPDATE customers SET whatsapp_opt_out = true, updated_at = now() WHERE id = $1`,
@@ -311,7 +346,7 @@ export function criarPreCadastro({ pool, empresa = "VTDIGITAL", contarEnviada })
     }
   }
 
-  return { tratar, garantirTabela };
+  return { tratar, garantirTabela, estadoBot };
 }
 
 /* O nome vem no meio de frase ("meu nome é Maria", "sou o João").

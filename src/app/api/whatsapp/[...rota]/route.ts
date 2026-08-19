@@ -18,6 +18,8 @@ const TOKEN = process.env.WA_TOKEN || "";
 const PERMITIDAS = new Set([
   "status", "qr", "eventos", "enviar", "assumir", "devolver",
   "reiniciar", "desconectar", "saude",
+  /* v3.53.0 — desligar o bot sem derrubar a sessão do WhatsApp. */
+  "pausar", "retomar", "ausencia",
 ]);
 
 function cabecalhos(extra: Record<string, string> = {}) {

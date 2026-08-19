@@ -114,6 +114,16 @@ export const CATALOGO: DefinicaoMensagem[] = [
     padrao: "Claro! Já estou chamando alguém da equipe. Um instante 🙂",
   },
   {
+    slug: "bot.ausencia",
+    titulo: "Aviso enquanto o bot está desligado",
+    quando:
+      "Só quando você desliga o bot E deixa o aviso ligado. Sai uma vez por conversa.",
+    grupo: "bot",
+    variaveis: [VAR_EMPRESA],
+    padrao:
+      "Recebi sua mensagem! 🙂\n\nEstamos fora do atendimento automático agora, mas já anotei aqui e a equipe responde assim que possível.",
+  },
+  {
     slug: "bot.opt_out",
     titulo: "Pediu para não receber mais",
     quando: 'O cliente escreve "sair", "parar", "cancelar".',

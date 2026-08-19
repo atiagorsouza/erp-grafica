@@ -14,8 +14,11 @@
      POST /enviar        { para, texto } — envio manual pelo atendente
      POST /assumir       { telefone } — humano assume a conversa
      POST /devolver      { telefone } — devolve ao bot
+     POST /pausar        { minutos } — desliga o bot SEM sair do WhatsApp
+     POST /retomar       religa o bot
+     POST /ausencia      { ativa } — avisar o cliente enquanto pausado
      POST /reiniciar     força reconexão
-     POST /desconectar   { apagarSessao } — encerra a sessão
+     POST /desconectar   { apagarSessao } — encerra a sessão (perde o QR)
 
    Escuta só em 127.0.0.1 por padrão: quem fala com ele é o ERP, na
    mesma máquina. Não deve ficar exposto à internet.
@@ -92,7 +95,47 @@ const servidor = http.createServer(async (req, res) => {
 
   try {
     if (rota === "/status" && req.method === "GET") {
-      return json(res, 200, gerenciador.estado());
+      /* Conexão e bot são coisas separadas: dá para estar conectado e
+         com o bot desligado. A tela precisa das duas informações. */
+      const bot = await preCadastro.estadoBot.ler();
+      return json(res, 200, {
+        ...gerenciador.estado(),
+        bot: {
+          pausado: bot.pausado,
+          pausadoAte: bot.ate ? bot.ate.toISOString() : null,
+          pausadoPor: bot.por,
+          motivo: bot.motivo,
+          ausenciaAtiva: bot.ausenciaAtiva,
+        },
+      });
+    }
+
+    /* ── Liga/desliga do bot ───────────────────────────────────────
+       Diferente de /desconectar: aqui o WhatsApp CONTINUA conectado,
+       recebendo e gravando. O bot só para de responder. */
+    if (rota === "/pausar" && req.method === "POST") {
+      const { minutos = null, por = null, motivo = null } = await lerCorpo(req);
+      const n = minutos === null || minutos === "" ? null : Number(minutos);
+      if (n !== null && (!Number.isFinite(n) || n <= 0 || n > 43200)) {
+        return json(res, 422, { erro: "minutos deve ficar entre 1 e 43200 (30 dias)" });
+      }
+      const estado = await preCadastro.estadoBot.pausar({ minutos: n, por, motivo });
+      return json(res, 200, {
+        ok: true,
+        pausado: estado.pausado,
+        pausadoAte: estado.ate ? estado.ate.toISOString() : null,
+      });
+    }
+
+    if (rota === "/retomar" && req.method === "POST") {
+      const estado = await preCadastro.estadoBot.retomar();
+      return json(res, 200, { ok: true, pausado: estado.pausado });
+    }
+
+    if (rota === "/ausencia" && req.method === "POST") {
+      const { ativa = true } = await lerCorpo(req);
+      const estado = await preCadastro.estadoBot.definirAusencia(ativa !== false);
+      return json(res, 200, { ok: true, ausenciaAtiva: estado.ausenciaAtiva });
     }
 
     if (rota === "/qr" && req.method === "GET") {
