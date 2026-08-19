@@ -639,16 +639,23 @@ export function ProductsClient({
                 minutos de máquina: uma peça 3D roda 6&nbsp;h na impressora mas o cliente recebe
                 em 4 dias. Num pedido com vários itens vale o maior, não a soma.
               </p>
+              {/* Dica ABAIXO do campo, não ao lado: o Field padrão põe
+                  rótulo e dica na mesma linha, e em três colunas
+                  estreitas a dica atropela o rótulo. */}
               <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-3">
-                <Field label="Criação" hint="arte, modelagem — 0 se o cliente traz pronta">
-                  <Input mono value={form.leadTimeCreation ?? ""} onChange={set("leadTimeCreation")} placeholder="0" />
-                </Field>
-                <Field label="Produção" hint="máquina rodando">
-                  <Input mono value={form.leadTimeProduction ?? ""} onChange={set("leadTimeProduction")} placeholder="1" />
-                </Field>
-                <Field label="Acabamento" hint="cura, montagem, secagem">
-                  <Input mono value={form.leadTimeFinishing ?? ""} onChange={set("leadTimeFinishing")} placeholder="0" />
-                </Field>
+                {([
+                  ["leadTimeCreation", "Criação", "0", "arte, modelagem — 0 se o cliente traz pronta"],
+                  ["leadTimeProduction", "Produção", "1", "máquina rodando"],
+                  ["leadTimeFinishing", "Acabamento", "0", "cura, montagem, secagem"],
+                ] as const).map(([campo, rotulo, exemplo, dica]) => (
+                  <label key={campo} className="block">
+                    <span className="mb-1.5 block text-[11.5px] font-semibold tracking-wide text-ink-600 uppercase">
+                      {rotulo}
+                    </span>
+                    <Input mono value={form[campo] ?? ""} onChange={set(campo)} placeholder={exemplo} />
+                    <span className="mt-1 block text-[10.5px] leading-snug text-ink-400">{dica}</span>
+                  </label>
+                ))}
               </div>
               <label className="mt-3.5 flex cursor-pointer items-start gap-2.5 text-[12.5px] text-ink-700">
                 <input

@@ -45,13 +45,15 @@ const REGRAS = [
   { re: /\b(recorte|vinil|adesiv|m[aá]scara|silhouette|cameo)\b/i,
     c: 0, p: 1, a: 1, nota: "recorte + aplicação" },
 
-  // ── Grande formato ──
+  /* Grande formato e DTF: 3 dias úteis, confirmado pelo usuário.
+     São itens de fornecedor — o prazo inclui o tempo de ida e volta,
+     não só a produção. Por isso 2 dias em "produção": um é a
+     terceirização. */
   { re: /\b(lona|banner|faixa|backdrop|wind|painel)\b/i,
-    c: 0, p: 1, a: 1, nota: "grande formato (acabamento/ilhós)" },
+    c: 0, p: 2, a: 1, nota: "grande formato (fornecedor + acabamento)" },
 
-  // ── DTF e têxtil ──
   { re: /\b(dtf|camisa|camiseta|t[êe]xtil|tecido|uniforme)\b/i,
-    c: 0, p: 1, a: 1, nota: "têxtil (prensa + cura)" },
+    c: 0, p: 2, a: 1, nota: "DTF/têxtil (fornecedor + prensa)" },
 
   // ── Impressão simples ──
   { re: /\b(cart[aã]o de visita|cart[aã]o)\b/i,
