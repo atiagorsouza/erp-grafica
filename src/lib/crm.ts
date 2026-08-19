@@ -51,6 +51,9 @@ const customerSchema = z.object({
   foundedAt: z.string().trim().nullable().optional(),
   origin: z.string().trim().max(60).nullable().optional(),
   whatsappOptOut: z.coerce.boolean().optional(),
+  /* Marketing tem consentimento próprio (v3.54.0): quem aceita receber
+     "seu pedido está pronto" não aceitou receber promoção. */
+  marketingOptIn: z.coerce.boolean().optional(),
   status: z.enum(["lead", "ativo", "inativo", "bloqueado"]).default("lead"),
   creditLimit: z.coerce.number().finite().min(0).max(999999999).optional(),
   tags: z.string().trim().max(300).nullable().optional(),
@@ -148,6 +151,11 @@ function normalizeCustomer(data: z.infer<typeof customerSchema>) {
     foundedAt: nullable(data.foundedAt),
     origin: nullable(data.origin),
     whatsappOptOut: data.whatsappOptOut ?? false,
+    marketingOptIn: data.marketingOptIn ?? false,
+    /* Carimba quando o consentimento é dado, não a cada salvamento. */
+    ...(data.marketingOptIn
+      ? { marketingOptInAt: new Date(), marketingOptInSource: "cadastro" }
+      : { marketingOptInAt: null, marketingOptInSource: null }),
     status: data.status,
     creditLimit: String(data.creditLimit ?? 0),
     tags: nullable(data.tags),

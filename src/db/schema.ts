@@ -129,6 +129,17 @@ export const customers = pgTable("customers", {
   origin: text("origin"),
   /* LGPD: cliente que pediu para não receber mensagem automática */
   whatsappOptOut: boolean("whatsapp_opt_out").default(false).notNull(),
+  /* ── Marketing é OUTRA coisa (v3.54.0) ─────────────────────────
+     `whatsappOptOut` cobre TUDO, inclusive aviso de "seu pedido está
+     pronto". Marketing precisa de consentimento próprio: quem aceita
+     receber aviso de pedido não aceitou receber promoção.
+
+     Sem opt-in explícito, o cliente NÃO entra em campanha — nem que
+     esteja cadastrado e tenha conversado ontem. */
+  marketingOptIn: boolean("marketing_opt_in").default(false).notNull(),
+  /* Quando e por onde consentiu — a LGPD pede saber. */
+  marketingOptInAt: timestamp("marketing_opt_in_at", { mode: "date" }),
+  marketingOptInSource: text("marketing_opt_in_source"),
   /* Telefone canônico em E.164 ("5521988887777") — é por aqui que o
      WhatsApp encontra o cliente. Os campos phone/whatsapp guardam a
      grafia bonita para exibir; este guarda a chave para COMPARAR.
@@ -1386,3 +1397,100 @@ export const messageTemplates = pgTable("message_templates", {
 });
 
 export type MessageTemplate = typeof messageTemplates.$inferSelect;
+
+/* ------------------------------------------------------------------ */
+/*  CAMPANHAS DE WHATSAPP (v3.54.0)                                    */
+/*                                                                     */
+/*  Marketing para BASE QUENTE apenas — quem já escreveu para a         */
+/*  gráfica. O documento MARKETING-WHATSAPP-BASE-QUENTE.md tem os       */
+/*  números: bot que só responde a quem falou primeiro tem <2% de ban   */
+/*  ao ano; quem aborda contato frio, 15-30%.                           */
+/*                                                                     */
+/*  As 6 condições combinadas com o dono, todas verificadas em código:  */
+/*    1. conversa recebida registrada (não basta estar cadastrado)      */
+/*    2. última interação há menos de 12 meses                          */
+/*    3. opt-in de marketing com origem e data                          */
+/*    4. máximo 4 mensagens por pessoa por mês                          */
+/*    5. lotes de no máximo 50 por dia                                  */
+/*    6. disjuntor automático em 1% de bloqueio                         */
+/* ------------------------------------------------------------------ */
+export const campaignStatusEnum = pgEnum("campaign_status", [
+  "rascunho",
+  "enviando",
+  "pausada",    // disjuntor disparou ou operador parou
+  "concluida",
+  "cancelada",
+]);
+
+export const campaigns = pgTable("campaigns", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  status: campaignStatusEnum("status").default("rascunho").notNull(),
+
+  /* Corpo da mensagem, com as mesmas variáveis do catálogo. */
+  body: text("body").notNull(),
+  /* Imagem opcional, como data URI. Mesmo limite do upload de logo. */
+  imageDataUri: text("image_data_uri"),
+  /* CTA: texto do botão e destino. O Baileys manda como link no fim
+     da mensagem — botão nativo exige API oficial. */
+  ctaLabel: text("cta_label"),
+  ctaUrl: text("cta_url"),
+
+  /* Filtro da audiência, avaliado na hora de montar a fila. */
+  audienceFilter: jsonb("audience_filter"),
+
+  /* Ritmo: quantos por dia e o intervalo entre mensagens. */
+  dailyLimit: integer("daily_limit").default(50).notNull(),
+  minDelaySeconds: integer("min_delay_seconds").default(8).notNull(),
+  maxDelaySeconds: integer("max_delay_seconds").default(25).notNull(),
+
+  /* Contadores, atualizados durante o envio. */
+  totalTargets: integer("total_targets").default(0).notNull(),
+  sentCount: integer("sent_count").default(0).notNull(),
+  failedCount: integer("failed_count").default(0).notNull(),
+  blockedCount: integer("blocked_count").default(0).notNull(),
+  repliedCount: integer("replied_count").default(0).notNull(),
+
+  /* Motivo da pausa automática — o operador precisa saber por quê. */
+  pausedReason: text("paused_reason"),
+
+  createdBy: text("created_by"),
+  startedAt: timestamp("started_at", { mode: "date" }),
+  finishedAt: timestamp("finished_at", { mode: "date" }),
+  createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
+});
+
+export const campaignTargetStatusEnum = pgEnum("campaign_target_status", [
+  "fila",
+  "enviado",
+  "falhou",
+  "bloqueado",   // o destinatário bloqueou
+  "respondeu",
+  "pulado",      // não passou nas regras na hora do envio
+]);
+
+export const campaignTargets = pgTable("campaign_targets", {
+  id: serial("id").primaryKey(),
+  campaignId: integer("campaign_id")
+    .references(() => campaigns.id, { onDelete: "cascade" })
+    .notNull(),
+  customerId: integer("customer_id")
+    .references(() => customers.id, { onDelete: "cascade" })
+    .notNull(),
+  phoneE164: text("phone_e164").notNull(),
+  status: campaignTargetStatusEnum("status").default("fila").notNull(),
+  /* Por que foi pulado — vira relatório para o operador. */
+  skipReason: text("skip_reason"),
+  error: text("error"),
+  sentAt: timestamp("sent_at", { mode: "date" }),
+  repliedAt: timestamp("replied_at", { mode: "date" }),
+  createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+}, (table) => [
+  /* Uma pessoa não recebe a mesma campanha duas vezes, nem que alguém
+     clique em "enviar" de novo. */
+  uniqueIndex("campaign_targets_unique_idx").on(table.campaignId, table.customerId),
+]);
+
+export type Campaign = typeof campaigns.$inferSelect;
+export type CampaignTarget = typeof campaignTargets.$inferSelect;
