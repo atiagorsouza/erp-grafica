@@ -1383,6 +1383,72 @@ async function main() {
     await sql("delete from message_templates where slug like 'bot.%' or slug like 'cadastro.%'");
   }
 
+  // 11.7) Painel de Controle não pode engordar (v3.53.1)
+  //
+  // Bug real em produção: as logos são data URIs de até 2 MB no banco,
+  // e a página mandava o valor inteiro para o navegador — duas vezes,
+  // no HTML e no payload RSC. Com as três preenchidas, o Painel saía
+  // com 12 MB e o navegador desistia. Respondia HTTP 200, então
+  // nenhum teste pegava.
+  {
+    const fake = "data:image/png;base64," + "A".repeat(600_000);
+    const chaves = ["company_logo", "company_logo_dark", "company_logo_icon"];
+    const antes = new Map();
+    for (const k of chaves) {
+      const [r] = await sql("select value from settings where key=$1", [k]);
+      antes.set(k, r?.value ?? null);
+      await sql(
+        `insert into settings (key,value,category) values ($1,$2,'empresa')
+         on conflict (key) do update set value=excluded.value`,
+        [k, fake]
+      );
+    }
+
+    const pag = await fetch(`${BASE_URL}/configuracoes`);
+    const bytes = (await pag.arrayBuffer()).byteLength;
+    assert(pag.ok, "Painel de Controle abre com as logos preenchidas");
+    assert(
+      bytes < 900_000,
+      `Painel não embute as logos no HTML (${Math.round(bytes / 1024)} KB)`
+    );
+
+    const api = await fetch(`${BASE_URL}/api/crud/settings`);
+    const apiBytes = (await api.arrayBuffer()).byteLength;
+    assert(apiBytes < 500_000, `/api/crud/settings não devolve as logos (${Math.round(apiBytes / 1024)} KB)`);
+
+    /* A imagem tem de continuar acessível — só por outro caminho. */
+    const img = await fetch(`${BASE_URL}/api/upload/logo?key=company_logo`);
+    assert(img.ok && (img.headers.get("content-type") || "").startsWith("image/"),
+      "logo é servida como imagem por /api/upload/logo");
+
+    const etag = img.headers.get("etag");
+    const cache = await fetch(`${BASE_URL}/api/upload/logo?key=company_logo`, {
+      headers: { "if-none-match": etag || "" },
+    });
+    assert(cache.status === 304, "segunda visita à logo responde 304 (não retransfere)");
+
+    const invalida = await fetch(`${BASE_URL}/api/upload/logo?key=hack`);
+    assert(invalida.status === 400, "chave de logo inválida é recusada");
+
+    /* O marcador NÃO pode ser gravado por cima da imagem: seria a
+       forma silenciosa de perder a logo. */
+    const [linha] = await sql("select id from settings where key='company_logo'");
+    const tentativa = await fetch(`${BASE_URL}/api/crud/settings`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ op: "update", id: Number(linha.id), data: { value: "__SET__" } }),
+    });
+    assert(tentativa.status === 422, "gravar o marcador __SET__ é recusado (422)");
+    const [depois] = await sql("select length(value) n from settings where key='company_logo'");
+    assert(Number(depois.n) > 100000, "a logo continua intacta depois da tentativa");
+
+    for (const k of chaves) {
+      const v = antes.get(k);
+      if (v === null) await sql("delete from settings where key=$1", [k]);
+      else await sql("update settings set value=$2 where key=$1", [k, v]);
+    }
+  }
+
   // 12) Páginas principais respondem
   for (const path of ["/clientes", "/orcamentos", "/pedidos", "/kanban", "/estoque", "/relatorios", "/financeiro", "/envios", "/cobrancas"]) {
     const res = await fetch(`${BASE_URL}${path}`);

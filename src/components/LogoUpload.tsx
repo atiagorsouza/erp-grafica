@@ -24,13 +24,27 @@ export function LogoUpload({
   onChange,
 }: {
   chave: string;
+  /** "__SET__" = existe logo no banco · "" = não há · data URI = recém-enviada */
   valor: string;
   escura?: boolean;
-  onChange: (dataUri: string) => void;
+  onChange: (marcador: string) => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [enviando, setEnviando] = useState(false);
   const [arrastando, setArrastando] = useState(false);
+  /* Muda a cada upload para furar o cache do navegador na prévia. */
+  const [versao, setVersao] = useState(0);
+
+  /* A prévia vem por URL, não pelo base64.
+
+     Antes o data URI inteiro era embutido no HTML da página e, com as
+     três logos preenchidas, o Painel saía com 12 MB e travava (bug
+     encontrado em produção na v3.53.1). Agora o navegador baixa a
+     imagem como qualquer outra: em paralelo e com cache. */
+  const temLogo = valor.length > 0;
+  const src = valor.startsWith("data:")
+    ? valor
+    : `/api/upload/logo?key=${encodeURIComponent(chave)}${versao ? `&v=${versao}` : ""}`;
 
   async function enviar(arquivo: File | undefined) {
     if (!arquivo) return;
@@ -45,7 +59,8 @@ export function LogoUpload({
         toast.error(json.error || "Não foi possível enviar a imagem.");
         return;
       }
-      onChange(json.dataUri);
+      setVersao(json.versao || Date.now());
+      onChange("__SET__");
       const kb = Math.round(json.bytes / 1024);
       toast.success(`Logo enviada (${kb} KB).`);
     } catch {
@@ -90,10 +105,10 @@ export function LogoUpload({
           className="flex h-16 w-28 shrink-0 items-center justify-center overflow-hidden rounded-md border border-paper-300"
           style={escura ? { background: "#0e1420" } : { background: XADREZ }}
         >
-          {valor ? (
+          {temLogo ? (
             /* eslint-disable-next-line @next/next/no-img-element */
             <img
-              src={valor}
+              src={src}
               alt="Prévia da logo"
               className="max-h-full max-w-full object-contain"
             />
@@ -120,9 +135,9 @@ export function LogoUpload({
               onClick={() => inputRef.current?.click()}
             >
               <Icon name="download" className="h-3.5 w-3.5 rotate-180" />
-              {enviando ? "Enviando..." : valor ? "Trocar" : "Escolher imagem"}
+              {enviando ? "Enviando..." : temLogo ? "Trocar" : "Escolher imagem"}
             </Button>
-            {valor && (
+            {temLogo && (
               <Button size="sm" variant="ghost" disabled={enviando} onClick={() => void remover()}>
                 Remover
               </Button>
