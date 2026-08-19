@@ -159,27 +159,49 @@ export function criarGerenciador({ pool, aoReceberMensagem, sessionId = "default
       }
     });
 
+    /* Espião de eventos: mostra TUDO que o Baileys emite.
+       Ligue com WA_DEBUG=1 quando o bot parecer mudo — é a única
+       forma de saber se a mensagem sequer chega à biblioteca, ou se
+       ela está vindo por um evento diferente de messages.upsert. */
+    if (process.env.WA_DEBUG === "1") {
+      sock.ev.process((eventos) => {
+        for (const nome of Object.keys(eventos)) {
+          console.log(`[wa-debug] evento: ${nome}`);
+          if (nome === "messages.upsert") {
+            console.log("[wa-debug]", JSON.stringify(eventos[nome], null, 2).slice(0, 1500));
+          }
+        }
+      });
+    }
+
     sock.ev.on("messages.upsert", async ({ messages, type }) => {
-      /* Log de entrada ANTES de qualquer filtro. Sem isto, uma
-         mensagem descartada por engano some sem deixar rastro — foi
-         exatamente o que aconteceu com os JIDs "@lid": o bot ficava
-         conectado e mudo, sem nada nos logs para investigar. */
-      log.info(
+      /* Log de entrada ANTES de qualquer filtro, em nível WARN.
+         Estava em `info` e o padrão do serviço é `warn` — ou seja, a
+         linha existia e nunca aparecia. Diagnosticar bot mudo sem
+         rastro é impossível, então este log fica sempre visível. */
+      log.warn(
         { tipo: type, quantidade: messages.length, de: messages.map((x) => x.key?.remoteJid) },
-        "messages.upsert recebido"
+        "→ messages.upsert recebido"
       );
 
       // "notify" = mensagem chegando agora. "append" = histórico.
-      if (type !== "notify") return;
+      if (type !== "notify") {
+        log.warn(`ignorado: tipo "${type}" (só tratamos "notify")`);
+        return;
+      }
 
       for (const m of messages) {
         const jid = m.key?.remoteJid || "";
 
-        if (m.key?.fromMe) continue;                    // eco do que enviamos
-        if (jid.endsWith("@g.us")) continue;            // grupo
-        if (jid.endsWith("@broadcast")) continue;       // lista de transmissão
-        if (jid.endsWith("@newsletter")) continue;      // canal
-        if (jid === "status@broadcast") continue;       // status
+        /* Cada descarte é registrado. Filtro que rejeita em silêncio
+           foi a causa do bot mudo no @lid — não repetir o erro. */
+        const pular = (motivo) => { log.warn(`  ignorado (${motivo}): ${jid}`); };
+
+        if (m.key?.fromMe) { pular("enviada por nós"); continue; }
+        if (jid.endsWith("@g.us")) { pular("grupo"); continue; }
+        if (jid.endsWith("@broadcast")) { pular("transmissão"); continue; }
+        if (jid.endsWith("@newsletter")) { pular("canal"); continue; }
+        if (jid === "status@broadcast") { pular("status"); continue; }
 
         /* O WhatsApp está migrando para LID (Linked ID): o remetente
            chega como "219743428550712@lid" em vez do número real. Um
@@ -197,12 +219,15 @@ export function criarGerenciador({ pool, aoReceberMensagem, sessionId = "default
             continue;
           }
         } else if (!jid.endsWith("@s.whatsapp.net")) {
+          pular("sufixo desconhecido");
           continue;
         }
 
         estado.mensagensRecebidas++;
+        const texto = extrairTexto(m);
+        log.warn(`  ✓ tratando: ${jidReal} — "${texto.slice(0, 60)}"`);
         try {
-          await aoReceberMensagem({ sock, msg: m, jid: jidReal, texto: extrairTexto(m) });
+          await aoReceberMensagem({ sock, msg: m, jid: jidReal, texto });
         } catch (e) {
           log.error({ err: e }, "erro ao tratar mensagem recebida");
         }
