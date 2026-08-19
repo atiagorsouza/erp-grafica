@@ -29,6 +29,7 @@ import pg from "pg";
 import { criarGerenciador } from "./conexao.mjs";
 import { criarPreCadastro } from "./pre-cadastro.mjs";
 import { paraJid, doJid } from "./telefone.mjs";
+import { enviarComBotoes } from "./botoes.mjs";
 
 const PORTA = Number(process.env.WA_PORT || 3101);
 const HOST = process.env.WA_HOST || "127.0.0.1";
@@ -170,7 +171,9 @@ const servidor = http.createServer(async (req, res) => {
     }
 
     if (rota === "/enviar" && req.method === "POST") {
-      const { para, texto } = await lerCorpo(req);
+      /* `botoes` é opcional e retrocompatível: quem manda só
+         {para,texto} continua funcionando igual. */
+      const { para, texto, botoes, rodape, titulo } = await lerCorpo(req);
       if (!para || !texto) return json(res, 422, { erro: "informe 'para' e 'texto'" });
 
       const e = gerenciador.estado();
@@ -194,14 +197,32 @@ const servidor = http.createServer(async (req, res) => {
       }
 
       const sock = gerenciador.socket();
-      const enviada = await sock.sendMessage(jid, { text: String(texto) });
+
+      /* Com botões, monta a mensagem interativa; sem, envia texto
+         simples. `enviarComBotoes` já cai para texto sozinho se o
+         WhatsApp recusar o formato nativo — o cliente nunca fica
+         sem receber por causa de enfeite. */
+      let enviada, modo = "texto";
+      if (Array.isArray(botoes) && botoes.length) {
+        const r = await enviarComBotoes(sock, jid, {
+          texto: String(texto),
+          rodape: rodape ? String(rodape) : null,
+          titulo: titulo ? String(titulo) : null,
+          botoes,
+        });
+        if (!r.ok) return json(res, 502, { erro: r.erro || "falha ao enviar" });
+        modo = r.modo;
+      } else {
+        enviada = await sock.sendMessage(jid, { text: String(texto) });
+      }
+
       gerenciador.contarEnviada();
       await pool.query(
         `INSERT INTO whatsapp_mensagens (phone_e164, direcao, texto, wa_id)
          VALUES ($1,'enviada',$2,$3)`,
         [fone, String(texto), enviada?.key?.id || null]
       );
-      return json(res, 200, { ok: true, id: enviada?.key?.id });
+      return json(res, 200, { ok: true, id: enviada?.key?.id, modo });
     }
 
     if (rota === "/assumir" && req.method === "POST") {

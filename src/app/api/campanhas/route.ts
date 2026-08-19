@@ -197,6 +197,23 @@ export async function POST(req: Request) {
 
         const texto = textoParaCliente(camp, { name: cli?.name || "" }, empresa);
 
+        /* Botão nativo de verdade (v3.55.0). O serviço monta o
+           nativeFlow e, se o WhatsApp recusar, manda o mesmo texto
+           com o link no fim — o cliente nunca fica sem receber.
+
+           `textoParaCliente` já anexa o link ao texto quando NÃO há
+           botão; com botão, o link não é repetido. */
+        const botoes = camp.ctaUrl
+          ? [{
+              name: "cta_url",
+              buttonParamsJson: JSON.stringify({
+                display_text: (camp.ctaLabel || "Ver mais").slice(0, 25),
+                url: camp.ctaUrl,
+                merchant_url: camp.ctaUrl,
+              }),
+            }]
+          : undefined;
+
         try {
           const r = await fetch(`${WA_BASE}/enviar`, {
             method: "POST",
@@ -204,7 +221,13 @@ export async function POST(req: Request) {
               "content-type": "application/json",
               ...(WA_TOKEN ? { "x-wa-token": WA_TOKEN } : {}),
             },
-            body: JSON.stringify({ para: alvo.phoneE164, texto }),
+            body: JSON.stringify({
+              para: alvo.phoneE164,
+              /* Com botão o link vai NO botão, então o texto vai limpo. */
+              texto: botoes ? textoParaCliente({ ...camp, ctaUrl: null }, { name: cli?.name || "" }, empresa) : texto,
+              botoes,
+              rodape: botoes ? empresa : undefined,
+            }),
             signal: AbortSignal.timeout(25_000),
           });
           const payload = (await r.json().catch(() => ({}))) as { erro?: string };
