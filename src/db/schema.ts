@@ -621,6 +621,24 @@ export const products = pgTable("products", {
   printSides: integer("print_sides").default(1),
   /** minutos de máquina por unidade — 3D/recorte cobram tempo (v3.39.0) */
   machineMinutes: numeric("machine_minutes", { precision: 10, scale: 2 }).default("0"),
+  /* ── Prazo de ENTREGA (não confundir com machineMinutes) ─────────
+     machineMinutes é tempo de máquina e entra no CUSTO. Isto aqui é
+     a PROMESSA ao cliente, em dias úteis.
+
+     Uma peça 3D leva 6 h de impressora mas o cliente recebe em 4
+     dias: tem fila na frente, modelagem antes e cura depois.
+
+     Três parcelas porque o que estoura prazo quase nunca é a
+     máquina — é a arte (depende do cliente aprovar) e o acabamento
+     (tempo físico: cola seca, verniz cura).
+
+     leadTimeSerial: item que só começa depois que os outros
+     terminam (encadernar exige capa e miolo prontos). Soma por cima
+     do maior em vez de correr em paralelo. */
+  leadTimeCreation: integer("lead_time_creation").default(0).notNull(),
+  leadTimeProduction: integer("lead_time_production").default(1).notNull(),
+  leadTimeFinishing: integer("lead_time_finishing").default(0).notNull(),
+  leadTimeSerial: boolean("lead_time_serial").default(false).notNull(),
   wastePercent: numeric("waste_percent", { precision: 6, scale: 4 }).default("0"),
   setupSheets: integer("setup_sheets").default(0),
   minOrderQty: numeric("min_order_qty", { precision: 12, scale: 3 }).default("1"),
