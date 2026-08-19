@@ -779,6 +779,27 @@ export function ClientsClient({ customers, leads, activities, quotes, orders, sa
                 Cliente NÃO autoriza mensagens automáticas de WhatsApp
               </span>
             </label>
+
+            {/* Consentimento de MARKETING é separado do opt-out geral
+                (v3.54.0). Quem aceita "seu pedido está pronto" não
+                aceitou receber promoção — e campanha sem este aceite
+                é o caminho curto para o número ser bloqueado. */}
+            <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-paper-200 bg-paper-50 px-3 py-2 sm:col-span-2">
+              <input
+                type="checkbox"
+                checked={form.marketingOptIn === "1"}
+                disabled={form.whatsappOptOut === "1"}
+                onChange={(e) => setForm((f) => ({ ...f, marketingOptIn: e.target.checked ? "1" : "" }))}
+                className="mt-0.5 h-4 w-4 accent-ink-900"
+              />
+              <span className="text-[12.5px] text-ink-700">
+                Autoriza receber novidades e promoções
+                <span className="block text-[11px] text-ink-400">
+                  Só marque se ele disse que sim. Sem isto, o cliente não entra em
+                  campanha — nem que já tenha conversado com você.
+                </span>
+              </span>
+            </label>
           </div>
         </FormSection>
 
@@ -903,6 +924,7 @@ export function ClientsClient({ customers, leads, activities, quotes, orders, sa
               {/* A recusa de WhatsApp precisa ser visível antes de
                   qualquer tentativa de contato, não escondida no form. */}
               {drawer.whatsappOptOut === true && <Badge tone="amber">Não enviar WhatsApp</Badge>}
+              {drawer.marketingOptIn === true && <Badge tone="green">Aceita novidades</Badge>}
               {isBirthdayToday(drawer.birthDate) && <Badge tone="green">Aniversário hoje</Badge>}
               {/* Estado do link de cadastro público: o operador precisa
                   saber se já pediu e se o cliente abriu, antes de

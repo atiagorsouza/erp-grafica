@@ -799,6 +799,77 @@
       ]
     },
     {
+      "id": "whatsapp",
+      "title": "WhatsApp & Marketing",
+      "desc": "Como o robô se comporta e as travas de segurança do envio em massa. A conexão e o texto das mensagens ficam na tela WhatsApp; aqui são os parâmetros.",
+      "icon": "whatsapp",
+      "color": "text-emerald-600",
+      "fields": [
+        {
+          "key": "wa_empresa_nome",
+          "label": "Como o robô se apresenta",
+          "hint": "Usado na variável {empresa} das mensagens. Vazio usa o nome fantasia.",
+          "defaultValue": ""
+        },
+        {
+          "key": "wa_horario_inicio",
+          "label": "Só responder a partir de",
+          "type": "text",
+          "mono": true,
+          "hint": "Fora da janela o robô fica quieto. Mensagem de madrugada é sinal de automação.",
+          "defaultValue": "08:00"
+        },
+        {
+          "key": "wa_horario_fim",
+          "label": "Parar de responder às",
+          "type": "text",
+          "mono": true,
+          "hint": "Deixe 23:59 para responder o dia inteiro.",
+          "defaultValue": "20:00"
+        },
+        {
+          "key": "wa_marketing_lote_dia",
+          "label": "Máximo de mensagens de marketing por dia",
+          "type": "number",
+          "suffix": "envios",
+          "hint": "O sistema nunca passa de 50, mesmo que você peça mais. Base pequena não perdoa.",
+          "defaultValue": "50"
+        },
+        {
+          "key": "wa_marketing_max_mes",
+          "label": "Máximo por pessoa, por mês",
+          "type": "number",
+          "suffix": "mensagens",
+          "hint": "Quatro é o limite recomendado. Acima disso a pessoa começa a bloquear.",
+          "defaultValue": "4"
+        },
+        {
+          "key": "wa_marketing_disjuntor",
+          "label": "Parar tudo se o bloqueio passar de",
+          "type": "number",
+          "suffix": "%",
+          "hint": "Numa base de 300, cada pessoa vale 0,33% — três bloqueios já são 1%. O sistema pausa sozinho.",
+          "defaultValue": "1"
+        },
+        {
+          "key": "wa_intervalo_min",
+          "label": "Intervalo mínimo entre envios",
+          "type": "number",
+          "suffix": "segundos",
+          "hint": "Disparo em rajada é a assinatura mais óbvia de robô.",
+          "defaultValue": "8"
+        },
+        {
+          "key": "wa_intervalo_max",
+          "label": "Intervalo máximo entre envios",
+          "type": "number",
+          "suffix": "segundos",
+          "hint": "O sistema sorteia um tempo entre o mínimo e o máximo a cada mensagem.",
+          "defaultValue": "25"
+        }
+      ]
+    },
+    {
       "id": "calendario",
       "title": "Calendário Comemorativo",
       "desc": "Alertas antecipados de datas e oportunidades comerciais sazonais.",
