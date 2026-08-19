@@ -160,6 +160,15 @@ export function criarGerenciador({ pool, aoReceberMensagem, sessionId = "default
     });
 
     sock.ev.on("messages.upsert", async ({ messages, type }) => {
+      /* Log de entrada ANTES de qualquer filtro. Sem isto, uma
+         mensagem descartada por engano some sem deixar rastro — foi
+         exatamente o que aconteceu com os JIDs "@lid": o bot ficava
+         conectado e mudo, sem nada nos logs para investigar. */
+      log.info(
+        { tipo: type, quantidade: messages.length, de: messages.map((x) => x.key?.remoteJid) },
+        "messages.upsert recebido"
+      );
+
       // "notify" = mensagem chegando agora. "append" = histórico.
       if (type !== "notify") return;
 
@@ -171,11 +180,29 @@ export function criarGerenciador({ pool, aoReceberMensagem, sessionId = "default
         if (jid.endsWith("@broadcast")) continue;       // lista de transmissão
         if (jid.endsWith("@newsletter")) continue;      // canal
         if (jid === "status@broadcast") continue;       // status
-        if (!jid.endsWith("@s.whatsapp.net")) continue; // qualquer outra coisa
+
+        /* O WhatsApp está migrando para LID (Linked ID): o remetente
+           chega como "219743428550712@lid" em vez do número real. Um
+           filtro que só aceita "@s.whatsapp.net" descarta a mensagem
+           em silêncio — o bot fica conectado e mudo.
+
+           Resolvemos o número real na ordem em que o WhatsApp o
+           oferece; se nada funcionar, ignoramos a mensagem em vez de
+           cadastrar um LID como se fosse telefone. */
+        let jidReal = jid;
+        if (jid.endsWith("@lid")) {
+          jidReal = (await resolverLid(sock, m, jid)) || "";
+          if (!jidReal) {
+            log.warn({ lid: jid }, "não consegui resolver o LID para um número — mensagem ignorada");
+            continue;
+          }
+        } else if (!jid.endsWith("@s.whatsapp.net")) {
+          continue;
+        }
 
         estado.mensagensRecebidas++;
         try {
-          await aoReceberMensagem({ sock, msg: m, jid, texto: extrairTexto(m) });
+          await aoReceberMensagem({ sock, msg: m, jid: jidReal, texto: extrairTexto(m) });
         } catch (e) {
           log.error({ err: e }, "erro ao tratar mensagem recebida");
         }
@@ -209,6 +236,55 @@ export function criarGerenciador({ pool, aoReceberMensagem, sessionId = "default
       return conectar();
     },
   };
+}
+
+/* ──────────────────────────────────────────────────────────────────
+   LID → número de telefone.
+
+   O WhatsApp passou a esconder o número atrás de um "Linked ID"
+   ("219743428550712@lid"). O mapeamento para o telefone real vem em
+   campos diferentes conforme a origem da mensagem, e nem sempre vem.
+
+   Tentamos, nesta ordem:
+     1. key.remoteJidAlt  — o próprio Baileys já resolveu
+     2. key.senderPn      — "phone number" do remetente
+     3. key.participantPn — usado em alguns fluxos
+     4. lidMapping        — cache interno do Baileys
+     5. onWhatsApp()      — pergunta ao servidor
+
+   Devolve null se nenhuma funcionar. Melhor perder a mensagem do que
+   gravar um LID no lugar do telefone: isso criaria um cliente
+   fantasma que ninguém consegue contactar.
+   ────────────────────────────────────────────────────────────────── */
+async function resolverLid(sock, m, lid) {
+  const candidatos = [
+    m.key?.remoteJidAlt,
+    m.key?.senderPn,
+    m.key?.participantPn,
+    m.key?.participantAlt,
+  ].filter(Boolean);
+
+  for (const c of candidatos) {
+    if (typeof c === "string" && c.endsWith("@s.whatsapp.net")) return c;
+  }
+
+  // Cache de LID do próprio Baileys (existe a partir da 6.7.x).
+  try {
+    const pn = await sock?.signalRepository?.lidMapping?.getPNForLID?.(lid);
+    if (pn && String(pn).endsWith("@s.whatsapp.net")) return String(pn);
+  } catch { /* nem toda versão expõe isso */ }
+
+  // Último recurso: perguntar ao servidor pelo número puro do LID.
+  try {
+    const numero = lid.split("@")[0].replace(/\D/g, "");
+    if (numero) {
+      const r = await sock?.onWhatsApp?.(numero);
+      const achado = Array.isArray(r) ? r.find((x) => x?.exists && x?.jid) : null;
+      if (achado?.jid?.endsWith("@s.whatsapp.net")) return achado.jid;
+    }
+  } catch { /* offline ou sem permissão */ }
+
+  return null;
 }
 
 /* O texto pode vir em vários formatos dependendo de como foi enviado. */
