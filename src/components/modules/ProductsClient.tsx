@@ -201,7 +201,8 @@ export function ProductsClient({
     setCompMaterials([]);
     setTiers([]);
     setSimQty("");
-    setForm({ margin: "40", pagesPerUnit: "1", copies: "1", baseMaterialQty: "1", defaultQuantity: "100", piecesPerSheet: "1", printSides: "1", wastePercent: "5", setupSheets: "0", minOrderQty: "1", operationalRate: "15", roundingStep: "0.01" });
+    setForm({ margin: "40", pagesPerUnit: "1", copies: "1", baseMaterialQty: "1", defaultQuantity: "100", piecesPerSheet: "1", printSides: "1", wastePercent: "5", setupSheets: "0", minOrderQty: "1", operationalRate: "15", roundingStep: "0.01",
+      leadTimeCreation: "0", leadTimeProduction: "1", leadTimeFinishing: "0", leadTimeSerial: "false" });
     setEditorOpen(true);
   }
 
@@ -243,6 +244,10 @@ export function ProductsClient({
       wastePercent: String(num(p.wastePercent) * 100),
       setupSheets: String(p.setupSheets ?? 0),
       minOrderQty: String(p.minOrderQty ?? 1),
+      leadTimeCreation: String(p.leadTimeCreation ?? 0),
+      leadTimeProduction: String(p.leadTimeProduction ?? 1),
+      leadTimeFinishing: String(p.leadTimeFinishing ?? 0),
+      leadTimeSerial: p.leadTimeSerial ? "true" : "false",
       operationalRate: String(num(p.operationalRate) * 100),
       roundingStep: String(p.roundingStep ?? 0.01),
       margin: String(num(p.margin, 0.4) * 100),
@@ -280,6 +285,10 @@ export function ProductsClient({
         wastePercent: String(num(form.wastePercent, 0) / 100),
         setupSheets: Number(form.setupSheets || 0),
         minOrderQty: form.minOrderQty || 1,
+        leadTimeCreation: num(form.leadTimeCreation, 0),
+        leadTimeProduction: num(form.leadTimeProduction, 1),
+        leadTimeFinishing: num(form.leadTimeFinishing, 0),
+        leadTimeSerial: form.leadTimeSerial === "true",
         operationalRate: String(num(form.operationalRate, 0) / 100),
         roundingStep: form.roundingStep || 0.01,
         baseMaterialId: form.baseMaterialId || null,
@@ -616,6 +625,49 @@ export function ProductsClient({
                   </>
                 )}
               </div>
+            </section>
+
+            {/* Prazo de entrega — vale para QUALQUER produto, por isso
+                fica fora do bloco de impressão. */}
+            <section className="rounded-xl border border-paper-200 bg-paper-100/50 p-4">
+              <h4 className="mb-1 flex items-center gap-2 font-mono text-[10.5px] font-semibold tracking-[0.16em] text-ink-600 uppercase">
+                <Icon name="clock" size={13} />
+                Prazo de entrega
+              </h4>
+              <p className="mb-3.5 text-[12px] leading-relaxed text-ink-500">
+                Em <strong>dias úteis</strong>, contados da aprovação da arte. Não confunda com
+                minutos de máquina: uma peça 3D roda 6&nbsp;h na impressora mas o cliente recebe
+                em 4 dias. Num pedido com vários itens vale o maior, não a soma.
+              </p>
+              <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-3">
+                <Field label="Criação" hint="arte, modelagem — 0 se o cliente traz pronta">
+                  <Input mono value={form.leadTimeCreation ?? ""} onChange={set("leadTimeCreation")} placeholder="0" />
+                </Field>
+                <Field label="Produção" hint="máquina rodando">
+                  <Input mono value={form.leadTimeProduction ?? ""} onChange={set("leadTimeProduction")} placeholder="1" />
+                </Field>
+                <Field label="Acabamento" hint="cura, montagem, secagem">
+                  <Input mono value={form.leadTimeFinishing ?? ""} onChange={set("leadTimeFinishing")} placeholder="0" />
+                </Field>
+              </div>
+              <label className="mt-3.5 flex cursor-pointer items-start gap-2.5 text-[12.5px] text-ink-700">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 h-4 w-4 shrink-0 accent-ink-900"
+                  checked={form.leadTimeSerial === "true"}
+                  onChange={(e) => setForm((f) => ({ ...f, leadTimeSerial: e.target.checked ? "true" : "false" }))}
+                />
+                <span>
+                  <strong>Só começa depois dos outros itens</strong>
+                  <span className="block text-[11.5px] text-ink-500">
+                    Encadernação exige capa e miolo prontos. Marcado, soma por cima do maior prazo
+                    em vez de correr em paralelo.
+                  </span>
+                </span>
+              </label>
+              <p className="mt-3 rounded-lg bg-paper-200/60 px-3 py-2 font-mono text-[11.5px] text-ink-600">
+                total: {(Number(form.leadTimeCreation || 0) + Number(form.leadTimeProduction || 0) + Number(form.leadTimeFinishing || 0)) || 0} dia(s) útil(eis)
+              </p>
             </section>
 
             {/* Material base + insumos */}

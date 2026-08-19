@@ -472,8 +472,8 @@
           "key": "quote_validity_days",
           "label": "Validade padrão (dias)",
           "type": "number",
-          "hint": "Dias a partir da criação",
-          "defaultValue": "7"
+          "hint": "Depois disso os valores podem mudar. Aparece impresso no orçamento enviado ao cliente.",
+          "defaultValue": "3"
         },
         {
           "key": "quote_default_payment",
@@ -625,6 +625,90 @@
             {
               "value": "false",
               "label": "Não"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "prazos",
+      "title": "Prazos & Expediente",
+      "desc": "Quando a gráfica trabalha e a partir de quando o prazo conta. Usado para calcular a data de entrega prometida no orçamento e no pedido.",
+      "icon": "clock",
+      "color": "text-proc-c",
+      "fields": [
+        {
+          "key": "prazo_dias_uteis",
+          "label": "Dias de expediente",
+          "type": "select",
+          "defaultValue": "1,2,3,4,5",
+          "hint": "Política da casa: somente dias úteis de segunda à sexta.",
+          "options": [
+            {
+              "value": "1,2,3,4,5",
+              "label": "Segunda a sexta"
+            },
+            {
+              "value": "1,2,3,4,5,6",
+              "label": "Segunda a sábado"
+            },
+            {
+              "value": "1,2,3,4,5,6,0",
+              "label": "Todos os dias"
+            }
+          ]
+        },
+        {
+          "key": "prazo_horario_corte",
+          "label": "Horário de corte",
+          "type": "text",
+          "defaultValue": "15:00",
+          "mono": true,
+          "hint": "Pedido aprovado depois deste horário conta a partir do dia seguinte. Evita prometer o que não dá para começar hoje."
+        },
+        {
+          "key": "prazo_usar_feriados",
+          "label": "Pular feriados",
+          "type": "select",
+          "defaultValue": "true",
+          "hint": "Nacionais + Rio de Janeiro (São Sebastião e São Jorge). Carnaval, Sexta-Feira Santa e Corpus Christi são calculados a cada ano — não é lista fixa que envelhece.",
+          "options": [
+            {
+              "value": "true",
+              "label": "Sim, pular feriados"
+            },
+            {
+              "value": "false",
+              "label": "Não, trabalhar em feriados"
+            }
+          ]
+        },
+        {
+          "key": "prazo_fechamentos",
+          "label": "Dias fechados",
+          "type": "text",
+          "defaultValue": "",
+          "mono": true,
+          "hint": "Recesso, férias coletivas, manutenção. Datas AAAA-MM-DD separadas por vírgula."
+        },
+        {
+          "key": "prazo_conta_de",
+          "label": "O prazo começa a contar",
+          "type": "select",
+          "defaultValue": "arte_aprovada",
+          "hint": "Contar da aprovação da arte é o mais justo: enquanto o cliente não aprova, o relógio não corre contra você.",
+          "options": [
+            {
+              "value": "arte_aprovada",
+              "label": "Da aprovação da arte"
+            },
+            {
+              "value": "pedido_aprovado",
+              "label": "Da aprovação do pedido"
+            },
+            {
+              "value": "entrada_paga",
+              "label": "Do pagamento da entrada"
             }
           ]
         }
