@@ -180,6 +180,9 @@ for (const [slug, name, w, h, af, cov, feed, cols] of fmts) {
 /* ------------------------------------------------------------------ */
 const mats = [
   ["Papel Chamex A4 75g", "folha", "Resma 500 folhas", "500", "28.00", 500, 100],
+  /* A3: resma de 500 por R$ 77 = R$ 0,154/folha. Confirmado pelo
+     usuário, que cobra R$ 2,99 a página A3. */
+  ["Papel Sulfite A3 75g", "folha", "Resma 500 folhas", "500", "77.00", 500, 100],
   ["Papel Foto 10x15 Glossy 180g", "unidade", "Pacote 100 folhas", "100", "42.00", 100, 50],
 
   ["Ribbon Cera Preto 110x76m", "metro", "Rolo 76 m", "76", "32.00", 76, 20],

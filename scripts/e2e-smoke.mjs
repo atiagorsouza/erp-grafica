@@ -1202,6 +1202,137 @@ async function main() {
   await sql("delete from deliveries where order_id=$1", [kbOrderId]);
   await sql("delete from orders where id=$1", [kbOrderId]);
 
+  // 11.4) Expediente e prazo (v3.51.0)
+  //
+  // O corte é 17h e o sábado NÃO produz — só atende. Estes checks
+  // existem porque errar aqui significa prometer data que não se
+  // cumpre, que é o pior tipo de erro deste sistema.
+  {
+    const prazo = (apartirDe, productId) =>
+      fetch(`${BASE_URL}/api/prazo`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ itens: [{ productId }], apartirDe }),
+      }).then((r) => r.json());
+
+    /* Produto de 1 dia útil, para medir o efeito do relógio. */
+    const [pz] = await sql(
+      `INSERT INTO products (name, lead_time_creation, lead_time_production, lead_time_finishing)
+       VALUES ($1, 0, 1, 0) RETURNING id`,
+      [`SMOKE PRAZO ${stamp}`]
+    );
+    const pzId = Number(pz.id);
+
+    /* Quarta-feira 19/08/2026. Antes das 17h a produção começa hoje e
+       entrega quinta; depois das 17h escorrega para sexta. */
+    const antes = await prazo("2026-08-19T16:30:00", pzId);
+    assert(antes.data === "2026-08-20", `antes do corte entrega quinta (${antes.data})`);
+
+    const noCorte = await prazo("2026-08-19T17:00:00", pzId);
+    assert(noCorte.data === "2026-08-21", `às 17h em ponto já conta amanhã (${noCorte.data})`);
+
+    const depois = await prazo("2026-08-19T17:01:00", pzId);
+    assert(depois.data === "2026-08-21", `depois do corte entrega sexta (${depois.data})`);
+
+    /* Sexta 21/08 às 18h: não começa hoje, e sábado/domingo não
+       produzem. A contagem só começa na segunda, então entrega terça.
+       (Escrevi 24 na primeira versão deste teste e o código me
+       corrigiu: segunda é o INÍCIO, não a entrega.) */
+    const sexta = await prazo("2026-08-21T18:00:00", pzId);
+    assert(sexta.data === "2026-08-25", `sexta após o corte só começa segunda, entrega terça (${sexta.data})`);
+
+    /* Sábado atende, mas não produz: pedido de sábado começa segunda
+       e entrega terça. */
+    const sabado = await prazo("2026-08-22T10:00:00", pzId);
+    assert(sabado.data === "2026-08-25", `sábado não produz, entrega terça (${sabado.data})`);
+
+    /* Ficando pronto na sexta, o sábado é oferecido para retirada —
+       sem mudar a data prometida. */
+    const proSabado = await prazo("2026-08-20T10:00:00", pzId);
+    assert(
+      proSabado.data === "2026-08-21" && proSabado.retiradaSabado === "2026-08-22",
+      `pronto na sexta oferece retirada no sábado (${proSabado.retiradaSabado})`
+    );
+
+    await sql("DELETE FROM products WHERE id=$1", [pzId]);
+  }
+
+  // 11.5) Link de cadastro público (v3.50.0)
+  //
+  // O que precisa ser verdade: o link nasce válido, a página pública
+  // abre sem sessão, campos comerciais enviados pelo cliente são
+  // ignorados, e o token queima depois do uso.
+  {
+    const rl = await fetch(`${BASE_URL}/api/crm/registration-link`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ op: "criar", customerId }),
+    });
+    const rlJson = await rl.json();
+    assert(rl.ok && rlJson.link?.token, "link de cadastro gerado");
+    assert(String(rlJson.url || "").includes(rlJson.link.token), "URL do cadastro contém o token");
+    assert(String(rlJson.mensagem || "").includes(rlJson.url), "prévia da mensagem já traz o link");
+
+    const token = rlJson.link.token;
+
+    const pagina = await fetch(`${BASE_URL}/cadastro/${token}`);
+    assert(pagina.ok, "página pública de cadastro abre sem sessão");
+
+    const [aposAbrir] = await sql("select status, opened_at from registration_links where token=$1", [token]);
+    assert(aposAbrir.status === "aberto" && aposAbrir.opened_at, "abertura do link é registrada");
+
+    /* Escalada de privilégio: o formulário público manda campos que
+       só o operador decide. Nenhum deles pode passar. */
+    const envio = await fetch(`${BASE_URL}/api/cadastro/${token}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        type: "pf",
+        name: `E2E Publico ${stamp}`,
+        document: makeCpf(stamp),
+        email: `publico${stamp}@e2e.local`,
+        /* Telefone derivado do stamp: fixo colidiria com o índice
+           único de telefone deixado por execuções anteriores. */
+        whatsapp: `21 9${String(stamp).slice(-8)}`,
+        cep: "21810-100",
+        number: "910",
+        creditLimit: 999999,
+        status: "bloqueado",
+        notes: "INJETADO",
+        tags: "INJETADO",
+        whatsappOptOut: true,
+      }),
+    });
+    assert(envio.ok, "cadastro público aceito");
+
+    const [depois] = await sql(
+      "select status, credit_limit, notes, tags, whatsapp_opt_out, number from customers where id=$1",
+      [customerId]
+    );
+    assert(depois.status === "ativo", "cadastro público promove o cliente a ativo");
+    assert(Number(depois.credit_limit) === 0, "cadastro público não altera limite de crédito");
+    assert(!String(depois.notes || "").includes("INJETADO"), "cadastro público não escreve em anotações");
+    assert(!String(depois.tags || "").includes("INJETADO"), "cadastro público não escreve em tags");
+    assert(depois.whatsapp_opt_out === false, "cadastro público não mexe no opt-out de WhatsApp");
+    assert(depois.number === "910", "cadastro público grava os campos permitidos");
+
+    const reuso = await fetch(`${BASE_URL}/api/cadastro/${token}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ type: "pf", name: "Tentativa Reuso", document: makeCpf(stamp) }),
+    });
+    assert(reuso.status === 410, "token de cadastro é de uso único");
+
+    const invalido = await fetch(`${BASE_URL}/api/cadastro/tokenqueNaoExiste123`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ type: "pf", name: "Fulano de Tal", document: makeCpf(stamp) }),
+    });
+    assert(invalido.status === 404, "token inexistente é recusado");
+
+    await sql("delete from registration_links where customer_id=$1", [customerId]);
+  }
+
   // 12) Páginas principais respondem
   for (const path of ["/clientes", "/orcamentos", "/pedidos", "/kanban", "/estoque", "/relatorios", "/financeiro", "/envios", "/cobrancas"]) {
     const res = await fetch(`${BASE_URL}${path}`);

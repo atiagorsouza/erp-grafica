@@ -74,7 +74,7 @@ export function feriadosDoAno(ano: number): Map<string, string> {
 }
 
 export interface ConfigPrazo {
-  /** 0=domingo … 6=sábado. Padrão seg–sex, conforme a política. */
+  /** 0=domingo … 6=sábado. Dias em que a PRODUÇÃO corre. Padrão seg–sex. */
   diasUteis: number[];
   /** "HH:MM" — depois disso, o pedido conta a partir do dia seguinte. */
   horarioCorte: string;
@@ -82,13 +82,31 @@ export interface ConfigPrazo {
   fechamentos: string[];
   /** Considerar feriados do calendário. */
   usarFeriados: boolean;
+  /* ── Atendimento e entrega ──────────────────────────────────────
+     Sábado é dia de ATENDER e ENTREGAR, não de produzir. São coisas
+     diferentes e o sistema tratava as duas como uma só.
+
+     Consequência prática: o prazo prometido nunca encurta por causa
+     do sábado — a produção continua contando só de segunda a sexta.
+     Mas quando a peça fica pronta na sexta, o cliente pode retirar no
+     sábado, e é isso que a tela passa a dizer.
+
+     A regra vale também para o outro lado: o que o dono faz fora do
+     expediente é problema dele. O sistema NUNCA promete com base
+     nisso. Entregar antes é presente; prometer antes é dívida. */
+  diasAtendimento: number[];
+  /** Até que horas o sábado atende. Vazio = não atende sábado. */
+  sabadoAte: string;
 }
 
 export const CONFIG_PADRAO: ConfigPrazo = {
   diasUteis: [1, 2, 3, 4, 5],
-  horarioCorte: "15:00",
+  /* 17:00 — informado pelo dono. Aprovou às 17h01? Conta amanhã. */
+  horarioCorte: "17:00",
   fechamentos: [],
   usarFeriados: true,
+  diasAtendimento: [1, 2, 3, 4, 5, 6],
+  sabadoAte: "13:00",
 };
 
 function ehUtil(d: Date, cfg: ConfigPrazo, feriados: Map<string, string>): boolean {
@@ -117,6 +135,9 @@ export interface ResultadoPrazo {
   inicio: string;
   /** Feriados e fins de semana pulados — para explicar ao cliente. */
   pulados: { data: string; motivo: string }[];
+  /** Fica pronto na sexta e o sábado atende? Então dá para retirar no
+   *  sábado. Informativo: não muda a data prometida. */
+  retiradaSabado: string | null;
 }
 
 /**
@@ -171,7 +192,25 @@ export function calcularPrazo(
     restantes--;
   }
 
-  return { data: iso(cursor), dias: Math.max(0, Math.floor(diasUteis)), inicio, pulados };
+  /* O sábado seguinte só é oferecido quando a peça fica pronta na
+     sexta. Em qualquer outro dia da semana o cliente retira no
+     próprio dia — apontar o sábado só confundiria. */
+  let retiradaSabado: string | null = null;
+  const atende = cfg.diasAtendimento?.includes(6) && !!cfg.sabadoAte;
+  if (atende && cursor.getUTCDay() === 5) {
+    const sabado = somaDias(cursor, 1);
+    const feriadoNoSabado = cfg.usarFeriados && feriados.has(iso(sabado));
+    const fechadoNoSabado = cfg.fechamentos.includes(iso(sabado));
+    if (!feriadoNoSabado && !fechadoNoSabado) retiradaSabado = iso(sabado);
+  }
+
+  return {
+    data: iso(cursor),
+    dias: Math.max(0, Math.floor(diasUteis)),
+    inicio,
+    pulados,
+    retiradaSabado,
+  };
 }
 
 function motivoNaoUtil(d: Date, cfg: ConfigPrazo, feriados: Map<string, string>): string {

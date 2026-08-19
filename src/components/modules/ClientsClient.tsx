@@ -30,6 +30,7 @@ import { Icon } from "@/components/icons";
 import { cn, initials } from "@/lib/format";
 import { formatCEP, formatCNPJ, formatCPF, formatPhone, formatStateRegistration } from "@/lib/validators";
 import { todayISO } from "@/lib/period";
+import { PedirCadastroModal } from "@/components/modules/PedirCadastroModal";
 
 type Row = Record<string, any>;
 
@@ -100,13 +101,16 @@ const COL_COLOR: Record<string, string> = {
 const SOURCES = ["balcao", "instagram", "site", "indicacao", "google", "facebook", "marketplace", "outro"];
 const ACTIVITY_TYPES = ["nota", "ligacao", "reuniao", "tarefa", "visita", "proposta"];
 
-export function ClientsClient({ customers, leads, activities, quotes, orders, sales }: {
+export function ClientsClient({ customers, leads, activities, quotes, orders, sales, registrationLinks = [] }: {
   customers: Row[];
   leads: Row[];
   activities: Row[];
   quotes: Row[];
   orders: Row[];
   sales: Row[];
+  /** Links de cadastro público vivos (v3.50.0). Opcional para não
+      quebrar quem monta este componente em teste. */
+  registrationLinks?: Row[];
 }) {
   const router = useRouter();
   const refresh = () => router.refresh();
@@ -126,6 +130,10 @@ export function ClientsClient({ customers, leads, activities, quotes, orders, sa
   const [deleting, setDeleting] = useState(false);
   const [fetchingCep, setFetchingCep] = useState(false);
   const [actForm, setActForm] = useState({ type: "nota", title: "", description: "" });
+  /* Modal do link público de cadastro (v3.50.0). Guarda o cliente
+     inteiro, não só o id: o modal precisa do opt-out e do telefone
+     para decidir se o bot pode enviar. */
+  const [cadastroModal, setCadastroModal] = useState<Row | null>(null);
 
   const set = (k: string) => (e: { target: { value: string } }) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
@@ -144,6 +152,17 @@ export function ClientsClient({ customers, leads, activities, quotes, orders, sa
       document: f.type === "pj" ? formatCNPJ(e.target.value) : formatCPF(e.target.value),
     }));
   const drawer = customers.find((c) => Number(c.id) === drawerId) || null;
+
+  /* Último link de cadastro por cliente. A lista já vem ordenada do
+     mais novo para o mais velho, então o primeiro que aparece vence. */
+  const linkPorCliente = useMemo(() => {
+    const map = new Map<number, Row>();
+    for (const l of registrationLinks) {
+      const cid = Number(l.customerId);
+      if (!map.has(cid)) map.set(cid, l);
+    }
+    return map;
+  }, [registrationLinks]);
 
   /* LTV por cliente — soma vendas PDV + pedidos */
   const ltv = useMemo(() => {
@@ -880,6 +899,16 @@ export function ClientsClient({ customers, leads, activities, quotes, orders, sa
                   qualquer tentativa de contato, não escondida no form. */}
               {drawer.whatsappOptOut === true && <Badge tone="amber">Não enviar WhatsApp</Badge>}
               {isBirthdayToday(drawer.birthDate) && <Badge tone="green">Aniversário hoje</Badge>}
+              {/* Estado do link de cadastro público: o operador precisa
+                  saber se já pediu e se o cliente abriu, antes de
+                  cobrar de novo. */}
+              {(() => {
+                const l = linkPorCliente.get(Number(drawer.id));
+                if (!l) return null;
+                if (l.status === "concluido") return <Badge tone="green">Cadastro pelo link</Badge>;
+                if (l.status === "aberto") return <Badge tone="cyan">Link aberto, não concluído</Badge>;
+                return <Badge tone="amber">Link enviado, não aberto</Badge>;
+              })()}
             </span>
           )
         }
@@ -894,6 +923,21 @@ export function ClientsClient({ customers, leads, activities, quotes, orders, sa
                 Ligar
               </Button>
               <div className="flex gap-2">
+                {/* Cadastro completo é política da empresa para todo
+                    pedido. Este botão é o caminho curto: gera o link
+                    público e deixa o operador conferir a mensagem
+                    antes do bot mandar. */}
+                <Button
+                  variant="outline"
+                  icon="whatsapp"
+                  onClick={() => setCadastroModal(drawer)}
+                >
+                  {["pendente", "aberto"].includes(
+                    String(linkPorCliente.get(Number(drawer.id))?.status || "")
+                  )
+                    ? "Reenviar cadastro"
+                    : "Pedir cadastro"}
+                </Button>
                 <Button
                   variant="soft"
                   icon="quote"
@@ -1118,6 +1162,22 @@ export function ClientsClient({ customers, leads, activities, quotes, orders, sa
           </div>
         )}
       </Drawer>
+
+      <PedirCadastroModal
+        cliente={
+          cadastroModal
+            ? {
+                id: Number(cadastroModal.id),
+                name: String(cadastroModal.name || ""),
+                whatsapp: cadastroModal.whatsapp as string | null,
+                phone: cadastroModal.phone as string | null,
+                whatsappOptOut: cadastroModal.whatsappOptOut as boolean | null,
+              }
+            : null
+        }
+        onClose={() => setCadastroModal(null)}
+        onDone={refresh}
+      />
 
       {/* ── IMPORTAR CLIENTES DO SISTEMA ANTIGO ── */}
       <ImportCustomersModal
