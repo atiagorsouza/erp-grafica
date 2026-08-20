@@ -53,7 +53,7 @@ except ImportError as e:
 
 # Tentar importar niimprint (biblioteca Niimbot)
 try:
-    from niimprint import NiimbotDevice, BleDevice
+    from niimprint import PrinterClient, BluetoothTransport, SerialTransport
     NIIMPRINT_AVAILABLE = True
 except ImportError:
     print("⚠️  Aviso: niimprint não encontrado")
@@ -133,15 +133,17 @@ class NiimbotRFIDWorker:
 
             logger.info(f"🔌 Conectando via {self.connection_type}...")
 
+            # Criar transporte apropriado
             if self.connection_type == "usb":
-                self.device = NiimbotDevice(self.address)
+                transport = SerialTransport(self.address)
             elif self.connection_type == "bluetooth":
-                self.device = BleDevice(self.address)
+                transport = BluetoothTransport(self.address)
             else:
                 logger.error(f"❌ Tipo de conexão inválido: {self.connection_type}")
                 return False
 
-            self.device.connect()
+            # Criar cliente Niimbot
+            self.device = PrinterClient(transport)
             logger.info("✓ Conectado à Niimbot B1")
             return True
 
