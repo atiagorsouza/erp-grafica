@@ -1524,6 +1524,34 @@ async function main() {
   const emptyPeriod = await fetch(`${BASE_URL}/relatorios?from=2019-01-01&to=2019-01-31`);
   assert(emptyPeriod.ok, "relatórios respondem com período personalizado");
 
+  /* ── Faxina (v3.57.0) ────────────────────────────────────────
+     O smoke cria material, produto e cliente a cada execução e nunca
+     apagava. Como o deploy roda o smoke em produção (passo 9/9), isso
+     acumulava: encontrei 10 "E2E Papel", 10 "E2E Produto" e 110
+     movimentos de estoque órfãos no banco do dono.
+
+     Teste que suja o banco de quem trabalha nele é teste mal
+     escrito. Limpa o que criou, na ordem das dependências.
+
+     Fora do assert de propósito: falha de limpeza não pode reprovar
+     um deploy que passou em tudo. Avisa e segue. */
+  try {
+    const r = await pool.query(
+      `DELETE FROM stock_movements
+        WHERE material_id IN (SELECT id FROM materials WHERE name LIKE 'E2E %')`
+    );
+    await pool.query(
+      `DELETE FROM product_materials
+        WHERE product_id IN (SELECT id FROM products WHERE name LIKE 'E2E %')`
+    );
+    const p = await pool.query(`DELETE FROM products  WHERE name LIKE 'E2E %'`);
+    const m = await pool.query(`DELETE FROM materials WHERE name LIKE 'E2E %'`);
+    const total = (p.rowCount || 0) + (m.rowCount || 0);
+    if (total) console.log(`🧹 limpeza: ${total} registro(s) e ${r.rowCount || 0} movimento(s) de teste removidos`);
+  } catch (e) {
+    console.warn("⚠ não consegui limpar os dados de teste:", e.message);
+  }
+
   console.log("🎉 E2E smoke concluído com sucesso");
 }
 
