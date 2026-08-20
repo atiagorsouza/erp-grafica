@@ -1485,6 +1485,19 @@ async function main() {
       `nenhum script instala com --omit=dev antes do build${ruins.length ? " — " + ruins[0] : ""}`);
   }
 
+  // 11.95) As rotas que dependem de tabela nova respondem (v3.55.2)
+  //
+  // Em 19/08 o /api/campanhas devolveu 500 em produção porque as
+  // tabelas nunca foram criadas — o drizzle-kit push não concluiu sem
+  // TTY e o deploy seguiu mesmo assim. Um 500 aqui é mais barato que
+  // um 500 na frente do cliente.
+  {
+    for (const rota of ["/api/campanhas", "/api/whatsapp-chat", "/api/campanhas?audiencia=1"]) {
+      const r = await fetch(`${BASE_URL}${rota}`);
+      assert(r.status === 200, `${rota} responde 200 (schema completo)`);
+    }
+  }
+
   // 12) Páginas principais respondem
   for (const path of ["/clientes", "/orcamentos", "/pedidos", "/kanban", "/estoque", "/relatorios", "/financeiro", "/envios", "/cobrancas"]) {
     const res = await fetch(`${BASE_URL}${path}`);

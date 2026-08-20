@@ -280,8 +280,31 @@ fi
 # ── 7. Migrações e reparos ──────────────────────────────────────────
 step "7/9  Banco de dados"
 if [ -n "${DATABASE_URL:-}" ]; then
+  # `drizzle-kit push` é interativo. Rodando por SSH sem TTY ele pode
+  # não concluir E AINDA ASSIM sair como sucesso — foi o que houve em
+  # 19/08/2026: código da 3.54.0 no ar, tabelas de campanha nunca
+  # criadas, /api/campanhas devolvendo 500.
+  #
+  # Por isso ele agora é só a primeira tentativa. Quem decide é o
+  # `migrar-banco.mjs`, que CONFERE o que o código precisa e cria o
+  # que faltar com SQL explícito — sem terminal interativo.
   npx drizzle-kit push --force >/tmp/drizzle.log 2>&1 \
-    && ok "schema atualizado" || warn "drizzle-kit push falhou (veja /tmp/drizzle.log)"
+    && ok "schema atualizado (drizzle)" \
+    || warn "drizzle-kit push não concluiu — o passo seguinte resolve"
+
+  if node scripts/migrar-banco.mjs --aplicar >/tmp/migrar.log 2>&1; then
+    if grep -q "Banco em dia" /tmp/migrar.log; then
+      ok "schema conferido: nada faltando"
+    else
+      ok "schema completado: $(grep -cE '^   · ' /tmp/migrar.log) item(ns) criado(s)"
+      grep -E '^   · ' /tmp/migrar.log | head -6
+    fi
+  else
+    # Aqui é falha de verdade: o código espera algo que não existe no
+    # banco. Seguir em frente só produz erro 500 na cara do cliente.
+    FALHOU="o banco não tem o schema que esta versão precisa"
+    er "$FALHOU"; tail -12 /tmp/migrar.log; exit 1
+  fi
 
   # Backfill de telefone: só avisa, nunca grava sozinho — fundir
   # cliente duplicado é decisão de negócio, não de script.
