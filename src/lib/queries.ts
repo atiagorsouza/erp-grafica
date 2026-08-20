@@ -53,7 +53,9 @@ import { todayISO } from "@/lib/period";
       lista devolvida.
    ───────────────────────────────────────────────────────────── */
 
-export const TAMANHO_PAGINA_PADRAO = 50;
+/* 10 por página: o dono achou 50 demais para ler de uma vez. Continua
+   ajustável pela URL (?por=) e, mais para frente, pelo Painel. */
+export const TAMANHO_PAGINA_PADRAO = 10;
 
 export type PaginaPedidos = {
   linhas: Awaited<ReturnType<typeof getOrders>>;
@@ -164,6 +166,95 @@ export async function auxiliaresDosPedidos(idsPedidos: number[]) {
     db.select().from(deliveries).where(inArray(deliveries.orderId, idsPedidos)),
   ]);
   return { approvals: approvalRows, schedules: scheduleRows, deliveries: deliveryRows };
+}
+
+/* ── ORÇAMENTOS ───────────────────────────────────────────────
+   Mesmo desenho de Pedidos. Diferença: os itens moram em outra
+   tabela (`quote_items`), então a busca por descrição é um EXISTS
+   com join, e não uma varredura de JSON. */
+
+function condicaoBuscaOrcamento(termo: string) {
+  const t = termo.trim().toLowerCase();
+  if (!t) return sql`TRUE`;
+  const like = `%${t}%`;
+  return sql`(
+    lower(${quotes.number}) LIKE ${like}
+    OR EXISTS (
+      SELECT 1 FROM ${customers} c
+       WHERE c.id = ${quotes.customerId}
+         AND (
+           lower(c.name) LIKE ${like}
+           OR lower(coalesce(c.trade_name, '')) LIKE ${like}
+           OR lower(coalesce(c.document, '')) LIKE ${like}
+         )
+    )
+    OR EXISTS (
+      SELECT 1 FROM ${quoteItems} qi
+       WHERE qi.quote_id = ${quotes.id}
+         AND lower(coalesce(qi.description, '')) LIKE ${like}
+    )
+  )`;
+}
+
+export async function getQuotesPage(opcoes: {
+  pagina?: number;
+  porPagina?: number;
+  busca?: string;
+  filtro?: string;
+} = {}) {
+  const porPagina = Math.min(Math.max(opcoes.porPagina || TAMANHO_PAGINA_PADRAO, 1), 200);
+  const busca = opcoes.busca || "";
+  const filtro = opcoes.filtro || "all";
+
+  const buscaSql = condicaoBuscaOrcamento(busca);
+  const where =
+    filtro === "all" ? buscaSql : sql`${buscaSql} AND ${quotes.status}::text = ${filtro}`;
+
+  const [{ total }] = await db
+    .select({ total: sql<number>`count(*)::int` })
+    .from(quotes)
+    .where(where);
+
+  const totalPaginas = Math.max(1, Math.ceil(total / porPagina));
+  const pagina = Math.min(Math.max(opcoes.pagina || 1, 1), totalPaginas);
+
+  const linhas = await db
+    .select()
+    .from(quotes)
+    .where(where)
+    .orderBy(desc(quotes.createdAt))
+    .limit(porPagina)
+    .offset((pagina - 1) * porPagina);
+
+  /* Contadores por status sobre a base inteira (respeitando a busca),
+     para as abas não passarem a contar só a página. */
+  const [c] = await db
+    .select({
+      rascunho: sql<number>`count(*) FILTER (WHERE ${quotes.status}::text = 'rascunho')::int`,
+      enviado: sql<number>`count(*) FILTER (WHERE ${quotes.status}::text = 'enviado')::int`,
+      aprovado: sql<number>`count(*) FILTER (WHERE ${quotes.status}::text = 'aprovado')::int`,
+      recusado: sql<number>`count(*) FILTER (WHERE ${quotes.status}::text = 'recusado')::int`,
+      expirado: sql<number>`count(*) FILTER (WHERE ${quotes.status}::text = 'expirado')::int`,
+      todos: sql<number>`count(*)::int`,
+    })
+    .from(quotes)
+    .where(buscaSql);
+
+  /* Só os itens dos orçamentos visíveis — antes vinha a tabela toda. */
+  const ids = linhas.map((q) => Number(q.id));
+  const itens = ids.length
+    ? await db.select().from(quoteItems).where(inArray(quoteItems.quoteId, ids))
+    : [];
+
+  return {
+    linhas,
+    itens,
+    total,
+    pagina,
+    porPagina,
+    totalPaginas,
+    contadores: c as unknown as Record<string, number>,
+  };
 }
 
 export async function getCategoriesByModule(
