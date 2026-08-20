@@ -25,7 +25,7 @@ import {
   toNumber,
   toPositive,
 } from "@/lib/money";
-import { isWhatsAppBlocked, whatsappNumber } from "@/lib/validators";
+import { formatDocumentAuto, isWhatsAppBlocked, whatsappNumber } from "@/lib/validators";
 
 import type { CompanyIdentity } from "@/lib/company";
 export type PosCompany = CompanyIdentity;
@@ -2071,7 +2071,7 @@ function ThermalReceipt({
             <div className="text-left text-[11px] uppercase">{c.name}</div>
           )}
 
-          {c.document && <div className="text-left text-[11px]">{c.document}</div>}
+          {c.document && <div className="text-left text-[11px]">{formatDocumentAuto(String(c.document))}</div>}
 
           {c.contactName && (
             <div className="text-left text-[11px] uppercase">A/C: {c.contactName}</div>

@@ -191,7 +191,10 @@ export async function getPricingDefaults(): Promise<PricingDefaults> {
       map.get("company_complement"),
       district,
       [city, state].filter(Boolean).join(" / "),
-      cep && `CEP ${cep}`,
+      /* O endereço de uma linha é montado ANTES do bloco que aplica as
+         máscaras, e usava o CEP cru: saía "CEP 21860005" no cabeçalho
+         do orçamento em A4 (foto do dono, 20/08/2026). */
+      cep && `CEP ${formatCEP(cep)}`,
     ]
       .filter(Boolean)
       .join(" — ");

@@ -326,8 +326,27 @@ body {
     border-color: #000 !important;
   }
 
+  /* TAMANHO DO PAPEL
+
+     `size: auto` deixava a escolha com a impressora — e o padrão de
+     fábrica de boa parte delas é Carta (216x279mm), não A4 (210x297mm).
+     O documento saía com margem irregular e risco de cortar o rodapé.
+
+     O cupom térmico tem @page próprio logo abaixo: 80mm de largura e
+     altura livre, porque a bobina é contínua e fixar altura força
+     salto de página no meio do cupom. */
   @page {
-    size: auto;
+    size: A4 portrait;
     margin: 10mm;
+  }
+
+  /* Cupom térmico e OS em bobina: 80mm, altura conforme o conteúdo. */
+  @page thermal {
+    size: 80mm auto;
+    margin: 0;
+  }
+
+  body:has(#receipt-print, #order-print-80mm) {
+    page: thermal;
   }
 }
