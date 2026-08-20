@@ -358,6 +358,22 @@ if [ -n "${DATABASE_URL:-}" ]; then
     fi
   fi
 
+  # ── Categorias de material (v3.57.0) ────────────────────────────
+  #
+  # Mesma lógica do seed de prazos: só CRIA categoria que falta e só
+  # classifica material que está SEM categoria. O que o dono
+  # classificou à mão fica intocado, então roda em todo deploy sem
+  # risco.
+  if [ -f scripts/seed-categorias-materiais.mjs ]; then
+    saida="$(node scripts/seed-categorias-materiais.mjs --aplicar 2>&1 || true)"
+    resumo="$(printf '%s' "$saida" | grep -oE '^✅ .*$' || true)"
+    if [ -n "${resumo:-}" ]; then
+      ok "categorias de material: ${resumo#✅ }"
+    else
+      ok "categorias de material conferidas"
+    fi
+  fi
+
   # ── Carimbo da versão no banco ──────────────────────────────────
   #
   # BUG v3.53.2: isto nunca era feito. `settings.app_version` ficava
