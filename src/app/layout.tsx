@@ -4,8 +4,8 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: {
-    default: "PrintFlow · Gráfica Rápida & Papelaria Personalizada",
-    template: "%s · PrintFlow",
+    default: "VTDIGITAL · Gráfica Rápida & Papelaria Personalizada",
+    template: "%s · VTDIGITAL",
   },
   description:
     "ERP + CRM para gráfica rápida e papelaria personalizada: motor de precificação por impressora, produção, orçamentos, PDV e financeiro.",

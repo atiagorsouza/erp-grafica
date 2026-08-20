@@ -225,8 +225,12 @@ body {
     background: #ffffff !important;
     color: #000000 !important;
     font-family: var(--font-mono), 'IBM Plex Mono', 'Courier New', Courier, monospace !important;
-    font-size: 11px !important;
-    line-height: 1.25 !important;
+    /* Calibrado (v3.59.1) contra o cupom do sistema antigo, medido na
+       foto com a bobina de 80mm como escala: lá o caractere ocupa
+       1,82mm contra 1,74mm nosso, e a entrelinha era 1,28 contra 1,49.
+       O cupom saía menor e mais arejado que o de referência. */
+    font-size: 11.5px !important;
+    line-height: 1.2 !important;
   }
 
   /* 2. IMPRESSÃO A4 (ORDEM DE PRODUÇÃO / PROPOSTA COMERCIAL: #order-print-a4 ou #quote-print-a4) */
@@ -322,8 +326,27 @@ body {
     border-color: #000 !important;
   }
 
+  /* TAMANHO DO PAPEL
+
+     `size: auto` deixava a escolha com a impressora — e o padrão de
+     fábrica de boa parte delas é Carta (216x279mm), não A4 (210x297mm).
+     O documento saía com margem irregular e risco de cortar o rodapé.
+
+     O cupom térmico tem @page próprio logo abaixo: 80mm de largura e
+     altura livre, porque a bobina é contínua e fixar altura força
+     salto de página no meio do cupom. */
   @page {
-    size: auto;
+    size: A4 portrait;
     margin: 10mm;
+  }
+
+  /* Cupom térmico e OS em bobina: 80mm, altura conforme o conteúdo. */
+  @page thermal {
+    size: 80mm auto;
+    margin: 0;
+  }
+
+  body:has(#receipt-print, #order-print-80mm) {
+    page: thermal;
   }
 }

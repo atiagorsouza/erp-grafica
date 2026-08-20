@@ -1,6 +1,15 @@
 import "server-only";
 import { db } from "@/db";
 import { settings } from "@/db/schema";
+import {
+  formatCEP,
+  formatCNPJ,
+  formatCPF,
+  formatPhone,
+  isValidCNPJ,
+  isValidCPF,
+  onlyDigits,
+} from "@/lib/validators";
 
 export interface PricingDefaults {
   taxRate: number; // imposto sobre venda (fração 0-1)
@@ -121,15 +130,39 @@ const DEFAULTS: PricingDefaults = {
  * de dígitos não for de CPF (11) nem de CNPJ (14), devolve o texto
  * original — pode ser inscrição estrangeira ou algo em digitação.
  */
-function formatDocument(raw: string): string {
-  const digits = String(raw || "").replace(/\D/g, "");
-  if (digits.length === 14) {
-    return digits.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, "$1.$2.$3/$4-$5");
-  }
-  if (digits.length === 11) {
-    return digits.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/, "$1.$2.$3-$4");
-  }
-  return String(raw || "");
+/* MÁSCARAS NA SAÍDA (v3.60.0)
+
+   O banco guarda só dígitos; a máscara é aplicada aqui, na leitura.
+   Antes só o CNPJ era formatado — telefone, CEP e IE saíam crus no
+   cupom impresso: "2120383504" em vez de "(21) 2038-3504". Está na
+   foto que o dono mandou em 20/08/2026.
+
+   Aplicar na saída (e não ao gravar) tem duas vantagens: o dado no
+   banco continua comparável (telefone × WhatsApp, busca por CNPJ) e
+   cadastros antigos, salvos com pontuação, são normalizados na hora
+   de exibir — sem precisar migrar nada. */
+function mascarar(raw: string, fn: (v: string) => string): string {
+  const v = String(raw || "").trim();
+  return v ? fn(v) : v;
+}
+
+/* CPF/CNPJ só é mascarado se for VÁLIDO.
+
+   Mascarar às cegas inventa documento: "3189224000154" (13 dígitos —
+   o CNPJ da VTDIGITAL com o zero inicial perdido) virava
+   "31.892.240/0015-4", que não existe e ainda por cima PARECE certo no
+   cupom do cliente. Documento inválido sai como está, sem disfarce,
+   para o erro ficar visível e ser corrigido no Painel. */
+function mascararDocumento(raw: string): string {
+  const v = String(raw || "").trim();
+  if (!v) return v;
+  const d = onlyDigits(v);
+  if (d.length === 11 && isValidCPF(d)) return formatCPF(d);
+  if (d.length === 14 && isValidCNPJ(d)) return formatCNPJ(d);
+  /* 13 dígitos quase sempre é CNPJ que perdeu o zero à esquerda em
+     algum campo numérico. Recuperamos e conferimos. */
+  if (d.length === 13 && isValidCNPJ("0" + d)) return formatCNPJ("0" + d);
+  return v;
 }
 
 let cache: PricingDefaults | null = null;
@@ -158,7 +191,10 @@ export async function getPricingDefaults(): Promise<PricingDefaults> {
       map.get("company_complement"),
       district,
       [city, state].filter(Boolean).join(" / "),
-      cep && `CEP ${cep}`,
+      /* O endereço de uma linha é montado ANTES do bloco que aplica as
+         máscaras, e usava o CEP cru: saía "CEP 21860005" no cabeçalho
+         do orçamento em A4 (foto do dono, 20/08/2026). */
+      cep && `CEP ${formatCEP(cep)}`,
     ]
       .filter(Boolean)
       .join(" — ");
@@ -171,20 +207,23 @@ export async function getPricingDefaults(): Promise<PricingDefaults> {
       company_name: tradeName,
       company_legal_name: legalName,
       company_trade_name: tradeName,
-      company_document: formatDocument(
+      company_document: mascararDocumento(
         map.get("company_cnpj") || map.get("company_document") || DEFAULTS.company_document
       ),
       company_email: map.get("company_email") || DEFAULTS.company_email,
-      company_phone: map.get("company_phone") || DEFAULTS.company_phone,
-      company_phone2: map.get("company_phone2") || map.get("company_whatsapp") || DEFAULTS.company_phone2,
-      company_whatsapp: map.get("company_whatsapp") || DEFAULTS.company_whatsapp,
+      company_phone: mascarar(map.get("company_phone") || DEFAULTS.company_phone, formatPhone),
+      company_phone2: mascarar(
+        map.get("company_phone2") || map.get("company_whatsapp") || DEFAULTS.company_phone2,
+        formatPhone
+      ),
+      company_whatsapp: mascarar(map.get("company_whatsapp") || DEFAULTS.company_whatsapp, formatPhone),
       company_address: structuredAddress || map.get("company_address") || DEFAULTS.company_address,
       company_street: streetFull,
       company_number: number,
       company_district: district,
       company_city: city,
       company_state: state,
-      company_cep: cep,
+      company_cep: mascarar(cep, formatCEP),
       company_website: map.get("company_website") || DEFAULTS.company_website,
       pix_key: map.get("pix_key") || DEFAULTS.pix_key,
       fiscal_environment: map.get("fiscal_environment") || DEFAULTS.fiscal_environment,
@@ -205,7 +244,13 @@ export async function getPricingDefaults(): Promise<PricingDefaults> {
           ? raw
           : DEFAULTS.pdv_receipt_boldness;
       })(),
-      company_ie: map.get("company_ie") || DEFAULTS.company_ie,
+      /* IE fica como foi digitada.
+
+         `formatStateRegistration` descarta tudo que não é dígito — e há
+         IE com letras (e o próprio "ISENTO"). Como o formato varia por
+         estado e não existe máscara única, aqui o valor sai como está;
+         a limpeza acontece só na tela, ao digitar. */
+      company_ie: (map.get("company_ie") || DEFAULTS.company_ie).trim(),
       company_im: map.get("company_im") || DEFAULTS.company_im,
       company_tax_regime: map.get("company_tax_regime") || DEFAULTS.company_tax_regime,
       company_cnae: map.get("company_cnae") || DEFAULTS.company_cnae,

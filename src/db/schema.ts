@@ -11,6 +11,9 @@ import {
   date,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
+/* Tipo só para a auto-referência de item_categories.parent_id: sem
+   ele o TypeScript entra em recursão infinita ao inferir a tabela. */
+import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
 /* ------------------------------------------------------------------ */
@@ -73,6 +76,24 @@ export const itemCategories = pgTable("item_categories", {
   icon: text("icon").default("📁"),
   color: text("color").default("#06b6d4"),
   order: integer("order").default(0),
+  /* ── Dois níveis (v3.58.0) ──────────────────────────────────────
+     A tabela era plana. O dono desenhou a estrutura dele em Mestre →
+     Subcategoria ("Gráfica Rápida" → "Serviços de Balcão"), que é
+     como ele pensa o negócio — e como o cliente pergunta.
+
+     `parentId` nulo = categoria mestre. Preenchido = subcategoria.
+
+     Só DOIS níveis, de propósito: com três, ninguém acha nada e a
+     tela vira árvore de explorador de arquivos. Se um dia precisar
+     de mais profundidade, o certo é rever o desenho, não empilhar.
+
+     ON DELETE SET NULL: apagar a mestre não apaga as filhas — elas
+     sobem para a raiz e ficam visíveis para serem reorganizadas.
+     Perder categoria em cascata seria perder o trabalho de
+     classificar. */
+  parentId: integer("parent_id").references((): AnyPgColumn => itemCategories.id, {
+    onDelete: "set null",
+  }),
   createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
 });
 

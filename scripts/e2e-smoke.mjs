@@ -1485,6 +1485,145 @@ async function main() {
       `nenhum script instala com --omit=dev antes do build${ruins.length ? " — " + ruins[0] : ""}`);
   }
 
+  // 11.95) As rotas que dependem de tabela nova respondem (v3.55.2)
+  //
+  // Em 19/08 o /api/campanhas devolveu 500 em produção porque as
+  // tabelas nunca foram criadas — o drizzle-kit push não concluiu sem
+  // TTY e o deploy seguiu mesmo assim. Um 500 aqui é mais barato que
+  // um 500 na frente do cliente.
+  {
+    for (const rota of ["/api/campanhas", "/api/whatsapp-chat", "/api/campanhas?audiencia=1"]) {
+      const r = await fetch(`${BASE_URL}${rota}`);
+      assert(r.status === 200, `${rota} responde 200 (schema completo)`);
+    }
+  }
+
+  // 11.96) A tela de WhatsApp monta as 4 abas (v3.56.0)
+  //
+  // As abas montam TODOS os painéis de uma vez (escondidos por CSS)
+  // para o polling do chat continuar rodando. Se um deles quebrar no
+  // servidor, a página inteira cai — então vale conferir que os
+  // quatro chegam ao HTML.
+  {
+    const html = await (await fetch(`${BASE_URL}/whatsapp`)).text();
+    for (const aba of ["Conversas", "Campanhas", "Mensagens", "Conexão"]) {
+      assert(html.includes(aba), `aba "${aba}" presente em /whatsapp`);
+    }
+    // O cabeçalho vive na página; duplicá-lo seria regressão.
+    const vezes = (html.match(/Conexão, pré-cadastro automático/g) || []).length;
+    assert(vezes <= 1, "cabeçalho do WhatsApp não aparece duplicado");
+  }
+
+  // 11.97) Árvore de categorias de produto (v3.58.0)
+  //
+  // As categorias viraram Mestre → Subcategoria. Duas coisas podem
+  // quebrar em silêncio: uma subcategoria perder o pai (vira órfã
+  // solta na lista) e um produto ficar pendurado direto na mestre
+  // (some dos filtros por subcategoria).
+  {
+    const r = await pool.query(`
+      SELECT
+        (SELECT count(*) FROM item_categories
+          WHERE module='product' AND parent_id IS NULL)::int mestres,
+        (SELECT count(*) FROM item_categories
+          WHERE module='product' AND parent_id IS NOT NULL)::int subs,
+        (SELECT count(*) FROM item_categories f
+          WHERE f.module='product' AND f.parent_id IS NOT NULL
+            AND NOT EXISTS (SELECT 1 FROM item_categories m WHERE m.id = f.parent_id))::int orfas,
+        (SELECT count(*) FROM item_categories a
+          JOIN item_categories b ON a.parent_id = b.id
+         WHERE b.parent_id IS NOT NULL)::int netos
+    `);
+    const t = r.rows[0];
+    assert(t.mestres >= 1, `árvore de produtos tem ${t.mestres} categoria(s) mestre`);
+    assert(t.subs >= 1, `árvore de produtos tem ${t.subs} subcategoria(s)`);
+    assert(t.orfas === 0, "nenhuma subcategoria apontando para pai inexistente");
+    // Só dois níveis: neto significa que alguém aninhou demais.
+    assert(t.netos === 0, "árvore tem no máximo dois níveis (sem netos)");
+  }
+
+  // 11.98) Proxy do WhatsApp respeita o método (v3.58.1)
+  //
+  // O dono viu "rota não encontrada" ao desligar o bot. Causa: o
+  // proxy repassava GET para /pausar (que só existe como POST) e o
+  // serviço devolvia 404. O Next pré-busca com GET, então o toast
+  // vermelho aparecia sozinho, sem clique.
+  {
+    for (const rota of ["pausar", "retomar", "ausencia"]) {
+      const r = await fetch(`${BASE_URL}/api/whatsapp/${rota}`);
+      assert(r.status === 405, `GET /api/whatsapp/${rota} devolve 405, não 404`);
+    }
+    // Rota inexistente continua 404 — 405 seria mentira.
+    const inv = await fetch(`${BASE_URL}/api/whatsapp/nao-existe`);
+    assert(inv.status === 404, "rota inexistente ainda devolve 404");
+  }
+
+  // 11.99) Travas de edição de categorias (v3.58.1)
+  //
+  // As categorias passaram a ser editáveis pela tela. Sem trava, é
+  // fácil apagar uma categoria cheia de produtos ou criar um terceiro
+  // nível que a interface não sabe desenhar.
+  {
+    /* fetch direto, não `req`: aqui os status 422 e 409 são o
+       RESULTADO esperado, e `req` trata não-2xx como exceção. */
+    const cat = async (op, data, id) => {
+      const r = await fetch(`${BASE_URL}/api/crud/item-categories`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ op, id, data }),
+      });
+      return { status: r.status, body: await r.json().catch(() => ({})) };
+    };
+
+    const mestre = await cat("create", {
+      module: "material", name: `SMOKE Mestre ${stamp}`, icon: "🧪", order: 990,
+    });
+    const idM = mestre.body?.row?.id;
+    assert(!!idM, "cria categoria mestre");
+
+    const filha = await cat("create", {
+      module: "material", name: `SMOKE Filha ${stamp}`, parentId: idM, order: 1,
+    });
+    const idF = filha.body?.row?.id;
+    assert(!!idF, "cria subcategoria");
+
+    const neto = await cat("create", {
+      module: "material", name: `SMOKE Neto ${stamp}`, parentId: idF,
+    });
+    assert(neto.status === 422, "recusa criar terceiro nível (neto)");
+
+    const loop = await cat("update", { name: `SMOKE Mestre ${stamp}`, parentId: idM }, idM);
+    assert(loop.status === 422, "recusa categoria ser pai de si mesma");
+
+    const comFilha = await cat("delete", {}, idM);
+    assert(comFilha.status === 409, "recusa apagar mestre que tem subcategoria");
+
+    await cat("delete", {}, idF);
+    await cat("delete", {}, idM);
+  }
+
+  // 11.995) Marca VTDIGITAL (v3.59.0)
+  //
+  // A troca de nome e logo é fácil de desfazer sem querer: um
+  // `git revert` distraído, um merge, um seed antigo. E as logos não
+  // podem voltar a trafegar inteiras no HTML — foi o que travou a
+  // tela de configurações na 3.53.1.
+  {
+    const home = await (await fetch(`${BASE_URL}/`)).text();
+    assert(home.includes("VTDIGITAL"), "a marca VTDIGITAL aparece na tela");
+    assert(!home.includes("PrintFlow"), "o nome antigo não aparece mais");
+
+    for (const k of ["company_logo", "company_logo_dark", "company_logo_icon"]) {
+      const r = await fetch(`${BASE_URL}/api/upload/logo?key=${k}`);
+      assert(r.status === 200, `logo ${k} é servida pela rota de imagem`);
+    }
+
+    const cfg = await (await fetch(`${BASE_URL}/configuracoes`)).text();
+    assert(!cfg.includes("base64"), "nenhuma logo trafega embutida no HTML");
+    const kb = Math.round(cfg.length / 1024);
+    assert(kb < 900, `/configuracoes continua leve (${kb} KB)`);
+  }
+
   // 12) Páginas principais respondem
   for (const path of ["/clientes", "/orcamentos", "/pedidos", "/kanban", "/estoque", "/relatorios", "/financeiro", "/envios", "/cobrancas"]) {
     const res = await fetch(`${BASE_URL}${path}`);
@@ -1494,6 +1633,34 @@ async function main() {
   // 13) Período nos relatórios
   const emptyPeriod = await fetch(`${BASE_URL}/relatorios?from=2019-01-01&to=2019-01-31`);
   assert(emptyPeriod.ok, "relatórios respondem com período personalizado");
+
+  /* ── Faxina (v3.57.0) ────────────────────────────────────────
+     O smoke cria material, produto e cliente a cada execução e nunca
+     apagava. Como o deploy roda o smoke em produção (passo 9/9), isso
+     acumulava: encontrei 10 "E2E Papel", 10 "E2E Produto" e 110
+     movimentos de estoque órfãos no banco do dono.
+
+     Teste que suja o banco de quem trabalha nele é teste mal
+     escrito. Limpa o que criou, na ordem das dependências.
+
+     Fora do assert de propósito: falha de limpeza não pode reprovar
+     um deploy que passou em tudo. Avisa e segue. */
+  try {
+    const r = await pool.query(
+      `DELETE FROM stock_movements
+        WHERE material_id IN (SELECT id FROM materials WHERE name LIKE 'E2E %')`
+    );
+    await pool.query(
+      `DELETE FROM product_materials
+        WHERE product_id IN (SELECT id FROM products WHERE name LIKE 'E2E %')`
+    );
+    const p = await pool.query(`DELETE FROM products  WHERE name LIKE 'E2E %'`);
+    const m = await pool.query(`DELETE FROM materials WHERE name LIKE 'E2E %'`);
+    const total = (p.rowCount || 0) + (m.rowCount || 0);
+    if (total) console.log(`🧹 limpeza: ${total} registro(s) e ${r.rowCount || 0} movimento(s) de teste removidos`);
+  } catch (e) {
+    console.warn("⚠ não consegui limpar os dados de teste:", e.message);
+  }
 
   console.log("🎉 E2E smoke concluído com sucesso");
 }

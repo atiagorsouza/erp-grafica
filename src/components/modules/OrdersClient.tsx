@@ -24,7 +24,7 @@ import { Icon } from "@/components/icons";
 import { cn } from "@/lib/format";
 import { applyDiscount, formatBRL, round2, toNumber, toPositive } from "@/lib/money";
 import { todayISO } from "@/lib/period";
-import { isWhatsAppBlocked, whatsappNumber } from "@/lib/validators";
+import { formatCEP, formatDocumentAuto, formatPhone, isWhatsAppBlocked, whatsappNumber } from "@/lib/validators";
 
 import type { CompanyIdentity } from "@/lib/company";
 export type PosCompany = CompanyIdentity;
@@ -1455,7 +1455,7 @@ function ProductionOrderA4({
       <div className="flex items-start justify-between border-b border-paper-300 pb-4">
         <div>
           <h1 className="text-[22px] font-extrabold text-ink-950 tracking-tight leading-none">
-            {company.name || "PrintFlow Gráfica Criativa"}
+            {company.name || "VTDIGITAL ART STUDIO"}
           </h1>
           <p className="text-[11px] font-semibold text-proc-c tracking-wider uppercase mt-1">
             GRÁFICA RÁPIDA E PERSONALIZADOS
@@ -1549,7 +1549,7 @@ function ProductionOrderA4({
                   customer.district,
                   customer.city,
                   customer.state,
-                  customer.cep ? `CEP ${customer.cep}` : null,
+                  customer.cep ? `CEP ${formatCEP(customer.cep)}` : null,
                 ]
                   .filter(Boolean)
                   .join(", ")
@@ -1754,9 +1754,9 @@ function ThermalOrderReceipt({
           <div className="font-bold uppercase">CLIENTE: {customer.name}</div>
           {/* documento e contato PJ: a via de produção também serve de
               comprovante de entrega (v3.23.0) */}
-          {customer.document ? <div>CPF/CNPJ: {String(customer.document)}</div> : null}
+          {customer.document ? <div>CPF/CNPJ: {formatDocumentAuto(String(customer.document))}</div> : null}
           {customer.contactName ? <div className="uppercase">A/C: {String(customer.contactName)}</div> : null}
-          {customer.phone && <div>TEL: {customer.phone}</div>}
+          {customer.phone && <div>TEL: {formatPhone(customer.phone)}</div>}
           <div className="my-1.5 border-b border-dashed border-black" />
         </>
       )}

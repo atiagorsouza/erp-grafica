@@ -1,5 +1,5 @@
 {
-  "version": "3.27.0",
+  "version": "3.60.0",
   "groups": [
     {
       "id": "empresa",
@@ -22,6 +22,20 @@
           "key": "company_cnpj",
           "label": "CNPJ",
           "mono": true,
+          "defaultValue": "",
+          "mask": "documento"
+        },
+        {
+          "key": "company_ie",
+          "label": "Inscrição estadual",
+          "mono": true,
+          "hint": "ou ISENTO",
+          "defaultValue": ""
+        },
+        {
+          "key": "company_im",
+          "label": "Inscrição municipal",
+          "mono": true,
           "defaultValue": ""
         },
         {
@@ -33,19 +47,22 @@
           "key": "company_phone",
           "label": "Telefone 1",
           "mono": true,
-          "defaultValue": "(21) 3000-0000"
+          "defaultValue": "(21) 3000-0000",
+          "mask": "telefone"
         },
         {
           "key": "company_phone2",
           "label": "Telefone 2",
           "mono": true,
-          "defaultValue": ""
+          "defaultValue": "",
+          "mask": "telefone"
         },
         {
           "key": "company_whatsapp",
           "label": "WhatsApp",
           "mono": true,
-          "defaultValue": ""
+          "defaultValue": "",
+          "mask": "telefone"
         },
         {
           "key": "company_website",
@@ -56,7 +73,17 @@
           "key": "pix_key",
           "label": "Chave PIX",
           "span2": true,
-          "defaultValue": "contato@graficavtdigital.com.br"
+          "defaultValue": "contato@graficavtdigital.com.br",
+          "mask": "pix"
+        },
+        {
+          "key": "company_cep",
+          "label": "CEP",
+          "mono": true,
+          "defaultValue": "",
+          "mask": "cep",
+          "autofill": "endereco",
+          "hint": "Digite o CEP e o endereço se preenche sozinho"
         },
         {
           "key": "company_street",
@@ -67,6 +94,11 @@
           "key": "company_number",
           "label": "Número",
           "mono": true,
+          "defaultValue": ""
+        },
+        {
+          "key": "company_complement",
+          "label": "Complemento do endereço",
           "defaultValue": ""
         },
         {
@@ -82,25 +114,6 @@
         {
           "key": "company_state",
           "label": "UF",
-          "mono": true,
-          "defaultValue": ""
-        },
-        {
-          "key": "company_cep",
-          "label": "CEP",
-          "mono": true,
-          "defaultValue": ""
-        },
-        {
-          "key": "company_ie",
-          "label": "Inscrição estadual",
-          "mono": true,
-          "hint": "ou ISENTO",
-          "defaultValue": ""
-        },
-        {
-          "key": "company_im",
-          "label": "Inscrição municipal",
           "mono": true,
           "defaultValue": ""
         },
@@ -140,11 +153,6 @@
           "label": "Código IBGE do município",
           "mono": true,
           "hint": "7 dígitos — exigido na NF-e",
-          "defaultValue": ""
-        },
-        {
-          "key": "company_complement",
-          "label": "Complemento do endereço",
           "defaultValue": ""
         },
         {
@@ -1001,8 +1009,8 @@
           "label": "Taxa InfinitePay — Crédito parcelado",
           "type": "number",
           "suffix": "%",
-          "hint": "Aplicada quando o cliente parcela em 2x ou mais.",
-          "defaultValue": "5.99"
+          "hint": "Aplicada quando o cliente parcela em 2x ou mais. ATENÇÃO: a taxa SOBE com o número de parcelas (3x ≈ 6,12% · 6x ≈ 8,8% · 12x ≈ 12,40%). Como aqui cabe um número só, use o parcelamento que você mais vende — se aceita 12x, deixar 5,99% subestima o custo em mais de 6 pontos.",
+          "defaultValue": "6.12"
         },
         {
           "key": "infinitepay_fee_mode",

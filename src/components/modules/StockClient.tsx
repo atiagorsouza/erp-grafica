@@ -26,6 +26,7 @@ import {
   toast,
 } from "@/components/ui";
 import { Icon } from "@/components/icons";
+import { CategoriasManager } from "@/components/modules/CategoriasManager";
 import { cn } from "@/lib/format";
 
  
@@ -40,7 +41,7 @@ export function StockClient({ materials, suppliers, purchases, materialCats, mov
 }) {
   const router = useRouter();
   const refresh = () => router.refresh();
-  const [tab, setTab] = useState<"materiais" | "movimentos" | "fornecedores" | "compras">("materiais");
+  const [tab, setTab] = useState<"materiais" | "movimentos" | "fornecedores" | "compras" | "categorias">("materiais");
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState<Record<string, string>>({});
   const [matModal, setMatModal] = useState<null | { edit?: Row }>(null);
@@ -55,6 +56,35 @@ export function StockClient({ materials, suppliers, purchases, materialCats, mov
 
   const lowCount = materials.filter((m) => Number(m.stock) <= Number(m.minStock || 0)).length;
   const shown = materials.filter((m) => !onlyLow || Number(m.stock) <= Number(m.minStock || 0));
+
+  /* ── Agrupamento por categoria (v3.57.0) ──────────────────────
+     A lista era plana, com a categoria só numa coluna. Com papelaria,
+     gráfica rápida, brindes e 3D no mesmo lugar, isso vira uma
+     mistura de papel, copo e filamento em ordem alfabética.
+
+     Agrupado, cada bloco responde a uma pergunta prática: "tenho
+     filamento?" é uma olhada, não uma varredura.
+
+     A ordem dos blocos é a de `item_categories.order` — pensada por
+     frequência de uso, não alfabética. O que mais sai fica em cima.
+     "Sem categoria" vai por último, funcionando como lista de
+     pendências: material que aparece ali é material a classificar. */
+  const grupos = (() => {
+    const porId = new Map<string, { cat: Record<string, unknown> | undefined; itens: typeof shown }>();
+    for (const m of shown) {
+      const chave = m.categoryId == null ? "" : String(m.categoryId);
+      if (!porId.has(chave)) porId.set(chave, { cat: catName(m.categoryId), itens: [] });
+      porId.get(chave)!.itens.push(m);
+    }
+    return [...porId.values()].sort((a, b) => {
+      if (!a.cat) return 1;              // sem categoria por último
+      if (!b.cat) return -1;
+      const oa = Number(a.cat.order ?? 999);
+      const ob = Number(b.cat.order ?? 999);
+      if (oa !== ob) return oa - ob;
+      return String(a.cat.name).localeCompare(String(b.cat.name), "pt-BR");
+    });
+  })();
   const matName = (id: unknown) => materials.find((m) => Number(m.id) === Number(id))?.name;
   const supName = (id: unknown) => suppliers.find((s) => Number(s.id) === Number(id))?.name;
 
@@ -215,6 +245,7 @@ export function StockClient({ materials, suppliers, purchases, materialCats, mov
             { value: "movimentos", label: "Movimentações", count: movements.length },
             { value: "fornecedores", label: "Fornecedores", count: suppliers.length },
             { value: "compras", label: "Compras", count: purchases.length },
+            { value: "categorias", label: "Categorias", count: materialCats.length },
           ]}
         />
         {tab === "materiais" && (
@@ -230,11 +261,43 @@ export function StockClient({ materials, suppliers, purchases, materialCats, mov
         shown.length === 0 ? (
           <EmptyState icon="boxes" title="Nenhum material" hint="Cadastre papéis, tintas, etiquetas e insumos com estoque mínimo." />
         ) : (
-          <TableWrap className="reveal reveal-1">
+          <div className="space-y-5">
+          {grupos.map((g) => {
+            const criticos = g.itens.filter(
+              (x) => Number(x.stock) <= Number(x.minStock || 0)
+            ).length;
+            const cor = g.cat ? String(g.cat.color) : "#94a3b8";
+            return (
+            <div key={g.cat ? String(g.cat.id) : "sem"} className="reveal reveal-1">
+              {/* Cabeçalho do bloco: nome, quantos itens e quantos
+                  críticos. O número de críticos ao lado do título
+                  evita ter que percorrer o bloco para saber se há
+                  algo faltando ali. */}
+              <div className="mb-1.5 flex flex-wrap items-center gap-2 px-0.5">
+                <span className="h-2.5 w-2.5 rounded-[3px]" style={{ background: cor }} />
+                <h3 className="text-[13px] font-bold text-ink-900">
+                  {g.cat?.icon ? `${String(g.cat.icon)} ` : ""}
+                  {g.cat ? String(g.cat.name) : "Sem categoria"}
+                </h3>
+                <span className="font-mono text-[11px] text-ink-400 tnum">
+                  {g.itens.length} {g.itens.length === 1 ? "item" : "itens"}
+                </span>
+                {criticos > 0 && (
+                  <span className="rounded-full bg-red-50 px-2 py-0.5 font-mono text-[10px] font-bold text-red-700 tnum">
+                    {criticos} em falta
+                  </span>
+                )}
+                {!g.cat && (
+                  <span className="text-[11px] text-ink-400">
+                    — abra o material e escolha uma categoria
+                  </span>
+                )}
+              </div>
+
+            <TableWrap>
             <thead>
               <tr>
                 <Th>Material</Th>
-                <Th>Categoria</Th>
                 <Th right>Custo unit.</Th>
                 <Th>Nível de estoque</Th>
                 <Th right>Atual / Mín</Th>
@@ -242,25 +305,16 @@ export function StockClient({ materials, suppliers, purchases, materialCats, mov
               </tr>
             </thead>
             <tbody>
-              {shown.map((m) => {
+              {g.itens.map((m) => {
                 const stock = Number(m.stock || 0);
                 const min = Number(m.minStock || 0);
                 const low = stock <= min;
                 const pct = min > 0 ? (stock / (min * 2.5)) * 100 : stock > 0 ? 100 : 0;
-                const cat = catName(m.categoryId);
                 return (
                   <Tr key={String(m.id)}>
                     <Td>
                       <p className="font-semibold text-ink-900">{String(m.name)}</p>
                       <p className="font-mono text-[10.5px] text-ink-400">{m.supplier || "—"}</p>
-                    </Td>
-                    <Td>
-                      {cat ? (
-                        <span className="flex items-center gap-1.5 text-[12px]">
-                          <span className="h-2 w-2 rounded-[2px]" style={{ background: String(cat.color) }} />
-                          {String(cat.name)}
-                        </span>
-                      ) : "—"}
                     </Td>
                     <Td right mono>
                       {formatMoney(Number(m.unitCost || 0))}<span className="text-[10px] text-ink-400">/{String(m.unit || "un")}</span>
@@ -295,8 +349,26 @@ export function StockClient({ materials, suppliers, purchases, materialCats, mov
                 );
               })}
             </tbody>
-          </TableWrap>
+            </TableWrap>
+            </div>
+            );
+          })}
+          </div>
         )
+      )}
+
+      {/* ── CATEGORIAS ── */}
+      {tab === "categorias" && (
+        <CategoriasManager
+          categorias={materialCats}
+          module="material"
+          titulo="Categorias de material"
+          contagem={materials.reduce<Record<string, number>>((acc, m) => {
+            const k = String(m.categoryId ?? "");
+            if (k) acc[k] = (acc[k] || 0) + 1;
+            return acc;
+          }, {})}
+        />
       )}
 
       {/* ── MOVIMENTOS ── */}

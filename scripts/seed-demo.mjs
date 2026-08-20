@@ -236,6 +236,20 @@ async function aplicar() {
   }
 
   /* ── Produtos ── */
+  /* Os produtos referenciam tabela de preço por ID. Os IDs eram
+     FIXOS (1, 7, 8, 9...), o que só funciona na primeiríssima carga:
+     se as tabelas forem recriadas, a sequência avança e o seed quebra
+     com "violates foreign key constraint".
+
+     Aconteceu aqui em 20/08/2026. Agora resolve por LABEL, que é
+     estável, e ignora o vínculo se a tabela não existir. */
+  const tabelasPorPosicao = (await q(`SELECT id, label FROM pricing_tables ORDER BY id`)).rows;
+  const idDaTabela = (pos) => {
+    if (!pos) return null;
+    const t = tabelasPorPosicao[Number(pos) - 1];
+    return t ? t.id : null;
+  };
+
   const prodId = new Map();
   for (const p of PRODUTOS) {
     const r = await um(
@@ -247,7 +261,7 @@ async function aplicar() {
        VALUES ($1,$2,$3,$4,$5,'unit',1,0.4,$6,$7,$7,true,false,$8,$9,$10,$11)
        RETURNING id`,
       [p.n, p.sku, `${TAG} ${p.un}`, catId.get(`product:${p.cat}`) ?? null,
-       p.pt ?? null, p.custo, p.preco, p.c, p.p, p.a, !!p.serie]
+       idDaTabela(p.pt), p.custo, p.preco, p.c, p.p, p.a, !!p.serie]
     );
     prodId.set(p.sku, { id: r.id, ...p });
     criados.produtos++;

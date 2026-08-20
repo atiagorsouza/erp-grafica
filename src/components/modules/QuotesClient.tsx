@@ -25,6 +25,7 @@ import {
 } from "@/components/ui";
 import { Icon } from "@/components/icons";
 import { cn } from "@/lib/format";
+import { formatCEP, formatDocumentAuto, formatPhone } from "@/lib/validators";
 import { applyDiscount, formatBRL, round2, toNumber, toPositive } from "@/lib/money";
 
 import type { CompanyIdentity } from "@/lib/company";
@@ -1024,7 +1025,7 @@ function CommercialProposalA4({
       <div className="flex items-start justify-between border-b border-paper-300 pb-4">
         <div>
           <h1 className="text-[22px] font-extrabold text-ink-950 tracking-tight leading-none">
-            {company.name || "PrintFlow Gráfica Criativa"}
+            {company.name || "VTDIGITAL ART STUDIO"}
           </h1>
           <p className="text-[11px] font-semibold text-proc-c tracking-wider uppercase mt-1">
             GRÁFICA RÁPIDA E PERSONALIZADOS
@@ -1074,11 +1075,17 @@ function CommercialProposalA4({
           </div>
           <div>
             <span className="block font-mono text-[9px] text-ink-400 uppercase">CPF/CNPJ</span>
-            <span className="font-mono">{customer?.document || "—"}</span>
+            <span className="font-mono">
+              {customer?.document ? formatDocumentAuto(String(customer.document)) : "—"}
+            </span>
           </div>
           <div>
             <span className="block font-mono text-[9px] text-ink-400 uppercase">CONTATO</span>
-            <span>{customer?.phone || customer?.whatsapp || "—"}</span>
+            <span>
+              {customer?.phone || customer?.whatsapp
+                ? formatPhone(String(customer.phone || customer.whatsapp))
+                : "—"}
+            </span>
           </div>
           <div>
             <span className="block font-mono text-[9px] text-ink-400 uppercase">E-MAIL</span>
@@ -1120,7 +1127,7 @@ function CommercialProposalA4({
                 customer?.district,
                 customer?.city,
                 customer?.state,
-                customer?.cep ? `CEP ${customer.cep}` : null,
+                customer?.cep ? `CEP ${formatCEP(customer.cep)}` : null,
               ]
                 .filter(Boolean)
                 .join(", ")}

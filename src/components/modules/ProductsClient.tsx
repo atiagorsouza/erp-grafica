@@ -36,6 +36,7 @@ import {
   toast,
 } from "@/components/ui";
 import { Icon } from "@/components/icons";
+import { CategoriasManager } from "@/components/modules/CategoriasManager";
 import { cn } from "@/lib/format";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -337,11 +338,45 @@ export function ProductsClient({
 
   const filtered = products.filter((p) => {
     const matchQ = !q || String(p.name).toLowerCase().includes(q.toLowerCase()) || String(p.sku || "").toLowerCase().includes(q.toLowerCase());
-    const matchC = catFilter === "all" || String(p.productCategoryId) === catFilter;
+    /* Filtrar por uma mestre traz tudo que está abaixo dela — é o que
+       o operador espera ao escolher "Brindes & Estamparia". */
+    const filhosDoFiltro = productCats
+      .filter((c) => String(c.parentId) === catFilter)
+      .map((c) => String(c.id));
+    const matchC =
+      catFilter === "all" ||
+      String(p.productCategoryId) === catFilter ||
+      filhosDoFiltro.includes(String(p.productCategoryId));
     return matchQ && matchC;
   });
 
   const catName = (id: unknown) => productCats.find((c) => Number(c.id) === Number(id))?.name;
+  const [gerirCats, setGerirCats] = useState(false);
+
+  /* ── Árvore de duas camadas (v3.58.0) ─────────────────────────
+     As categorias viraram Mestre → Subcategoria. Os selects listavam
+     tudo achatado, então "Impressos Comerciais" aparecia solto, sem
+     dizer que é de "Gráfica Rápida".
+
+     `<optgroup>` resolve com HTML puro: agrupa visualmente e o
+     usuário não pode escolher o grupo por engano. */
+  const arvoreCats = (() => {
+    const mestres = productCats
+      .filter((c) => c.parentId == null)
+      .sort((a, b) => Number(a.order ?? 0) - Number(b.order ?? 0));
+    return mestres.map((m) => ({
+      mestre: m,
+      filhos: productCats
+        .filter((c) => Number(c.parentId) === Number(m.id))
+        .sort((a, b) => Number(a.order ?? 0) - Number(b.order ?? 0)),
+    }));
+  })();
+
+  /* Categorias sem pai e sem filhos: sobrou de alguma classificação
+     antiga. Aparecem no fim para serem reorganizadas, não somem. */
+  const catsSoltas = productCats.filter(
+    (c) => c.parentId == null && !productCats.some((f) => Number(f.parentId) === Number(c.id))
+  );
 
   return (
     <div>
@@ -361,16 +396,54 @@ export function ProductsClient({
         </div>
         <Select value={catFilter} onChange={(e) => setCatFilter(e.target.value)} className="w-auto">
           <option value="all">Todas as categorias</option>
-          {productCats.map((c) => (
-            <option key={String(c.id)} value={String(c.id)}>
-              {String(c.icon)} {String(c.name)}
-            </option>
+          {arvoreCats.map(({ mestre, filhos }) => (
+            <optgroup key={String(mestre.id)} label={`${String(mestre.icon)} ${String(mestre.name)}`}>
+              {/* A própria mestre é selecionável: pega ela e os filhos. */}
+              <option value={String(mestre.id)}>Todos de {String(mestre.name)}</option>
+              {filhos.map((c) => (
+                <option key={String(c.id)} value={String(c.id)}>
+                  {String(c.icon)} {String(c.name)}
+                </option>
+              ))}
+            </optgroup>
           ))}
+          {catsSoltas.length > 0 && (
+            <optgroup label="Sem grupo">
+              {catsSoltas.map((c) => (
+                <option key={String(c.id)} value={String(c.id)}>
+                  {String(c.icon)} {String(c.name)}
+                </option>
+              ))}
+            </optgroup>
+          )}
         </Select>
         <span className="ml-auto font-mono text-[11px] text-ink-400 tnum">
           {filtered.length} de {products.length} produtos
         </span>
+        {/* Gerir categorias é tarefa rara: fica atrás de um botão, não
+            ocupando espaço permanente. */}
+        <Button
+          size="sm"
+          variant="ghost"
+          icon={gerirCats ? "x" : "gear"}
+          onClick={() => setGerirCats((v) => !v)}
+        >
+          Categorias
+        </Button>
       </div>
+
+      {gerirCats && (
+        <CategoriasManager
+          categorias={productCats}
+          module="product"
+          titulo="Categorias de produto"
+          contagem={products.reduce<Record<string, number>>((acc, p) => {
+            const k = String(p.productCategoryId ?? "");
+            if (k) acc[k] = (acc[k] || 0) + 1;
+            return acc;
+          }, {})}
+        />
+      )}
 
       {filtered.length === 0 ? (
         <EmptyState
@@ -481,7 +554,20 @@ export function ProductsClient({
               <Field label="Categoria comercial">
                 <Select value={form.productCategoryId || ""} onChange={set("productCategoryId")}>
                   <option value="">Sem categoria</option>
-                  {productCats.map((c) => (
+                  {/* No cadastro só a subcategoria é escolhível: um
+                      produto pertence à folha, não ao galho. Se
+                      pudesse ficar na mestre, metade acabaria solta
+                      em "Brindes & Estamparia" sem dizer qual. */}
+                  {arvoreCats.map(({ mestre, filhos }) => (
+                    <optgroup key={String(mestre.id)} label={`${String(mestre.icon)} ${String(mestre.name)}`}>
+                      {filhos.map((c) => (
+                        <option key={String(c.id)} value={String(c.id)}>
+                          {String(c.icon)} {String(c.name)}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ))}
+                  {catsSoltas.map((c) => (
                     <option key={String(c.id)} value={String(c.id)}>
                       {String(c.icon)} {String(c.name)}
                     </option>

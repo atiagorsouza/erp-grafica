@@ -15,12 +15,33 @@ export const dynamic = "force-dynamic";
 const BASE = process.env.WA_SERVICE_URL || "http://127.0.0.1:3101";
 const TOKEN = process.env.WA_TOKEN || "";
 
-const PERMITIDAS = new Set([
-  "status", "qr", "eventos", "enviar", "assumir", "devolver",
-  "reiniciar", "desconectar", "saude",
+/* Cada rota com os métodos que o SERVIÇO realmente trata.
+
+   Antes era um Set de nomes e o proxy repassava GET e POST para
+   qualquer um deles. O serviço, que só tem POST em /pausar, respondia
+   "rota não encontrada" — e o usuário via esse toast vermelho ao
+   desligar o bot, mesmo com a ação funcionando.
+
+   A causa: o Next pré-busca rotas com GET. Bastava a tela tocar em
+   /pausar fora de um clique para o erro aparecer do nada.
+
+   Agora o proxy sabe o método certo e recusa antes de incomodar o
+   serviço — com uma mensagem que diz o que houve. */
+const PERMITIDAS: Record<string, ("GET" | "POST")[]> = {
+  status:      ["GET"],
+  qr:          ["GET"],
+  eventos:     ["GET"],
+  saude:       ["GET"],
+  enviar:      ["POST"],
+  assumir:     ["POST"],
+  devolver:    ["POST"],
+  reiniciar:   ["POST"],
+  desconectar: ["POST"],
   /* v3.53.0 — desligar o bot sem derrubar a sessão do WhatsApp. */
-  "pausar", "retomar", "ausencia",
-]);
+  pausar:      ["POST"],
+  retomar:     ["POST"],
+  ausencia:    ["POST"],
+};
 
 function cabecalhos(extra: Record<string, string> = {}) {
   const h: Record<string, string> = { ...extra };
@@ -30,8 +51,18 @@ function cabecalhos(extra: Record<string, string> = {}) {
 
 async function repassar(req: NextRequest, rota: string[]) {
   const caminho = rota.join("/");
-  if (!PERMITIDAS.has(rota[0])) {
+  const metodos = PERMITIDAS[rota[0]];
+  if (!metodos) {
     return Response.json({ erro: "rota não permitida" }, { status: 404 });
+  }
+  if (!metodos.includes(req.method as "GET" | "POST")) {
+    /* 405 e não 404: a rota existe, o método é que está errado. E o
+       Next pré-busca com GET — devolver 404 aqui vira toast de erro
+       na cara do usuário sem que ele tenha feito nada. */
+    return Response.json(
+      { erro: `${rota[0]} aceita apenas ${metodos.join(", ")}` },
+      { status: 405, headers: { Allow: metodos.join(", ") } }
+    );
   }
 
   const alvo = `${BASE}/${caminho}`;

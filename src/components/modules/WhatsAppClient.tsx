@@ -42,7 +42,10 @@ const ROTULO: Record<Estado["status"], { texto: string; tone: "green" | "amber" 
   banido:       { texto: "Bloqueado",     tone: "red" },
 };
 
-export function WhatsAppClient() {
+/* `semCabecalho` (v3.56.0): quando esta tela virou aba, o PageHeader
+   passou a viver na página — senão apareceria duas vezes, e sumiria
+   junto com a aba quando o operador fosse ver as conversas. */
+export function WhatsAppClient({ semCabecalho = false }: { semCabecalho?: boolean } = {}) {
   const [e, setE] = useState<Estado>(VAZIO);
   const [offline, setOffline] = useState<string | null>(null);
   const [ocupado, setOcupado] = useState(false);
@@ -103,8 +106,20 @@ export function WhatsAppClient() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify(corpo ?? {}),
       });
-      const j = await r.json();
-      if (!r.ok) throw new Error(j.erro || "falhou");
+      /* Resposta pode não ser JSON (405 do proxy, 502 do nginx). Ler
+         com json() direto estoura "Unexpected token" e o usuário vê
+         um erro técnico no lugar da causa. */
+      const j = (await r.json().catch(() => ({}))) as { erro?: string };
+      if (!r.ok) {
+        throw new Error(
+          j.erro ||
+            (r.status === 405
+              ? "O serviço recusou o método desta chamada."
+              : r.status === 502 || r.status === 503
+                ? "O serviço do WhatsApp não respondeu."
+                : `Falhou (HTTP ${r.status}).`)
+        );
+      }
       if (msg) toast.success(msg);
       /* Pausar/retomar não geram evento SSE (o Baileys não mudou de
          estado). Relemos o status para a tela refletir na hora. */
@@ -122,12 +137,14 @@ export function WhatsAppClient() {
   if (offline) {
     return (
       <>
-        <PageHeader
-          eyebrow="Atendimento"
-          title="WhatsApp"
-          description="Conexão, pré-cadastro automático e monitoramento das conversas."
-          icon="whatsapp"
-        />
+        {!semCabecalho && (
+          <PageHeader
+            eyebrow="Atendimento"
+            title="WhatsApp"
+            description="Conexão, pré-cadastro automático e monitoramento das conversas."
+            icon="whatsapp"
+          />
+        )}
         <Card>
           <EmptyState
             icon="alert"
@@ -152,6 +169,7 @@ export function WhatsAppClient() {
 
   return (
     <>
+      {!semCabecalho && (
       <PageHeader
         eyebrow="Atendimento"
         title="WhatsApp"
@@ -181,6 +199,7 @@ export function WhatsAppClient() {
           </div>
         }
       />
+      )}
 
       {/* ── Liga/desliga do bot ────────────────────────────────────
           Fica ACIMA das colunas, atravessando a tela: é a informação

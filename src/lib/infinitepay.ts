@@ -328,7 +328,7 @@ export async function createCharge(raw: unknown) {
 
   const description =
     input.description?.trim() ||
-    (reference === "AVULSO" ? "Pagamento PrintFlow" : `Pedido ${reference}`);
+    (reference === "AVULSO" ? "Pagamento VTDIGITAL" : `Pedido ${reference}`);
 
   /* Repasse da tarifa do link (independe da maquininha do PDV).
      Usa a taxa de crédito à vista como referência: é o pior caso
