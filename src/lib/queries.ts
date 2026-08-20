@@ -30,8 +30,141 @@ import {
   deliveries,
   settings,
 } from "@/db/schema";
-import { eq, desc, asc, isNull } from "drizzle-orm";
+import { eq, desc, asc, isNull, sql, inArray } from "drizzle-orm";
 import { todayISO } from "@/lib/period";
+
+/* ─────────────────────────────────────────────────────────────
+   Paginação no servidor (v3.62.0)
+
+   Até aqui as telas carregavam a tabela inteira e filtravam no
+   navegador. Com ~125 pedidos/mês isso viraria alguns MB de HTML
+   por abertura de tela em cerca de um ano — o celular sente
+   primeiro. Estas funções trazem só a página pedida.
+
+   Duas armadilhas que o desenho precisa respeitar:
+
+   1. A busca da tela varre SEIS campos, incluindo dados do
+      cliente (outra tabela) e a descrição dos itens (dentro do
+      JSONB). Paginar sem reproduzir isso faria a busca emagrecer
+      em silêncio: o usuário procuraria "banner" e não acharia.
+   2. Os contadores das abas ("Em aberto", "Atrasados"...) somam a
+      base toda. Se virassem contagem da página, passariam a
+      mentir. Por isso são COUNT separados, e não `.length` da
+      lista devolvida.
+   ───────────────────────────────────────────────────────────── */
+
+export const TAMANHO_PAGINA_PADRAO = 50;
+
+export type PaginaPedidos = {
+  linhas: Awaited<ReturnType<typeof getOrders>>;
+  total: number;
+  pagina: number;
+  porPagina: number;
+  totalPaginas: number;
+  contadores: Record<string, number>;
+};
+
+/** Filtros das abas da tela de Pedidos, traduzidos para SQL. */
+function condicaoFiltroPedido(filtro: string) {
+  const hoje = todayISO();
+  const encerrado = sql`(${orders.status} = 'cancelado' OR ${orders.productionStatus} = 'concluido')`;
+  switch (filtro) {
+    case "ativos":
+      return sql`NOT ${encerrado}`;
+    case "atrasados":
+      // Mesma regra do dueInfo() da tela: vencido e ainda não encerrado.
+      return sql`${orders.dueDate} IS NOT NULL AND NOT ${encerrado} AND ${orders.dueDate} < ${hoje}`;
+    case "aguardando":
+    case "em_producao":
+    case "concluido":
+      return sql`(${orders.productionStatus} = ${filtro} OR ${orders.status} = ${filtro})`;
+    default:
+      return sql`TRUE`;
+  }
+}
+
+/** Busca textual equivalente à da tela: número, cliente e itens. */
+function condicaoBuscaPedido(termo: string) {
+  const t = termo.trim().toLowerCase();
+  if (!t) return sql`TRUE`;
+  const like = `%${t}%`;
+  return sql`(
+    lower(${orders.number}) LIKE ${like}
+    OR EXISTS (
+      SELECT 1 FROM ${customers} c
+       WHERE c.id = ${orders.customerId}
+         AND (
+           lower(c.name) LIKE ${like}
+           OR lower(coalesce(c.trade_name, '')) LIKE ${like}
+           OR lower(coalesce(c.document, '')) LIKE ${like}
+           OR lower(coalesce(c.phone, '')) LIKE ${like}
+         )
+    )
+    OR EXISTS (
+      SELECT 1 FROM jsonb_array_elements(${orders.items}) AS item
+       WHERE lower(coalesce(item->>'description', '')) LIKE ${like}
+    )
+  )`;
+}
+
+export async function getOrdersPage(opcoes: {
+  pagina?: number;
+  porPagina?: number;
+  busca?: string;
+  filtro?: string;
+} = {}): Promise<PaginaPedidos> {
+  const porPagina = Math.min(Math.max(opcoes.porPagina || TAMANHO_PAGINA_PADRAO, 1), 200);
+  const busca = opcoes.busca || "";
+  const filtro = opcoes.filtro || "ativos";
+
+  const where = sql`${condicaoFiltroPedido(filtro)} AND ${condicaoBuscaPedido(busca)}`;
+
+  const [{ total }] = await db
+    .select({ total: sql<number>`count(*)::int` })
+    .from(orders)
+    .where(where);
+
+  const totalPaginas = Math.max(1, Math.ceil(total / porPagina));
+  const pagina = Math.min(Math.max(opcoes.pagina || 1, 1), totalPaginas);
+
+  const linhas = await db
+    .select()
+    .from(orders)
+    .where(where)
+    .orderBy(desc(orders.createdAt))
+    .limit(porPagina)
+    .offset((pagina - 1) * porPagina);
+
+  return { linhas, total, pagina, porPagina, totalPaginas, contadores: await contadoresPedidos(busca) };
+}
+
+/** Contadores das abas — sempre sobre a base inteira, nunca sobre a página. */
+export async function contadoresPedidos(busca = "") {
+  const b = condicaoBuscaPedido(busca);
+  const [linha] = await db
+    .select({
+      ativos: sql<number>`count(*) FILTER (WHERE ${condicaoFiltroPedido("ativos")})::int`,
+      atrasados: sql<number>`count(*) FILTER (WHERE ${condicaoFiltroPedido("atrasados")})::int`,
+      aguardando: sql<number>`count(*) FILTER (WHERE ${orders.productionStatus} = 'aguardando')::int`,
+      em_producao: sql<number>`count(*) FILTER (WHERE ${orders.productionStatus} = 'em_producao')::int`,
+      concluido: sql<number>`count(*) FILTER (WHERE ${orders.productionStatus} = 'concluido')::int`,
+      todos: sql<number>`count(*)::int`,
+    })
+    .from(orders)
+    .where(b);
+  return linha as unknown as Record<string, number>;
+}
+
+/** Anexos das telas de pedido, restritos aos pedidos visíveis na página. */
+export async function auxiliaresDosPedidos(idsPedidos: number[]) {
+  if (idsPedidos.length === 0) return { approvals: [], schedules: [], deliveries: [] };
+  const [approvalRows, scheduleRows, deliveryRows] = await Promise.all([
+    db.select().from(artApprovals).where(inArray(artApprovals.orderId, idsPedidos)).orderBy(desc(artApprovals.createdAt)),
+    db.select().from(productionSchedules).where(inArray(productionSchedules.orderId, idsPedidos)).orderBy(asc(productionSchedules.scheduledDate)),
+    db.select().from(deliveries).where(inArray(deliveries.orderId, idsPedidos)),
+  ]);
+  return { approvals: approvalRows, schedules: scheduleRows, deliveries: deliveryRows };
+}
 
 export async function getCategoriesByModule(
   module: "product" | "material" | "service" | "finishing" | "pricing_table"

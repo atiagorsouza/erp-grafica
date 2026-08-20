@@ -35,6 +35,18 @@ export type PosCompany = CompanyIdentity;
 
 type Row = Record<string, any>;
 
+/* Estado da paginação, calculado no servidor. `contadores` são as
+   somas da base inteira, usadas nas abas. */
+type Paginacao = {
+  total: number;
+  pagina: number;
+  porPagina: number;
+  totalPaginas: number;
+  contadores: Record<string, number>;
+  busca: string;
+  filtro: string;
+};
+
 
 type OrderItem = {
   productId?: number | null;
@@ -114,8 +126,10 @@ export function OrdersClient({
   schedules,
   deliveries,
   company,
+  paginacao,
 }: {
   orders: Row[];
+  paginacao: Paginacao;
   customers: Row[];
   printers: Row[];
   approvals: Row[];
@@ -126,9 +140,39 @@ export function OrdersClient({
   const router = useRouter();
   const [customersList, setCustomersList] = useState<Row[]>(initialCustomers);
 
-  /* Estados de filtro e busca */
-  const [filter, setFilter] = useState("ativos");
-  const [q, setQ] = useState("");
+  /* Filtro e busca agora moram na URL (v3.62.0): quem decide o que
+     aparece é o servidor. `q` é só o texto enquanto se digita; ele vira
+     navegação depois de uma pausa, para não consultar a cada tecla. */
+  const filter = paginacao.filtro;
+  const [q, setQ] = useState(paginacao.busca);
+
+  const irPara = useCallback(
+    (mudancas: Record<string, string | number>) => {
+      const p = new URLSearchParams();
+      const base: Record<string, string> = {
+        q: paginacao.busca,
+        filtro: paginacao.filtro,
+        pagina: String(paginacao.pagina),
+        por: String(paginacao.porPagina),
+        ...Object.fromEntries(Object.entries(mudancas).map(([k, v]) => [k, String(v)])),
+      };
+      // Trocar de filtro ou de busca sempre devolve à primeira página,
+      // senão o usuário cairia numa página que não existe mais.
+      if (mudancas.q !== undefined || mudancas.filtro !== undefined) base.pagina = "1";
+      for (const [k, v] of Object.entries(base)) if (v && v !== "0") p.set(k, v);
+      router.push(`/pedidos${p.toString() ? `?${p}` : ""}`);
+    },
+    [router, paginacao]
+  );
+
+  const setFilter = useCallback((valor: string) => irPara({ filtro: valor }), [irPara]);
+
+  /* Debounce da busca: espera a digitação parar antes de ir ao servidor. */
+  useEffect(() => {
+    if (q === paginacao.busca) return;
+    const t = setTimeout(() => irPara({ q }), 300);
+    return () => clearTimeout(t);
+  }, [q, paginacao.busca, irPara]);
   const [openId, setOpenId] = useState<number | null>(null);
 
   /* Estados de formulário de novo pedido / edição */
@@ -169,11 +213,15 @@ export function OrdersClient({
     [todayStr]
   );
 
-  const lateCount = useMemo(() => orders.filter((o) => dueInfo(o).late).length, [orders, dueInfo]);
+  /* Contadores das abas vêm do servidor: contam a base inteira, não a
+     página. Contar a página faria "Atrasados" mostrar no máximo 50. */
+  const lateCount = paginacao.contadores.atrasados ?? 0;
 
   /* Filtro + Busca global de pedidos */
   const filtered = useMemo(() => {
-    const term = q.trim().toLowerCase();
+    /* O servidor já aplicou filtro e busca. Este passo virou apenas uma
+       rede de segurança para o intervalo entre digitar e a página chegar. */
+    const term = paginacao.busca.trim().toLowerCase();
     return orders.filter((o) => {
       const c = custName(o.customerId);
       const items = Array.isArray(o.items) ? o.items : [];
@@ -192,7 +240,7 @@ export function OrdersClient({
       if (filter === "todos") return true;
       return o.productionStatus === filter || o.status === filter;
     });
-  }, [orders, q, filter, custName, dueInfo]);
+  }, [orders, paginacao.busca, filter, custName, dueInfo]);
 
   /* Atualização de pedido sem recarga brusca.
    A API centraliza Kanban, Entrega e Financeiro para evitar divergência. */
@@ -383,15 +431,11 @@ export function OrdersClient({
   const orderDelivery = order ? deliveries.find((d) => Number(d.orderId) === Number(order.id)) : null;
 
   const stats = [
-    {
-      k: "ativos",
-      label: "Em aberto",
-      n: orders.filter((o) => o.status !== "cancelado" && o.productionStatus !== "concluido").length,
-    },
+    { k: "ativos", label: "Em aberto", n: paginacao.contadores.ativos ?? 0 },
     { k: "atrasados", label: "Atrasados", n: lateCount },
-    { k: "aguardando", label: "Aguardando", n: orders.filter((o) => o.productionStatus === "aguardando").length },
-    { k: "em_producao", label: "Em produção", n: orders.filter((o) => o.productionStatus === "em_producao").length },
-    { k: "concluido", label: "Concluídos", n: orders.filter((o) => o.productionStatus === "concluido").length },
+    { k: "aguardando", label: "Aguardando", n: paginacao.contadores.aguardando ?? 0 },
+    { k: "em_producao", label: "Em produção", n: paginacao.contadores.em_producao ?? 0 },
+    { k: "concluido", label: "Concluídos", n: paginacao.contadores.concluido ?? 0 },
   ];
 
   /* Opções de cliente para Combobox */
@@ -459,7 +503,7 @@ export function OrdersClient({
                 : "border-paper-300 bg-paper-50 text-ink-500"
             )}
           >
-            Todos ({orders.length})
+            Todos ({paginacao.contadores.todos ?? 0})
           </button>
         </div>
 
@@ -629,6 +673,68 @@ export function OrdersClient({
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* ── PAGINAÇÃO ──
+         Duas formas para o mesmo estado: no celular um botão "carregar
+         mais" (rolagem é o gesto natural); no computador páginas
+         numeradas, que ajudam a saber onde se está e a voltar. */}
+      {paginacao.total > 0 && (
+        <div className="mt-5 flex flex-col items-center gap-3 border-t border-paper-200 pt-4">
+          <p className="text-xs text-ink-500">
+            Mostrando{"\u00a0"}
+            <strong className="text-ink-700">
+              {(paginacao.pagina - 1) * paginacao.porPagina + 1}
+              {"\u00a0"}a{"\u00a0"}
+              {Math.min(paginacao.pagina * paginacao.porPagina, paginacao.total)}
+            </strong>
+            {"\u00a0"}de{"\u00a0"}<strong className="text-ink-700">{paginacao.total}</strong>
+            {"\u00a0"}
+            {paginacao.total === 1 ? "pedido" : "pedidos"}
+            {paginacao.busca ? ` para "${paginacao.busca}"` : ""}
+          </p>
+
+          {paginacao.totalPaginas > 1 && (
+            <>
+              {/* Celular */}
+              <div className="flex w-full sm:hidden">
+                {paginacao.pagina < paginacao.totalPaginas && (
+                  <Button
+                    variant="outline"
+                    className="w-full"
+                    onClick={() => irPara({ pagina: paginacao.pagina + 1 })}
+                  >
+                    Carregar mais
+                  </Button>
+                )}
+              </div>
+
+              {/* Computador */}
+              <div className="hidden items-center gap-1.5 sm:flex">
+                <Button
+                  variant="outline"
+                  disabled={paginacao.pagina <= 1}
+                  onClick={() => irPara({ pagina: paginacao.pagina - 1 })}
+                >
+                  Anterior
+                </Button>
+                <span className="px-3 text-xs text-ink-500">
+                  Página{"\u00a0"}
+                  <strong className="text-ink-700">{paginacao.pagina}</strong>
+                  {"\u00a0"}de{"\u00a0"}
+                  <strong className="text-ink-700">{paginacao.totalPaginas}</strong>
+                </span>
+                <Button
+                  variant="outline"
+                  disabled={paginacao.pagina >= paginacao.totalPaginas}
+                  onClick={() => irPara({ pagina: paginacao.pagina + 1 })}
+                >
+                  Próxima
+                </Button>
+              </div>
+            </>
+          )}
         </div>
       )}
 
