@@ -201,6 +201,20 @@ export function ShippingClient({
         }
       />
 
+      {/* A regra da casa, escrita onde ela é aplicada (v3.56.0).
+          O sistema NÃO impede — toda regra tem exceção e o operador
+          decide. Mas quem abre esta tela precisa lembrar dela sem
+          ter de perguntar. */}
+      <div className="reveal mb-5 rounded-xl border border-cyan-200 bg-cyan-50/60 px-4 py-3">
+        <p className="text-[12.5px] leading-relaxed text-ink-700">
+          <strong>Quando usar o SuperFrete:</strong> entregas para{" "}
+          <strong>fora do município</strong>, fora do estado, ou itens volumosos.
+          <br />
+          Dentro da cidade, o normal é motoboy/Uber/99 — que o cliente paga direto —
+          ou retirada agendada, confirmando antes se está pronto.
+        </p>
+      </div>
+
       {!config.configured && (
         <Card className="reveal mb-5 border-yellow-300 bg-yellow-50">
           <div className="flex items-start gap-3">

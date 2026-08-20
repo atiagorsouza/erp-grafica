@@ -42,7 +42,10 @@ const ROTULO: Record<Estado["status"], { texto: string; tone: "green" | "amber" 
   banido:       { texto: "Bloqueado",     tone: "red" },
 };
 
-export function WhatsAppClient() {
+/* `semCabecalho` (v3.56.0): quando esta tela virou aba, o PageHeader
+   passou a viver na página — senão apareceria duas vezes, e sumiria
+   junto com a aba quando o operador fosse ver as conversas. */
+export function WhatsAppClient({ semCabecalho = false }: { semCabecalho?: boolean } = {}) {
   const [e, setE] = useState<Estado>(VAZIO);
   const [offline, setOffline] = useState<string | null>(null);
   const [ocupado, setOcupado] = useState(false);
@@ -122,12 +125,14 @@ export function WhatsAppClient() {
   if (offline) {
     return (
       <>
-        <PageHeader
-          eyebrow="Atendimento"
-          title="WhatsApp"
-          description="Conexão, pré-cadastro automático e monitoramento das conversas."
-          icon="whatsapp"
-        />
+        {!semCabecalho && (
+          <PageHeader
+            eyebrow="Atendimento"
+            title="WhatsApp"
+            description="Conexão, pré-cadastro automático e monitoramento das conversas."
+            icon="whatsapp"
+          />
+        )}
         <Card>
           <EmptyState
             icon="alert"
@@ -152,6 +157,7 @@ export function WhatsAppClient() {
 
   return (
     <>
+      {!semCabecalho && (
       <PageHeader
         eyebrow="Atendimento"
         title="WhatsApp"
@@ -181,6 +187,7 @@ export function WhatsAppClient() {
           </div>
         }
       />
+      )}
 
       {/* ── Liga/desliga do bot ────────────────────────────────────
           Fica ACIMA das colunas, atravessando a tela: é a informação

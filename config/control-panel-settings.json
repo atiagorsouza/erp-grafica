@@ -1001,8 +1001,8 @@
           "label": "Taxa InfinitePay — Crédito parcelado",
           "type": "number",
           "suffix": "%",
-          "hint": "Aplicada quando o cliente parcela em 2x ou mais.",
-          "defaultValue": "5.99"
+          "hint": "Aplicada quando o cliente parcela em 2x ou mais. ATENÇÃO: a taxa SOBE com o número de parcelas (3x ≈ 6,12% · 6x ≈ 8,8% · 12x ≈ 12,40%). Como aqui cabe um número só, use o parcelamento que você mais vende — se aceita 12x, deixar 5,99% subestima o custo em mais de 6 pontos.",
+          "defaultValue": "6.12"
         },
         {
           "key": "infinitepay_fee_mode",

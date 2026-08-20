@@ -1498,6 +1498,22 @@ async function main() {
     }
   }
 
+  // 11.96) A tela de WhatsApp monta as 4 abas (v3.56.0)
+  //
+  // As abas montam TODOS os painéis de uma vez (escondidos por CSS)
+  // para o polling do chat continuar rodando. Se um deles quebrar no
+  // servidor, a página inteira cai — então vale conferir que os
+  // quatro chegam ao HTML.
+  {
+    const html = await (await fetch(`${BASE_URL}/whatsapp`)).text();
+    for (const aba of ["Conversas", "Campanhas", "Mensagens", "Conexão"]) {
+      assert(html.includes(aba), `aba "${aba}" presente em /whatsapp`);
+    }
+    // O cabeçalho vive na página; duplicá-lo seria regressão.
+    const vezes = (html.match(/Conexão, pré-cadastro automático/g) || []).length;
+    assert(vezes <= 1, "cabeçalho do WhatsApp não aparece duplicado");
+  }
+
   // 12) Páginas principais respondem
   for (const path of ["/clientes", "/orcamentos", "/pedidos", "/kanban", "/estoque", "/relatorios", "/financeiro", "/envios", "/cobrancas"]) {
     const res = await fetch(`${BASE_URL}${path}`);
