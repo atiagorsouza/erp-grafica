@@ -374,6 +374,21 @@ if [ -n "${DATABASE_URL:-}" ]; then
     fi
   fi
 
+  # ── Árvore de categorias de produto (v3.58.0) ───────────────────
+  #
+  # Idempotente: cria o que falta, realinha ícone/ordem/pai e só
+  # remapeia produto cujo nome está na lista. Categoria criada à mão
+  # pelo dono não é tocada.
+  if [ -f scripts/seed-categorias-produtos.mjs ]; then
+    saida="$(node scripts/seed-categorias-produtos.mjs --aplicar 2>&1 || true)"
+    resumo="$(printf '%s' "$saida" | grep -oE '^✅ .*$' || true)"
+    if [ -n "${resumo:-}" ]; then
+      ok "categorias de produto: ${resumo#✅ }"
+    else
+      ok "categorias de produto conferidas"
+    fi
+  fi
+
   # ── Carimbo da versão no banco ──────────────────────────────────
   #
   # BUG v3.53.2: isto nunca era feito. `settings.app_version` ficava

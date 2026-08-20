@@ -1514,6 +1514,34 @@ async function main() {
     assert(vezes <= 1, "cabeçalho do WhatsApp não aparece duplicado");
   }
 
+  // 11.97) Árvore de categorias de produto (v3.58.0)
+  //
+  // As categorias viraram Mestre → Subcategoria. Duas coisas podem
+  // quebrar em silêncio: uma subcategoria perder o pai (vira órfã
+  // solta na lista) e um produto ficar pendurado direto na mestre
+  // (some dos filtros por subcategoria).
+  {
+    const r = await pool.query(`
+      SELECT
+        (SELECT count(*) FROM item_categories
+          WHERE module='product' AND parent_id IS NULL)::int mestres,
+        (SELECT count(*) FROM item_categories
+          WHERE module='product' AND parent_id IS NOT NULL)::int subs,
+        (SELECT count(*) FROM item_categories f
+          WHERE f.module='product' AND f.parent_id IS NOT NULL
+            AND NOT EXISTS (SELECT 1 FROM item_categories m WHERE m.id = f.parent_id))::int orfas,
+        (SELECT count(*) FROM item_categories a
+          JOIN item_categories b ON a.parent_id = b.id
+         WHERE b.parent_id IS NOT NULL)::int netos
+    `);
+    const t = r.rows[0];
+    assert(t.mestres >= 1, `árvore de produtos tem ${t.mestres} categoria(s) mestre`);
+    assert(t.subs >= 1, `árvore de produtos tem ${t.subs} subcategoria(s)`);
+    assert(t.orfas === 0, "nenhuma subcategoria apontando para pai inexistente");
+    // Só dois níveis: neto significa que alguém aninhou demais.
+    assert(t.netos === 0, "árvore tem no máximo dois níveis (sem netos)");
+  }
+
   // 12) Páginas principais respondem
   for (const path of ["/clientes", "/orcamentos", "/pedidos", "/kanban", "/estoque", "/relatorios", "/financeiro", "/envios", "/cobrancas"]) {
     const res = await fetch(`${BASE_URL}${path}`);
