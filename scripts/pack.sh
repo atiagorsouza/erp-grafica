@@ -100,3 +100,15 @@ done
 echo "✔ $PKG"
 echo "  $(cd "$DEST" && cat "printflow-erp-v$VERSION.tar.gz.sha256")"
 echo "  raiz: $FIRST · $(du -h "$PKG" | cut -f1)"
+
+# ── Verificador de integridade (v3.58.2) ────────────────────────────
+# Vai junto de todo pacote. Em 20/08/2026 o dono baixou o release e
+# recebeu 23 KB em vez de 708 — download interrompido. O .tar.gz abre
+# mesmo pela metade, então parecia pacote incompleto em vez de
+# download quebrado. Trinta segundos de conferência antes de instalar
+# evitam meia hora de confusão depois.
+if [ -f "$ROOT/scripts/conferir-pacote.sh" ]; then
+  cp "$ROOT/scripts/conferir-pacote.sh" "$DEST/CONFERIR.sh" 2>/dev/null \
+    && chmod +x "$DEST/CONFERIR.sh" 2>/dev/null \
+    && echo "  CONFERIR.sh incluído em $DEST"
+fi
