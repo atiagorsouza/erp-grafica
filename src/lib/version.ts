@@ -1,5 +1,5 @@
 /**
- * Versionamento do PrintFlow ERP.
+ * Versionamento do VTDIGITAL ERP.
  *
  * Fonte da verdade do número de versão: arquivo `VERSION` na raiz do projeto.
  * O script `scripts/check-version.mjs` valida em CI/install/update que

@@ -106,15 +106,29 @@ export async function Sidebar({ pathname }: { pathname: string }) {
       {/* Marca */}
       <div className="relative shrink-0 px-5 pt-5 pb-4">
         <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-ink-950 ring-1 ring-white/10">
+          {/* Logo da empresa (v3.59.0). Vem de /api/upload/logo, que
+              devolve o binário com ETag — nunca o data URI inteiro,
+              que foi o que travou a tela de configurações na 3.53.1.
+
+              Se não houver logo cadastrada, a rota responde 404 e o
+              `onError` do <img> não ajuda aqui (é server component):
+              por isso a marca CMYK fica ATRÁS, e a imagem por cima.
+              Sem logo, aparece a marca; com logo, ela cobre. */}
+          <div className="relative flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-ink-950 ring-1 ring-white/10">
             <RegistrationMark size={24} />
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/api/upload/logo?key=company_logo_icon"
+              alt=""
+              className="absolute inset-0 h-full w-full object-contain p-0.5"
+            />
           </div>
           <div className="min-w-0">
             <p className="display-expanded text-[17px] leading-none font-bold tracking-tight text-white">
-              PrintFlow
+              VTDIGITAL
             </p>
             <p className="mt-1 font-mono text-[9px] tracking-[0.18em] text-ink-400 uppercase">
-              Gráfica · Papelaria
+              Art Studio
             </p>
           </div>
         </div>

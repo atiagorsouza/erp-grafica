@@ -2,7 +2,7 @@ import type { ReactNode, SVGProps } from "react";
 
 /**
  * Ícones autorais — traço 1.7, cantos arredondados, grade 24×24.
- * Desenhados para o PrintFlow (sem dependências externas).
+ * Desenhados para o VTDIGITAL (sem dependências externas).
  */
 const P: Record<string, ReactNode> = {
   gauge: (
@@ -299,7 +299,7 @@ export function Icon({
   );
 }
 
-/** Marca de registro CMYK — logo do PrintFlow */
+/** Marca de registro CMYK — usada como ícone do sistema */
 export function RegistrationMark({ size = 26 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 32 32" fill="none" aria-hidden="true">

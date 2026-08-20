@@ -105,7 +105,7 @@ export async function getSuperfreteConfig(): Promise<SuperfreteConfig> {
     cepOrigin,
     userAgent:
       map.get("superfrete_user_agent") ||
-      `PrintFlow ERP (${map.get("company_email") || "contato@printflow.local"})`,
+      `VTDIGITAL ERP (${map.get("company_email") || "contato.vt@vtdigital.com"})`,
     pkg: {
       weight: toNumber(map.get("superfrete_pkg_weight"), 0.3) || 0.3,
       height: toNumber(map.get("superfrete_pkg_height"), 4) || 4,
@@ -562,7 +562,7 @@ export async function addToCart(raw: unknown) {
   if (fromCep.length !== 8) {
     return { error: "CEP de origem não configurado", status: 422 } satisfies ShipError;
   }
-  const companyName = cfgMap.get("company_name") || "PrintFlow";
+  const companyName = cfgMap.get("company_name") || "VTDIGITAL";
   const companyDoc = String(cfgMap.get("company_cnpj") || cfgMap.get("company_document") || "").replace(/\D/g, "");
   if (!companyDoc) {
     return {
@@ -623,7 +623,7 @@ export async function addToCart(raw: unknown) {
       receipt: input.receipt ?? false,
       own_hand: input.ownHand ?? false,
       non_commercial: input.nonCommercial ?? true,
-      platform: "PrintFlow ERP",
+      platform: "VTDIGITAL ERP",
     },
   };
 

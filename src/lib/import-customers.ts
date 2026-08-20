@@ -201,7 +201,7 @@ export async function parseCustomersPdf(buffer: ArrayBuffer): Promise<ParsedCust
  * assim primeiro, para o usuário conferir antes de confirmar.
  *
  * Deduplicação por documento (ignorando máscara). Cliente já existente
- * é ATUALIZADO apenas nos campos vazios: dado digitado no PrintFlow tem
+ * é ATUALIZADO apenas nos campos vazios: dado digitado no VTDIGITAL tem
  * precedência sobre o que veio do sistema antigo.
  */
 export async function importCustomers(

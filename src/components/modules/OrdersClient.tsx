@@ -1455,7 +1455,7 @@ function ProductionOrderA4({
       <div className="flex items-start justify-between border-b border-paper-300 pb-4">
         <div>
           <h1 className="text-[22px] font-extrabold text-ink-950 tracking-tight leading-none">
-            {company.name || "PrintFlow Gráfica Criativa"}
+            {company.name || "VTDIGITAL ART STUDIO"}
           </h1>
           <p className="text-[11px] font-semibold text-proc-c tracking-wider uppercase mt-1">
             GRÁFICA RÁPIDA E PERSONALIZADOS

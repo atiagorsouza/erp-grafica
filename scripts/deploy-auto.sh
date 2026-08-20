@@ -389,6 +389,16 @@ if [ -n "${DATABASE_URL:-}" ]; then
     fi
   fi
 
+  # ── Logos da empresa (v3.59.0) ──────────────────────────────────
+  #
+  # Só grava onde está VAZIO: logo trocada pelo dono no Painel nunca é
+  # sobrescrita por um deploy.
+  if [ -f scripts/aplicar-logo.mjs ]; then
+    saida="$(node scripts/aplicar-logo.mjs --aplicar 2>&1 || true)"
+    resumo="$(printf '%s' "$saida" | grep -oE '^✅ .*$' || true)"
+    [ -n "${resumo:-}" ] && ok "logos: ${resumo#✅ }" || ok "logos conferidas"
+  fi
+
   # ── Carimbo da versão no banco ──────────────────────────────────
   #
   # BUG v3.53.2: isto nunca era feito. `settings.app_version` ficava

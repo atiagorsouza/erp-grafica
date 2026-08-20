@@ -1602,6 +1602,28 @@ async function main() {
     await cat("delete", {}, idM);
   }
 
+  // 11.995) Marca VTDIGITAL (v3.59.0)
+  //
+  // A troca de nome e logo é fácil de desfazer sem querer: um
+  // `git revert` distraído, um merge, um seed antigo. E as logos não
+  // podem voltar a trafegar inteiras no HTML — foi o que travou a
+  // tela de configurações na 3.53.1.
+  {
+    const home = await (await fetch(`${BASE_URL}/`)).text();
+    assert(home.includes("VTDIGITAL"), "a marca VTDIGITAL aparece na tela");
+    assert(!home.includes("PrintFlow"), "o nome antigo não aparece mais");
+
+    for (const k of ["company_logo", "company_logo_dark", "company_logo_icon"]) {
+      const r = await fetch(`${BASE_URL}/api/upload/logo?key=${k}`);
+      assert(r.status === 200, `logo ${k} é servida pela rota de imagem`);
+    }
+
+    const cfg = await (await fetch(`${BASE_URL}/configuracoes`)).text();
+    assert(!cfg.includes("base64"), "nenhuma logo trafega embutida no HTML");
+    const kb = Math.round(cfg.length / 1024);
+    assert(kb < 900, `/configuracoes continua leve (${kb} KB)`);
+  }
+
   // 12) Páginas principais respondem
   for (const path of ["/clientes", "/orcamentos", "/pedidos", "/kanban", "/estoque", "/relatorios", "/financeiro", "/envios", "/cobrancas"]) {
     const res = await fetch(`${BASE_URL}${path}`);

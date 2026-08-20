@@ -89,7 +89,7 @@ export function ReportsClient({
   /** Exportação CSV com BOM, para o Excel abrir com acento correto. */
   function exportCsv() {
     const rows: string[][] = [
-      ["PrintFlow ERP — Relatório", periodLabel],
+      ["VTDIGITAL — Relatório", periodLabel],
       [],
       ["Indicador", "Valor"],
       ["Receita total (PDV + Pedidos)", totals.revenue.toFixed(2)],

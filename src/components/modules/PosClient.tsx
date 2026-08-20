@@ -2319,7 +2319,7 @@ function buildTextReceipt(r: ReceiptData, comp: PosCompany): string {
   const timeFormatted = d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
 
   const lines = [
-    `*${comp.name || "PrintFlow"}*`,
+    `*${comp.name || "VTDIGITAL"}*`,
     comp.address,
     `Tel: ${[comp.phone, comp.phone2].filter(Boolean).join(" / ")}`,
     "--------------------------------",
