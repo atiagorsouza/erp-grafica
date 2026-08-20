@@ -1462,6 +1462,29 @@ async function main() {
     assert(v.upToDate === true, "sistema se reconhece atualizado");
   }
 
+  // 11.9) Nenhum script recomenda --omit=dev para BUILDAR (v3.55.1)
+  //
+  // Em 19/08/2026 essa instrução, escrita por mim num LEIA-ME,
+  // derrubou o site: TypeScript e Tailwind são devDependencies e o
+  // build precisa deles. Um teste é mais confiável que a minha
+  // memória.
+  {
+    const fs = await import("node:fs/promises");
+    const alvos = ["scripts/deploy-auto.sh", "scripts/socorro.sh"];
+    let ruins = [];
+    for (const f of alvos) {
+      const txt = await fs.readFile(f, "utf8").catch(() => "");
+      for (const linha of txt.split("\n")) {
+        // Só reprova quando a linha EXECUTA npm install --omit=dev;
+        // menção em comentário ou aviso é justamente o que queremos.
+        const executa = /^\s*(?!#)(?:.*\|\|\s*)?(?:NODE_ENV=\S+\s+)?npm\s+(install|ci)\b[^#]*--omit=dev/.test(linha);
+        if (executa) ruins.push(`${f}: ${linha.trim().slice(0, 60)}`);
+      }
+    }
+    assert(ruins.length === 0,
+      `nenhum script instala com --omit=dev antes do build${ruins.length ? " — " + ruins[0] : ""}`);
+  }
+
   // 12) Páginas principais respondem
   for (const path of ["/clientes", "/orcamentos", "/pedidos", "/kanban", "/estoque", "/relatorios", "/financeiro", "/envios", "/cobrancas"]) {
     const res = await fetch(`${BASE_URL}${path}`);

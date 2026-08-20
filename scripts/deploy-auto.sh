@@ -228,8 +228,28 @@ fi
 step "6/9  Build (pode levar alguns minutos)"
 rm -rf .next
 export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=2048}"
-if npm run build >/tmp/build.log 2>&1; then
-  ok "build concluído"
+if npm run build >/tmp/build.log 2>&1 && [ -f .next/BUILD_ID ]; then
+  ok "build concluído (BUILD_ID $(cat .next/BUILD_ID 2>/dev/null | head -c 12))"
+elif [ ! -f .next/BUILD_ID ] && ! grep -qiE "SIGKILL|out of memory|heap out of memory|Killed|Module not found|Build failed" /tmp/build.log; then
+  # O build disse que deu certo mas não deixou BUILD_ID. Isso é build
+  # pela metade: o `next start` sai na hora reclamando que não achou
+  # build de produção, e o pm2 fica em loop de restart.
+  #
+  # Aconteceu em produção em 19/08/2026: `npm install --omit=dev` pulou
+  # TypeScript e Tailwind (que são devDependencies e são necessários
+  # para COMPILAR), o webpack não resolveu os atalhos @/ do tsconfig e
+  # o .next ficou sem manifesto. Conferir o arquivo é mais confiável
+  # do que confiar no código de saída.
+  FALHOU="build terminou sem gerar .next/BUILD_ID (build incompleto)"
+  er "$FALHOU"
+  echo
+  echo "     Quase sempre é dependência faltando. Rode:"
+  echo "       rm -rf .next node_modules"
+  echo "       npm install          # TUDO, sem --omit=dev"
+  echo "       npm run build"
+  echo
+  tail -20 /tmp/build.log
+  exit 1
 else
   if grep -qiE "SIGKILL|out of memory|heap out of memory|Killed" /tmp/build.log; then
     FALHOU="o build morreu por FALTA DE MEMÓRIA (não é erro de código)"
@@ -239,6 +259,17 @@ else
     echo "       sudo fallocate -l 2G /swapfile"
     echo "       sudo chmod 600 /swapfile && sudo mkswap /swapfile"
     echo "       sudo swapon /swapfile"
+  elif grep -qiE "Module not found|Cannot find module" /tmp/build.log; then
+    FALHOU="faltam dependências para compilar"
+    er "$FALHOU"
+    echo
+    echo "     TypeScript e Tailwind são devDependencies e o build precisa"
+    echo "     deles. Se você usou --omit=dev, foi isso. Rode:"
+    echo "       rm -rf .next node_modules"
+    echo "       npm install          # sem --omit=dev"
+    echo "       npm run build"
+    echo
+    grep -E "Module not found|Can't resolve" /tmp/build.log | head -6
   else
     FALHOU="erro de build"
     er "$FALHOU"; tail -25 /tmp/build.log
