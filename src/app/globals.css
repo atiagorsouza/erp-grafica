@@ -225,8 +225,12 @@ body {
     background: #ffffff !important;
     color: #000000 !important;
     font-family: var(--font-mono), 'IBM Plex Mono', 'Courier New', Courier, monospace !important;
-    font-size: 11px !important;
-    line-height: 1.25 !important;
+    /* Calibrado (v3.59.1) contra o cupom do sistema antigo, medido na
+       foto com a bobina de 80mm como escala: lá o caractere ocupa
+       1,82mm contra 1,74mm nosso, e a entrelinha era 1,28 contra 1,49.
+       O cupom saía menor e mais arejado que o de referência. */
+    font-size: 11.5px !important;
+    line-height: 1.2 !important;
   }
 
   /* 2. IMPRESSÃO A4 (ORDEM DE PRODUÇÃO / PROPOSTA COMERCIAL: #order-print-a4 ou #quote-print-a4) */

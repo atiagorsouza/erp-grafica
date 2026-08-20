@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { db } from "@/db";
-import { printers } from "@/db/schema";
+import { printers, settings } from "@/db/schema";
+import { eq, sql } from "drizzle-orm";
 import { Icon, RegistrationMark, type IconName } from "@/components/icons";
 
 type NavItem = { href: string; label: string; icon: IconName };
@@ -101,27 +102,53 @@ export async function Sidebar({ pathname }: { pathname: string }) {
     /* banco ainda sem schema */
   }
 
+  /* Existe logo cadastrada? Consulta barata (uma chave, sem trazer o
+     data URI de 30 KB — só o comprimento). Precisa ser aqui e não no
+     componente da imagem porque server component não tem `onError`:
+     sem isso, logo ausente deixaria um quadrado branco vazio. */
+  let temLogo = false;
+  try {
+    const [row] = await db
+      .select({ n: sql<number>`length(coalesce(${settings.value}, ''))` })
+      .from(settings)
+      .where(eq(settings.key, "company_logo_icon"))
+      .limit(1);
+    temLogo = Number(row?.n ?? 0) > 0;
+  } catch {
+    /* sem banco, cai na marca desenhada */
+  }
+
   return (
     <aside className="no-print ink-grid sticky top-0 z-30 hidden h-screen w-[264px] shrink-0 flex-col border-r border-ink-800 bg-ink-900 lg:flex">
       {/* Marca */}
       <div className="relative shrink-0 px-5 pt-5 pb-4">
         <div className="flex items-center gap-3">
-          {/* Logo da empresa (v3.59.0). Vem de /api/upload/logo, que
-              devolve o binário com ETag — nunca o data URI inteiro,
-              que foi o que travou a tela de configurações na 3.53.1.
+          {/* Logo da empresa (v3.59.1).
 
-              Se não houver logo cadastrada, a rota responde 404 e o
-              `onError` do <img> não ajuda aqui (é server component):
-              por isso a marca CMYK fica ATRÁS, e a imagem por cima.
-              Sem logo, aparece a marca; com logo, ela cobre. */}
-          <div className="relative flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-ink-950 ring-1 ring-white/10">
-            <RegistrationMark size={24} />
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src="/api/upload/logo?key=company_logo_icon"
-              alt=""
-              className="absolute inset-0 h-full w-full object-contain p-0.5"
-            />
+              Duas correções sobre a v3.59.0, ambas visíveis no print
+              que o dono mandou:
+
+              1. A imagem era a logo INTEIRA — "VT" + DIGITAL + ART
+                 STUDIO — espremida em 40px. Virava borrão. Agora o
+                 arquivo é só o símbolo "VT" recortado; o nome já está
+                 escrito ao lado, em texto.
+
+              2. A marca CMYK ficava ATRÁS da imagem como reserva. Com
+                 PNG transparente, ela aparecia POR BAIXO nos vãos do
+                 "V" — a "bagunça" que ele viu. Ou uma, ou outra:
+                 `temLogo` decide no servidor, que é onde dá para
+                 saber. */}
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-white p-1 ring-1 ring-white/10">
+            {temLogo ? (
+              /* eslint-disable-next-line @next/next/no-img-element */
+              <img
+                src="/api/upload/logo?key=company_logo_icon"
+                alt=""
+                className="h-full w-full object-contain"
+              />
+            ) : (
+              <RegistrationMark size={24} />
+            )}
           </div>
           <div className="min-w-0">
             <p className="display-expanded text-[17px] leading-none font-bold tracking-tight text-white">

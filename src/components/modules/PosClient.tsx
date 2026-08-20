@@ -2139,36 +2139,28 @@ function ThermalReceipt({
 
       <div className="my-1.5 border-b border-dashed border-black" />
 
-      {/* ── 6. BLOCO DE TOTAIS ── */}
+      {/* ── 6. BLOCO DE TOTAIS ──
+          Três colunas, como no cupom antigo: rótulo à esquerda, "R$"
+          numa coluna própria no meio e o número alinhado à direita.
+          Antes era `justify-between` com "R$ 12,49" grudado num bloco
+          só, e os centavos não alinhavam entre as linhas. */}
       <div className="space-y-0.5 font-bold text-[11.5px] uppercase">
-        <div className="flex justify-between">
-          <span>VALOR PRODUTOS</span>
-          <span>R$ {formatNum(receipt.subtotal)}</span>
-        </div>
-
-        <div className="flex justify-between">
-          <span>VALOR DESCONTO</span>
-          <span>R$ {formatNum(receipt.discount)}</span>
-        </div>
-
-        <div className="flex justify-between text-[12.5px] font-extrabold">
-          <span>VALOR TOTAL</span>
-          <span>R$ {formatNum(receipt.total)}</span>
-        </div>
+        <TotalRow label="VALOR PRODUTOS" value={formatNum(receipt.subtotal)} />
+        <TotalRow label="VALOR DESCONTO" value={formatNum(receipt.discount)} />
+        {/* O antigo destaca o total espaçando as letras, não aumentando
+            o corpo — numa térmica de 80mm aumentar a fonte estoura a
+            linha. Mesmo recurso aqui. */}
+        <TotalRow
+          label="V A L O R   T O T A L"
+          value={formatNum(receipt.total)}
+        />
       </div>
 
       <div className="my-1 border-b-2 border-black" />
 
       <div className="space-y-0.5 font-bold text-[11.5px] uppercase">
-        <div className="flex justify-between">
-          <span>VALOR PAGO</span>
-          <span>R$ {formatNum(receipt.received || receipt.total)}</span>
-        </div>
-
-        <div className="flex justify-between">
-          <span>VALOR TROCO</span>
-          <span>R$ {formatNum(receipt.change || 0)}</span>
-        </div>
+        <TotalRow label="VALOR PAGO" value={formatNum(receipt.received || receipt.total)} />
+        <TotalRow label="VALOR TROCO" value={formatNum(receipt.change || 0)} />
       </div>
 
       <div className="my-1.5 border-b border-dashed border-black" />
@@ -2212,28 +2204,54 @@ function ThermalReceipt({
           </p>
         )}
 
-        {(receipt.notes || company.receiptFooter) && (
-          <>
-            <p className="mt-2 border-t border-dotted border-black pt-1 font-semibold text-[10.5px]">
-              Observações
-            </p>
-            <p className="leading-snug">
-              {receipt.notes || company.receiptFooter}
-            </p>
-          </>
-        )}
+        {/* Observações do operador.
+
+            O rodapé padrão saía DUAS vezes no mesmo cupom (visível na
+            foto da comparação): o campo de observações do PDV já nasce
+            preenchido com `receiptFooter`, e o bloco final imprimia o
+            mesmo texto de novo. Aqui só entra o que o operador de fato
+            escreveu, e só quando difere do rodapé padrão. */}
+        {(() => {
+          const obs = (receipt.notes || "").trim();
+          const rodape = (company.receiptFooter || "").trim();
+          if (!obs || obs === rodape) return null;
+          return (
+            <>
+              <p className="mt-2 border-t border-dotted border-black pt-1 font-semibold text-[10.5px]">
+                Observações
+              </p>
+              <p className="leading-snug">{obs}</p>
+            </>
+          );
+        })()}
 
         {company.pixKey && receipt.payment === "PIX" && (
           <p className="mt-1 font-mono text-[10px]">PIX: {company.pixKey}</p>
         )}
 
-        <p className="mt-2 text-center text-[10px] leading-snug">
+        {/* Despedida e identificação: à ESQUERDA, como no cupom antigo.
+            Centralizar era invenção nossa — na bobina de 80mm o texto
+            centralizado quebra o alinhamento de tudo que vem acima. */}
+        <p className="mt-2 text-left text-[11px] leading-snug">
           {company.receiptFooter || "Agradecemos a preferência!"}
         </p>
-        <p className="text-center text-[9px] uppercase tracking-wider">
+        <p className="text-left text-[10px] uppercase tracking-wider">
           Documento não fiscal · {receipt.number}
         </p>
       </div>
+    </div>
+  );
+}
+
+/* Linha de total em 3 colunas (rótulo · R$ · valor), espelhando o
+   cupom do sistema antigo. A coluna do "R$" é fixa para que todos os
+   valores fiquem alinhados pela vírgula. */
+function TotalRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-baseline">
+      <span className="flex-1">{label}</span>
+      <span className="w-8 shrink-0">R$</span>
+      <span className="w-[74px] shrink-0 text-right tnum">{value}</span>
     </div>
   );
 }
