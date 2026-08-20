@@ -1403,7 +1403,7 @@ export function PosClient({
               </div>
 
               {!splitOn ? (
-                <div className="mt-1.5 grid grid-cols-4 gap-1.5">
+                <div className="mt-1.5 grid grid-cols-2 gap-1.5 sm:grid-cols-4">
                   {PAYMENTS.map((p) => (
                     <button
                       key={p.id}
@@ -1722,7 +1722,7 @@ export function PosClient({
             Nenhuma venda nas últimas 24 horas.
           </p>
         ) : (
-          <div className="max-h-[60vh] overflow-y-auto">
+          <div className="max-h-[60vh] overflow-x-auto overflow-y-auto">
             <table className="w-full text-[12.5px]">
               <thead className="sticky top-0 bg-paper-50 text-left font-mono text-[10px] tracking-wider text-ink-500 uppercase">
                 <tr>
@@ -2554,7 +2554,7 @@ function QuickCustomerModal({
 
         <div className="border-t border-paper-200 pt-2 space-y-2">
           <p className="font-semibold text-ink-800 text-[11.5px]">Endereço (impresso no cupom)</p>
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
             <Field label="CEP" hint={fetchingCep ? "buscando..." : undefined}>
               <Input
                 mono

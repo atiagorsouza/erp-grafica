@@ -117,6 +117,8 @@ const P: Record<string, ReactNode> = {
   ),
   plus: <path d="M12 5v14M5 12h14" />,
   x: <path d="m6 6 12 12M18 6 6 18" />,
+  /* hambúrguer do menu no celular (v3.61.0) */
+  menu: <path d="M4 7h16M4 12h16M4 17h16" />,
   check: <path d="m4.5 12.5 5 5 10-11" />,
   "chevron-down": <path d="m6 9.5 6 6 6-6" />,
   "chevron-right": <path d="m9.5 6 6 6-6 6" />,

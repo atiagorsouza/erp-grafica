@@ -12,7 +12,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     <div className="flex min-h-screen">
       <Sidebar pathname={pathname} />
       <div className="flex min-w-0 flex-1 flex-col">
-        <TopBar />
+        <TopBar pathname={pathname} />
         <main className="flex-1 overflow-x-hidden print:overflow-visible">
           <div className="mx-auto max-w-[1560px] px-4 py-6 sm:px-6 lg:px-8 print:m-0 print:max-w-none print:p-0">
             {children}

@@ -962,7 +962,7 @@ export function ProductsClient({
                 {liveCalc && (
                   <>
                     {"finalSheets" in liveCalc && calcMode === "batch" && (
-                      <div className="mb-3 grid grid-cols-3 gap-2">
+                      <div className="mb-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
                         {[
                           { k: "peças", v: String(liveCalc.qty) },
                           { k: "folhas base", v: String(Math.ceil(liveCalc.qty / Math.max(num(form.piecesPerSheet, 1), 1))) },

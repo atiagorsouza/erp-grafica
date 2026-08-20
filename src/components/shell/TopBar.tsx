@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
+import { MobileNav } from "@/components/shell/MobileNav";
 import { Icon } from "@/components/icons";
 import { cn, formatMoney } from "@/lib/format";
 
@@ -22,7 +23,7 @@ const notifTone: Record<string, string> = {
   danger: "bg-red-50 text-red-600",
 };
 
-export function TopBar() {
+export function TopBar({ pathname }: { pathname: string }) {
   const [q, setQ] = useState("");
   const [hits, setHits] = useState<SearchHit[]>([]);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -94,6 +95,10 @@ export function TopBar() {
   return (
     <header className="no-print sticky top-0 z-20 border-b border-paper-200 bg-paper-100/85 backdrop-blur-md">
       <div className="flex h-[58px] items-center gap-3 px-4 sm:px-6">
+        {/* Menu do celular: abaixo de lg a sidebar some, e sem isto não
+            havia como navegar (v3.61.0). */}
+        <MobileNav pathname={pathname} />
+
         {/* Busca global */}
         <div ref={searchRef} className="relative w-full max-w-md">
           <div className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-ink-400">

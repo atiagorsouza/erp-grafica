@@ -872,7 +872,7 @@ export function QuotesClient({
       >
         {view && (
           <div className="space-y-5">
-            <div className="grid grid-cols-3 gap-2.5">
+            <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
               {[
                 { k: "Subtotal", v: formatBRL(Number(view.subtotal || 0)) },
                 { k: "Desconto", v: `− ${formatBRL(Number(view.discount || 0))}` },

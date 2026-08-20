@@ -1011,7 +1011,7 @@ export function ClientsClient({ customers, leads, activities, quotes, orders, sa
             </div>
 
             {/* LTV por canal */}
-            <div className="grid grid-cols-3 gap-2.5">
+            <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
               {[
                 { k: "Orçamentos", v: quotes.filter((x) => Number(x.customerId) === Number(drawer.id)).length, money: quotes.filter((x) => Number(x.customerId) === Number(drawer.id)).reduce((s, x) => s + Number(x.total || 0), 0) },
                 { k: "Pedidos", v: orders.filter((x) => Number(x.customerId) === Number(drawer.id)).length, money: orders.filter((x) => Number(x.customerId) === Number(drawer.id)).reduce((s, x) => s + Number(x.total || 0), 0) },
@@ -1344,7 +1344,7 @@ function ImportCustomersModal({
 
         {result && (
           <>
-            <div className="grid grid-cols-4 gap-2">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               {[
                 { label: "fichas lidas", value: result.totalFichas, tone: "text-ink-800" },
                 { label: "novos", value: result.imported, tone: "text-emerald-700" },
@@ -1375,7 +1375,7 @@ function ImportCustomersModal({
             )}
 
             {result.preview.length > 0 && (
-              <div className="max-h-56 overflow-y-auto rounded-lg border border-paper-200">
+              <div className="max-h-56 overflow-x-auto overflow-y-auto rounded-lg border border-paper-200">
                 <table className="w-full text-[12px]">
                   <thead className="sticky top-0 bg-paper-50 text-left font-mono text-[10px] tracking-wider text-ink-500 uppercase">
                     <tr>
