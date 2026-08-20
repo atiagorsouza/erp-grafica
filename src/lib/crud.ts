@@ -38,6 +38,17 @@ export async function crudHandler(req: Request, opts: CrudOptions) {
     if (opts.afterMutate) await opts.afterMutate();
     return Response.json({ ok: true, row: result });
   } catch (e) {
+    /* Erro de REGRA (422/409) é diferente de erro de SISTEMA (500).
+       Antes tudo virava 500: a tela mostrava "erro interno" quando o
+       certo era explicar que a categoria tem produto dentro. Um
+       handler pode anexar `status` ao erro para dizer qual é qual. */
+    const status = Number((e as { status?: number })?.status);
+    if (Number.isFinite(status) && status >= 400 && status < 500) {
+      return Response.json(
+        { error: e instanceof Error ? e.message : "requisição inválida" },
+        { status }
+      );
+    }
     console.error("[crud]", e);
     return Response.json(
       { error: e instanceof Error ? e.message : "erro interno" },

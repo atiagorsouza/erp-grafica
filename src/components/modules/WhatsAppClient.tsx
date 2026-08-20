@@ -106,8 +106,20 @@ export function WhatsAppClient({ semCabecalho = false }: { semCabecalho?: boolea
         headers: { "content-type": "application/json" },
         body: JSON.stringify(corpo ?? {}),
       });
-      const j = await r.json();
-      if (!r.ok) throw new Error(j.erro || "falhou");
+      /* Resposta pode não ser JSON (405 do proxy, 502 do nginx). Ler
+         com json() direto estoura "Unexpected token" e o usuário vê
+         um erro técnico no lugar da causa. */
+      const j = (await r.json().catch(() => ({}))) as { erro?: string };
+      if (!r.ok) {
+        throw new Error(
+          j.erro ||
+            (r.status === 405
+              ? "O serviço recusou o método desta chamada."
+              : r.status === 502 || r.status === 503
+                ? "O serviço do WhatsApp não respondeu."
+                : `Falhou (HTTP ${r.status}).`)
+        );
+      }
       if (msg) toast.success(msg);
       /* Pausar/retomar não geram evento SSE (o Baileys não mudou de
          estado). Relemos o status para a tela refletir na hora. */

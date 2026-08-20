@@ -26,6 +26,7 @@ import {
   toast,
 } from "@/components/ui";
 import { Icon } from "@/components/icons";
+import { CategoriasManager } from "@/components/modules/CategoriasManager";
 import { cn } from "@/lib/format";
 
  
@@ -40,7 +41,7 @@ export function StockClient({ materials, suppliers, purchases, materialCats, mov
 }) {
   const router = useRouter();
   const refresh = () => router.refresh();
-  const [tab, setTab] = useState<"materiais" | "movimentos" | "fornecedores" | "compras">("materiais");
+  const [tab, setTab] = useState<"materiais" | "movimentos" | "fornecedores" | "compras" | "categorias">("materiais");
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState<Record<string, string>>({});
   const [matModal, setMatModal] = useState<null | { edit?: Row }>(null);
@@ -244,6 +245,7 @@ export function StockClient({ materials, suppliers, purchases, materialCats, mov
             { value: "movimentos", label: "Movimentações", count: movements.length },
             { value: "fornecedores", label: "Fornecedores", count: suppliers.length },
             { value: "compras", label: "Compras", count: purchases.length },
+            { value: "categorias", label: "Categorias", count: materialCats.length },
           ]}
         />
         {tab === "materiais" && (
@@ -353,6 +355,20 @@ export function StockClient({ materials, suppliers, purchases, materialCats, mov
           })}
           </div>
         )
+      )}
+
+      {/* ── CATEGORIAS ── */}
+      {tab === "categorias" && (
+        <CategoriasManager
+          categorias={materialCats}
+          module="material"
+          titulo="Categorias de material"
+          contagem={materials.reduce<Record<string, number>>((acc, m) => {
+            const k = String(m.categoryId ?? "");
+            if (k) acc[k] = (acc[k] || 0) + 1;
+            return acc;
+          }, {})}
+        />
       )}
 
       {/* ── MOVIMENTOS ── */}

@@ -36,6 +36,7 @@ import {
   toast,
 } from "@/components/ui";
 import { Icon } from "@/components/icons";
+import { CategoriasManager } from "@/components/modules/CategoriasManager";
 import { cn } from "@/lib/format";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -350,6 +351,7 @@ export function ProductsClient({
   });
 
   const catName = (id: unknown) => productCats.find((c) => Number(c.id) === Number(id))?.name;
+  const [gerirCats, setGerirCats] = useState(false);
 
   /* ── Árvore de duas camadas (v3.58.0) ─────────────────────────
      As categorias viraram Mestre → Subcategoria. Os selects listavam
@@ -418,7 +420,30 @@ export function ProductsClient({
         <span className="ml-auto font-mono text-[11px] text-ink-400 tnum">
           {filtered.length} de {products.length} produtos
         </span>
+        {/* Gerir categorias é tarefa rara: fica atrás de um botão, não
+            ocupando espaço permanente. */}
+        <Button
+          size="sm"
+          variant="ghost"
+          icon={gerirCats ? "x" : "gear"}
+          onClick={() => setGerirCats((v) => !v)}
+        >
+          Categorias
+        </Button>
       </div>
+
+      {gerirCats && (
+        <CategoriasManager
+          categorias={productCats}
+          module="product"
+          titulo="Categorias de produto"
+          contagem={products.reduce<Record<string, number>>((acc, p) => {
+            const k = String(p.productCategoryId ?? "");
+            if (k) acc[k] = (acc[k] || 0) + 1;
+            return acc;
+          }, {})}
+        />
+      )}
 
       {filtered.length === 0 ? (
         <EmptyState

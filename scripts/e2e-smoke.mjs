@@ -1542,6 +1542,66 @@ async function main() {
     assert(t.netos === 0, "árvore tem no máximo dois níveis (sem netos)");
   }
 
+  // 11.98) Proxy do WhatsApp respeita o método (v3.58.1)
+  //
+  // O dono viu "rota não encontrada" ao desligar o bot. Causa: o
+  // proxy repassava GET para /pausar (que só existe como POST) e o
+  // serviço devolvia 404. O Next pré-busca com GET, então o toast
+  // vermelho aparecia sozinho, sem clique.
+  {
+    for (const rota of ["pausar", "retomar", "ausencia"]) {
+      const r = await fetch(`${BASE_URL}/api/whatsapp/${rota}`);
+      assert(r.status === 405, `GET /api/whatsapp/${rota} devolve 405, não 404`);
+    }
+    // Rota inexistente continua 404 — 405 seria mentira.
+    const inv = await fetch(`${BASE_URL}/api/whatsapp/nao-existe`);
+    assert(inv.status === 404, "rota inexistente ainda devolve 404");
+  }
+
+  // 11.99) Travas de edição de categorias (v3.58.1)
+  //
+  // As categorias passaram a ser editáveis pela tela. Sem trava, é
+  // fácil apagar uma categoria cheia de produtos ou criar um terceiro
+  // nível que a interface não sabe desenhar.
+  {
+    /* fetch direto, não `req`: aqui os status 422 e 409 são o
+       RESULTADO esperado, e `req` trata não-2xx como exceção. */
+    const cat = async (op, data, id) => {
+      const r = await fetch(`${BASE_URL}/api/crud/item-categories`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ op, id, data }),
+      });
+      return { status: r.status, body: await r.json().catch(() => ({})) };
+    };
+
+    const mestre = await cat("create", {
+      module: "material", name: `SMOKE Mestre ${stamp}`, icon: "🧪", order: 990,
+    });
+    const idM = mestre.body?.row?.id;
+    assert(!!idM, "cria categoria mestre");
+
+    const filha = await cat("create", {
+      module: "material", name: `SMOKE Filha ${stamp}`, parentId: idM, order: 1,
+    });
+    const idF = filha.body?.row?.id;
+    assert(!!idF, "cria subcategoria");
+
+    const neto = await cat("create", {
+      module: "material", name: `SMOKE Neto ${stamp}`, parentId: idF,
+    });
+    assert(neto.status === 422, "recusa criar terceiro nível (neto)");
+
+    const loop = await cat("update", { name: `SMOKE Mestre ${stamp}`, parentId: idM }, idM);
+    assert(loop.status === 422, "recusa categoria ser pai de si mesma");
+
+    const comFilha = await cat("delete", {}, idM);
+    assert(comFilha.status === 409, "recusa apagar mestre que tem subcategoria");
+
+    await cat("delete", {}, idF);
+    await cat("delete", {}, idM);
+  }
+
   // 12) Páginas principais respondem
   for (const path of ["/clientes", "/orcamentos", "/pedidos", "/kanban", "/estoque", "/relatorios", "/financeiro", "/envios", "/cobrancas"]) {
     const res = await fetch(`${BASE_URL}${path}`);
