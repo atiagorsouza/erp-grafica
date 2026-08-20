@@ -30,6 +30,7 @@
 import "dotenv/config";
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
@@ -102,8 +103,22 @@ try {
   );
   const enums = new Set((await q(`SELECT typname FROM pg_type WHERE typtype='e'`)).map((r) => r.typname));
 
+  /* Nem tudo que o código usa está no Drizzle: `whatsapp_mensagens` e
+     `whatsapp_conversas` nascem em `migrar-campanhas.sql`, em SQL puro.
+     Derivar SÓ do schema perdia essas duas — o /whatsapp quebrava com
+     "relation does not exist" e este script ainda dizia "banco em dia".
+     Então unimos as duas fontes: o schema Drizzle E os CREATE TABLE do
+     .sql. */
+  const doSql = new Set(
+    [...(await readFile(join(AQUI, "migrar-campanhas.sql"), "utf8"))
+      .matchAll(/CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?"?([a-z0-9_]+)"?/gi)]
+      .map((m) => m[1])
+  );
+
+  const todasEsperadas = new Set([...Object.keys(esperado.tabelas), ...doSql]);
+
   const faltaEnum = Object.keys(esperado.enums).filter((e) => !enums.has(e));
-  const faltaTabela = Object.keys(esperado.tabelas).filter((t) => !tabelas.has(t));
+  const faltaTabela = [...todasEsperadas].filter((t) => !tabelas.has(t));
   /* Coluna só é "faltante" se a TABELA já existe. Se a tabela inteira
      falta, ela nasce completa no CREATE — listar as colunas junto só
      polui o relatório. */
@@ -136,8 +151,10 @@ try {
   /* Tabela inteira faltando é caso de drizzle-kit: montar CREATE TABLE
      à mão aqui seria reimplementar o gerador, e errado. Colunas e
      tipos, sim, sabemos criar com segurança. */
-  if (faltaTabela.length) {
-    console.log("\n  ⚠ Há TABELAS faltando — isso este script não cria.");
+  const semReceita = faltaTabela.filter((t) => !doSql.has(t));
+  if (semReceita.length) {
+    console.log("\n  ⚠ Há TABELAS faltando que este script não sabe criar:");
+    for (const t of semReceita) console.log(`     · ${t}`);
     console.log("    Rode antes:  npx drizzle-kit push --force");
   }
 
@@ -152,7 +169,36 @@ try {
      do CREATE TYPE dela. */
   const feitos = [];
 
-  for (const nome of faltaEnum) {
+  /* Se falta alguma tabela que o .sql sabe criar, roda o .sql. Ele é
+     todo IF NOT EXISTS, então é seguro repetir. */
+  if (faltaTabela.some((t) => doSql.has(t))) {
+    console.log("\n  aplicando migrar-campanhas.sql…");
+    await client.query(await readFile(join(AQUI, "migrar-campanhas.sql"), "utf8"));
+    for (const t of faltaTabela.filter((x) => doSql.has(x))) {
+      feitos.push(`tabela ${t}`);
+      console.log(`   + tabela  ${t}`);
+    }
+  }
+
+  /* O .sql também cria tipos e colunas por conta própria. Reconferimos
+     o banco AGORA, depois dele: emitir `CREATE TYPE` para algo que ele
+     acabou de criar aborta tudo com "already exists". */
+  const enumAgora = new Set(
+    (await q(`SELECT typname FROM pg_type WHERE typtype='e'`)).map((r) => r.typname)
+  );
+  const colAgora = new Set(
+    (
+      await q(
+        `SELECT table_name||'.'||column_name AS c
+           FROM information_schema.columns WHERE table_schema='public'`
+      )
+    ).map((r) => r.c)
+  );
+  const tabAgora = new Set(
+    (await q(`SELECT tablename FROM pg_tables WHERE schemaname='public'`)).map((r) => r.tablename)
+  );
+
+  for (const nome of faltaEnum.filter((e) => !enumAgora.has(e))) {
     const valores = esperado.enums[nome].map((v) => `'${String(v).replace(/'/g, "''")}'`).join(", ");
     const sql = `CREATE TYPE ${id(nome)} AS ENUM (${valores})`;
     await client.query(sql);
@@ -160,7 +206,13 @@ try {
     console.log(`   + tipo    ${nome}`);
   }
 
-  for (const [tab, c] of faltaColuna) {
+  /* Idem para as colunas: o .sql pode ter criado as que faltavam, e
+     tabelas recém-criadas por ele já nascem completas. */
+  const colunasPendentes = faltaColuna.filter(
+    ([tab, c]) => tabAgora.has(tab) && !colAgora.has(`${tab}.${c.nome}`)
+  );
+
+  for (const [tab, c] of colunasPendentes) {
     /* NOT NULL sem default numa tabela que já tem linhas é rejeitado
        pelo Postgres — e forçar um default inventado corromperia dado
        real. Nesses casos criamos a coluna anulável e avisamos. */
@@ -204,7 +256,7 @@ try {
 
   const aindaFalta = [
     ...Object.keys(esperado.enums).filter((e) => !enum2.has(e)).map((e) => `tipo ${e}`),
-    ...Object.keys(esperado.tabelas).filter((t) => !tab2.has(t)).map((t) => `tabela ${t}`),
+    ...[...todasEsperadas].filter((t) => !tab2.has(t)).map((t) => `tabela ${t}`),
     ...Object.entries(esperado.tabelas).flatMap(([t, cols]) =>
       tab2.has(t) ? cols.filter((c) => !col2.has(`${t}.${c.nome}`)).map((c) => `coluna ${t}.${c.nome}`) : []
     ),
