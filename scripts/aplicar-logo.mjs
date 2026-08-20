@@ -63,7 +63,7 @@ try {
 
   const { rows } = await client.query(
     `SELECT key, coalesce(value,'') v FROM settings WHERE key = ANY($1)`,
-    [LOGOS.map((l) => l.chave)]
+    [LOGOS.flatMap((l) => [l.chave, l.chave + "_origem"])]
   );
   const atual = new Map(rows.map((r) => [r.key, r.v]));
 
@@ -73,16 +73,62 @@ try {
   for (const logo of LOGOS) {
     const tem = String(atual.get(logo.chave) ?? "").trim();
 
-    if (tem && !FORCAR) {
-      console.log(`  = ${logo.chave.padEnd(20)} já configurada (${Math.round(tem.length / 1024)} KB)`);
+    const achou = await achar(logo.arquivo);
+
+    /* A logo do PACOTE é a mesma que está no banco?
+
+       Antes bastava a chave ter QUALQUER valor para o script preservar
+       o que estava lá. Isso protege a logo que o dono trocou no Painel
+       — mas também congelava uma logo ERRADA: em 20/08/2026 o ícone da
+       sidebar tinha sido gravado com a marca inteira (ilegível em
+       40px), o pacote seguinte trazia o arquivo corrigido, e o deploy
+       preservou o errado. Foram cinco tentativas até alguém rodar
+       --forcar à mão.
+
+       Agora comparamos o conteúdo: se o arquivo do pacote for
+       diferente do que está no banco, ele é uma CORREÇÃO e entra.
+       Se for igual, não há o que fazer. */
+    const doPacote = achou ? `data:image/png;base64,${achou.buf.toString("base64")}` : null;
+    const igual = doPacote !== null && doPacote === tem;
+
+    /* Quem gravou a logo que está no banco: este script (deploy) ou o
+       dono, pelo Painel? A resposta muda tudo:
+
+         - gravada pelo DEPLOY  → pode ser corrigida por outro deploy
+         - trocada pelo DONO    → intocável, só com --forcar
+
+       Sem essa marca não dá para distinguir "logo errada que o pacote
+       veio consertar" de "logo que o dono escolheu". A primeira versão
+       desta correção comparava só o conteúdo e acabou sobrescrevendo a
+       logo do Painel — o oposto do que a proteção existia para fazer. */
+    const marca = String(atual.get(logo.chave + "_origem") ?? "").trim();
+    const doDono = tem !== "" && marca !== "deploy";
+
+    if (tem && igual) {
+      console.log(`  = ${logo.chave.padEnd(20)} já está atualizada (${Math.round(tem.length / 1024)} KB)`);
       mantidas++;
       continue;
     }
 
-    const achou = await achar(logo.arquivo);
+    if (doDono && !FORCAR) {
+      console.log(`  = ${logo.chave.padEnd(20)} mantida — trocada no Painel (use --forcar para substituir)`);
+      mantidas++;
+      continue;
+    }
+
+    if (tem && !achou) {
+      console.log(`  = ${logo.chave.padEnd(20)} mantida (${Math.round(tem.length / 1024)} KB) — sem arquivo no pacote`);
+      mantidas++;
+      continue;
+    }
+
     if (!achou) {
       console.log(`  ! ${logo.chave.padEnd(20)} ${logo.arquivo} não encontrado`);
       continue;
+    }
+
+    if (tem && !igual) {
+      console.log(`  ~ ${logo.chave.padEnd(20)} o pacote traz uma versão diferente — atualizando`);
     }
 
     const kb = Math.round(achou.buf.length / 1024);
@@ -101,6 +147,14 @@ try {
         `INSERT INTO settings (key, value, category) VALUES ($1, $2, 'empresa')
          ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = now()`,
         [logo.chave, dataUri]
+      );
+      /* Marca que esta logo veio do DEPLOY. Quando o dono trocar pelo
+         Painel, a rota de upload apaga esta chave — e a partir daí o
+         deploy não mexe mais nela. */
+      await client.query(
+        `INSERT INTO settings (key, value, category) VALUES ($1, 'deploy', 'empresa')
+         ON CONFLICT (key) DO UPDATE SET value = 'deploy', updated_at = now()`,
+        [logo.chave + "_origem"]
       );
     }
   }

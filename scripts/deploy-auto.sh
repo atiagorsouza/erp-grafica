@@ -26,16 +26,52 @@
 # ────────────────────────────────────────────────────────────────────
 set -uo pipefail
 
-RAIZ="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cd "$RAIZ"
+# RAIZ = a pasta do SITE, não a pasta do script.
+#
+# Antes era `dirname $0/..`, o que só funciona se o script estiver em
+# scripts/ DENTRO do site. Rodando o deploy-auto.sh que vem solto no
+# pacote (ex.: /www/wwwroot/vtdigital-3.59.1/deploy-auto.sh) o RAIZ
+# virava /www/wwwroot — e o backup tentava copiar a pasta errada e
+# falhava, sem dizer por quê. Aconteceu em produção em 20/08/2026.
+#
+# Agora procuramos o site de verdade, na ordem:
+#   1. --raiz passado à mão
+#   2. o diretório atual, se tiver package.json do projeto
+#   3. a pasta acima do script (caso clássico: scripts/ dentro do site)
+ehSite() { [ -f "$1/package.json" ] && grep -q '"next"' "$1/package.json" 2>/dev/null; }
+
+RAIZ=""
+for i in "$@"; do
+  [ "${ANTERIOR:-}" = "--raiz" ] && RAIZ="$i" && break
+  ANTERIOR="$i"
+done
+unset ANTERIOR
+
+if [ -z "$RAIZ" ]; then
+  AQUI="$(pwd)"
+  ACIMA="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd)"
+  if ehSite "$AQUI"; then
+    RAIZ="$AQUI"
+  elif ehSite "$ACIMA"; then
+    RAIZ="$ACIMA"
+  else
+    echo "✖ não achei a pasta do site (nenhum package.json com Next por perto)."
+    echo "  Rode de dentro da pasta do ERP, ou passe:  --raiz /caminho/do/erp"
+    exit 1
+  fi
+fi
+cd "$RAIZ" || { echo "✖ não consegui entrar em $RAIZ"; exit 1; }
 
 PORTA=3000
 PACOTE=""
 ROLLBACK=1
+FORCAR=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --porta)         PORTA="$2"; shift 2 ;;
+    --raiz)          shift 2 ;;   # já lido acima, antes do cd
+    --forcar)        FORCAR=1; shift ;;
     --sem-rollback)  ROLLBACK=0; shift ;;
     -h|--help)       sed -n '2,26p' "$0"; exit 0 ;;
     *)               PACOTE="$1"; shift ;;
@@ -164,6 +200,32 @@ if [ -f "${PACOTE}.sha256" ]; then
     && ok "checksum confere" || warn "checksum não confere (seguindo mesmo assim)"
 fi
 
+# Reinstalar a MESMA versão derruba o site por 1–2 minutos sem entregar
+# nada de novo. Em 20/08/2026 isso aconteceu duas vezes seguidas em
+# produção: na primeira o script escolheu sozinho um pacote antigo e
+# reinstalou a versão que já estava no ar; na segunda, rodou de novo a
+# mesma 3.59.1 "por garantia". Site fora do ar à toa nas duas.
+if [ -n "${ANTES:-}" ] && [ "$ANTES" = "$ALVO" ]; then
+  echo
+  warn "a versão v${ALVO} JÁ está no ar."
+  warn "reinstalar vai derrubar o site por 1–2 min e não muda nada."
+  if [ "$FORCAR" = "1" ]; then
+    warn "--forcar informado: seguindo mesmo assim."
+  elif [ -t 0 ]; then
+    printf "  Reinstalar mesmo assim? [s/N] "
+    read -r resposta
+    case "$resposta" in
+      s|S|sim|SIM) ok "seguindo a pedido" ;;
+      *) echo; ok "nada foi alterado — o site continua no ar."; exit 0 ;;
+    esac
+  else
+    echo
+    er "rodando sem terminal: não vou reinstalar por conta própria."
+    er "se for mesmo o que você quer:  bash deploy-auto.sh --forcar $PACOTE"
+    exit 0
+  fi
+fi
+
 if [ "$ALVO" = "$ANTES" ]; then
   warn "v$ALVO já está no ar — reinstalando por cima"
 fi
@@ -172,13 +234,29 @@ fi
 step "2/9  Backup da instalação atual"
 BACKUP_DIR="$RAIZ/backups/pre-deploy-$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$BACKUP_DIR"
-if copiar_arvore "$RAIZ" "$BACKUP_DIR" 2>/dev/null && [ -f "$BACKUP_DIR/package.json" ]; then
+if copiar_arvore "$RAIZ" "$BACKUP_DIR" 2>/tmp/backup-erro.log && [ -f "$BACKUP_DIR/package.json" ]; then
   ok "código salvo em $(basename "$BACKUP_DIR") ($(du -sh "$BACKUP_DIR" 2>/dev/null | cut -f1))"
 else
   # Sem backup não há rollback. Melhor parar agora do que descobrir
   # depois de já ter derrubado o servidor.
+  #
+  # O erro ia para /dev/null e o script só dizia "não consegui criar o
+  # backup" — justamente quando dá problema, escondia o motivo. Em
+  # 20/08/2026 isso custou várias tentativas às cegas em produção.
   FALHOU="não consegui criar o backup"
-  er "$FALHOU"; exit 1
+  er "$FALHOU"
+  echo
+  er "  pasta do site : $RAIZ"
+  er "  destino       : $BACKUP_DIR"
+  [ -f "$BACKUP_DIR/package.json" ] || er "  package.json NÃO chegou no backup"
+  if [ -s /tmp/backup-erro.log ]; then
+    er "  o que o sistema disse:"
+    sed 's/^/      /' /tmp/backup-erro.log | head -10
+  fi
+  echo
+  er "  confira:  df -h \"$RAIZ\"   (espaço)"
+  er "            ls -ld \"$RAIZ/backups\"   (permissão)"
+  exit 1
 fi
 
 if [ -n "${DATABASE_URL:-}" ] && command -v pg_dump >/dev/null 2>&1; then

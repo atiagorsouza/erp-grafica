@@ -164,6 +164,12 @@ export async function POST(req: Request) {
     await db.insert(settings).values({ key: chave, value: dataUri, category: "empresa" });
   }
 
+  /* A logo passou a ser ESCOLHA DO DONO — o deploy não pode mais
+     substituí-la. O `aplicar-logo.mjs` só atualiza logo cuja origem
+     seja "deploy"; apagando a marca aqui, a imagem enviada pelo Painel
+     fica protegida das próximas atualizações. */
+  await db.delete(settings).where(eq(settings.key, `${chave}_origem`));
+
   /* Não devolvemos o data URI: o cliente já tem o arquivo e a prévia
      passa a vir da URL do GET. Mandar de volta 2 MB que o navegador
      acabou de enviar é desperdício puro. `versao` força a prévia a
