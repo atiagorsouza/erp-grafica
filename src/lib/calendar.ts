@@ -214,10 +214,30 @@ export async function deactivateCalendarDate(id: number, reason = "Desativada pe
   return { ok: true as const, row };
 }
 
+/* 29 de fevereiro em ano não bissexto (v3.55.0).
+
+   `isValidMonthDay` usa o ano 2000 (bissexto) para PERMITIR cadastrar
+   29/02 como data recorrente — o que está certo. Mas o JavaScript
+   estoura silenciosamente: `new Date(2027, 1, 29)` devolve 1º de
+   março, sem erro.
+
+   Resultado: a data comemorativa aparecia um dia depois em três de
+   cada quatro anos, e ninguém desconfiaria — só notaria que o aviso
+   chegou "estranho". Em ano não bissexto o correto é 28/02: é o
+   último dia de fevereiro, que é o que a data significa. */
+function diaSeguroNoAno(ano: number, mes: number, dia: number): Date {
+  const d = new Date(ano, mes - 1, dia);
+  /* Se o mês mudou, o dia não existe naquele ano: recua para o
+     último dia do mês pretendido. O dia 0 do mês seguinte é
+     exatamente isso. */
+  if (d.getMonth() !== mes - 1) return new Date(ano, mes, 0);
+  return d;
+}
+
 export function daysUntil(month: number, day: number, now = new Date()) {
   const y = now.getFullYear();
   const today = new Date(y, now.getMonth(), now.getDate());
-  let target = new Date(y, month - 1, day);
-  if (target < today) target = new Date(y + 1, month - 1, day);
+  let target = diaSeguroNoAno(y, month, day);
+  if (target < today) target = diaSeguroNoAno(y + 1, month, day);
   return Math.ceil((target.getTime() - today.getTime()) / 86400000);
 }

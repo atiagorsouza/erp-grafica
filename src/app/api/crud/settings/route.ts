@@ -5,6 +5,28 @@ import { eq, asc } from "drizzle-orm";
 
 export const dynamic = "force-dynamic";
 
+/* Chaves que o sistema aceita gravar (v3.55.0).
+
+   Antes, qualquer `key` criava linha nova. Um typo no cliente ou uma
+   requisição malformada inventava configuração que a tela nunca
+   mostra (porque não está no catálogo) e que ninguém consegue apagar
+   pela interface — lixo permanente no banco.
+
+   A auditoria dos 3 módulos encontrou 2 dessas órfãs em produção.
+   Agora só passa o que o catálogo conhece, mais as chaves que o
+   próprio sistema grava por fora dele. */
+const CHAVES_INTERNAS = new Set(["app_version", "company_trade_name"]);
+
+function chaveConhecida(key: string): boolean {
+  if (CHAVES_INTERNAS.has(key)) return true;
+  /* Estado do bot é gravado pelo serviço do WhatsApp, não pelo
+     Painel — por isso não está no catálogo. */
+  if (/^wa_bot_/.test(key)) return true;
+  return (controlPanelConfig as { groups: { fields: { key: string }[] }[] }).groups.some((g) =>
+    g.fields.some((f) => f.key === key)
+  );
+}
+
 async function upsertSetting(data: Record<string, unknown>) {
   const key = String(data.key || "").trim();
   if (!key) throw new Error("key obrigatória");
@@ -12,6 +34,15 @@ async function upsertSetting(data: Record<string, unknown>) {
   const category = String(data.category || "geral");
 
   const existing = await db.select().from(settings).where(eq(settings.key, key)).limit(1);
+
+  /* Atualizar chave existente sempre pode; CRIAR uma nova exige que
+     ela seja conhecida. Assim nada que já está no banco quebra, mas
+     a porta para lixo novo fica fechada. */
+  if (!existing[0] && !chaveConhecida(key)) {
+    const erro = new Error(`Configuração desconhecida: ${key}`);
+    (erro as Error & { code?: string }).code = "UNKNOWN_SETTING";
+    throw erro;
+  }
   if (existing[0]) {
     const [row] = await db
       .update(settings)
@@ -78,9 +109,22 @@ export async function POST(req: Request) {
 
   try {
     if (op === "save" || op === "create") {
-      const row = await upsertSetting(data);
-      clearSettingsCache();
-      return Response.json({ ok: true, row });
+      try {
+        const row = await upsertSetting(data);
+        clearSettingsCache();
+        return Response.json({ ok: true, row });
+      } catch (e) {
+        if ((e as Error & { code?: string }).code === "UNKNOWN_SETTING") {
+          return Response.json(
+            {
+              error: (e as Error).message,
+              details: { code: "UNKNOWN_SETTING" },
+            },
+            { status: 422 }
+          );
+        }
+        throw e;
+      }
     }
 
     if (op === "update") {
