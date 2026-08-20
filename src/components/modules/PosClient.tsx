@@ -2151,7 +2151,10 @@ function ThermalReceipt({
             o corpo — numa térmica de 80mm aumentar a fonte estoura a
             linha. Mesmo recurso aqui. */}
         <TotalRow
-          label="V A L O R   T O T A L"
+          /* espaços não-quebráveis: o HTML colapsa espaço normal e as
+             palavras saíam grudadas ("V A L O R T O T A L") na foto do
+             cupom impresso */
+          label={"V A L O R" + "\u00a0\u00a0" + "T O T A L"}
           value={formatNum(receipt.total)}
         />
       </div>

@@ -26,6 +26,10 @@ type FieldDef = {
   suffix?: string;
   span2?: boolean;
   mono?: boolean;
+  /** máscara aplicada enquanto digita; o banco guarda só os dígitos */
+  mask?: "documento" | "telefone" | "cep" | "pix";
+  /** "endereco": ao completar o CEP, busca e preenche rua/bairro/cidade/UF */
+  autofill?: string;
 };
 
 type Group = {
@@ -62,8 +66,74 @@ const defaultOf = (key: string): string => {
   return "";
 };
 
+/* MÁSCARAS DO PAINEL (v3.60.0)
+
+   O dono digita como preferir; a máscara é aplicada enquanto ele
+   escreve. O que vai para o banco é o texto mascarado, e o
+   `settings.ts` normaliza na leitura — então cadastro antigo, com ou
+   sem pontuação, continua válido.
+
+   Antes nenhum dos 25 campos da empresa tinha máscara: o CNPJ e os
+   telefones saíam crus no cupom impresso ("2120383504"). */
+function aplicarMascara(valor: string, mask?: FieldDef["mask"]): string {
+  if (!mask) return valor;
+  const d = valor.replace(/\D/g, "");
+
+  if (mask === "telefone") {
+    const n = d.slice(0, 11);
+    if (n.length <= 2) return n;
+    if (n.length <= 6) return `(${n.slice(0, 2)}) ${n.slice(2)}`;
+    if (n.length <= 10) return `(${n.slice(0, 2)}) ${n.slice(2, 6)}-${n.slice(6)}`;
+    return `(${n.slice(0, 2)}) ${n.slice(2, 7)}-${n.slice(7)}`;
+  }
+
+  if (mask === "cep") {
+    const n = d.slice(0, 8);
+    return n.length > 5 ? `${n.slice(0, 5)}-${n.slice(5)}` : n;
+  }
+
+  if (mask === "documento") {
+    const n = d.slice(0, 14);
+    /* Até 11 dígitos ainda pode virar CPF ou CNPJ. Pontuar como CPF
+       desde o 4º dígito fazia "30189" (começo do CNPJ) aparecer como
+       "301.89" na tela — confuso para quem digita. Só pontuamos
+       quando o CPF está completo, ou quando já passou de 11 dígitos e
+       portanto só pode ser CNPJ. */
+    if (n.length > 3 && n.length < 11) {
+      /* zona ambígua: mostra sem pontuação */
+      return n;
+    }
+    if (n.length <= 11) {
+      /* CPF */
+      return n
+        .replace(/^(\d{3})(\d)/, "$1.$2")
+        .replace(/^(\d{3})\.(\d{3})(\d)/, "$1.$2.$3")
+        .replace(/\.(\d{3})(\d{1,2})$/, ".$1-$2");
+    }
+    /* CNPJ */
+    return n
+      .replace(/^(\d{2})(\d)/, "$1.$2")
+      .replace(/^(\d{2})\.(\d{3})(\d)/, "$1.$2.$3")
+      .replace(/\.(\d{3})(\d)/, ".$1/$2")
+      .replace(/(\d{4})(\d{1,2})$/, "$1-$2");
+  }
+
+  /* PIX aceita CPF, CNPJ, e-mail, telefone ou chave aleatória. Só
+     mascaramos quando é claramente um documento — mascarar e-mail ou
+     chave aleatória estragaria a chave. */
+  if (mask === "pix") {
+    const soDigitos = valor.trim() !== "" && /^[\d.\-/()\s]+$/.test(valor);
+    if (!soDigitos) return valor;
+    if (d.length === 11 || d.length === 14) return aplicarMascara(valor, "documento");
+    return valor;
+  }
+
+  return valor;
+}
+
 export function SettingsClient({ rows }: { rows: Row[] }) {
   const router = useRouter();
+  const [buscandoCep, setBuscandoCep] = useState(false);
 
   const rowsByKey = useMemo(() => {
     const map = new Map<string, Row>();
@@ -93,6 +163,36 @@ export function SettingsClient({ rows }: { rows: Row[] }) {
     const original = row ? String(row.value ?? "") : defaultOf(key);
     return original !== value;
   }).length;
+
+  /* Busca o endereço pelo CEP e preenche rua/bairro/cidade/UF.
+
+     Usa a mesma rota que o cadastro de cliente no PDV (/api/cep/:cep)
+     — não vale ter dois caminhos para a mesma coisa. Só dispara com 8
+     dígitos, e nunca sobrescreve o número/complemento, que o ViaCEP
+     não conhece. */
+  async function buscarCep(valor: string) {
+    const limpo = String(valor || "").replace(/\D/g, "");
+    if (limpo.length !== 8) return;
+    setBuscandoCep(true);
+    try {
+      const r = await fetch(`/api/cep/${limpo}`);
+      if (!r.ok) return;
+      const d = (await r.json()) as {
+        street?: string; district?: string; city?: string; state?: string;
+      };
+      setForm((x) => ({
+        ...x,
+        company_street: d.street || x.company_street || "",
+        company_district: d.district || x.company_district || "",
+        company_city: d.city || x.company_city || "",
+        company_state: d.state || x.company_state || "",
+      }));
+    } catch {
+      /* CEP inexistente ou sem internet: o dono digita à mão */
+    } finally {
+      setBuscandoCep(false);
+    }
+  }
 
   async function save() {
     setSaving(true);
@@ -223,9 +323,19 @@ export function SettingsClient({ rows }: { rows: Row[] }) {
                         mono={f.mono || f.type === "number"}
                         type={f.type === "number" ? "number" : "text"}
                         value={form[f.key] ?? String(f.defaultValue ?? "")}
-                        onChange={(e) => setForm((x) => ({ ...x, [f.key]: e.target.value }))}
+                        onChange={(e) => {
+                          const bruto = e.target.value;
+                          const valor = aplicarMascara(bruto, f.mask);
+                          setForm((x) => ({ ...x, [f.key]: valor }));
+                          if (f.autofill === "endereco") void buscarCep(valor);
+                        }}
                         className={f.suffix ? "pr-9" : ""}
                       />
+                      {f.autofill === "endereco" && buscandoCep && (
+                        <span className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-[10px] text-ink-400">
+                          buscando…
+                        </span>
+                      )}
                       {f.suffix && (
                         <span className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 font-mono text-[11px] text-ink-400">
                           {f.suffix}
