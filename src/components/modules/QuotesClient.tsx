@@ -47,6 +47,17 @@ type Item = {
   total: number;
 };
 
+/* Estado da paginação vindo do servidor (v3.62.0). */
+type Paginacao = {
+  total: number;
+  pagina: number;
+  porPagina: number;
+  totalPaginas: number;
+  contadores: Record<string, number>;
+  busca: string;
+  filtro: string;
+};
+
 const STATUSES = ["rascunho", "enviado", "aprovado", "recusado", "expirado"];
 
 /* ==================================================================
@@ -61,8 +72,10 @@ export function QuotesClient({
   services,
   orders,
   company,
+  paginacao,
 }: {
   quotes: Row[];
+  paginacao: Paginacao;
   items: Row[];
   customers: Row[];
   products: Row[];
@@ -74,8 +87,35 @@ export function QuotesClient({
   const params = useSearchParams();
   const [customersList, setCustomersList] = useState<Row[]>(initialCustomers);
 
-  const [filter, setFilter] = useState("all");
-  const [q, setQ] = useState("");
+  /* Filtro e busca vivem na URL: quem decide o que aparece é o
+     servidor (v3.62.0). */
+  const filter = paginacao.filtro;
+  const [q, setQ] = useState(paginacao.busca);
+
+  const irPara = useCallback(
+    (mudancas: Record<string, string | number>) => {
+      const p = new URLSearchParams();
+      const base: Record<string, string> = {
+        q: paginacao.busca,
+        filtro: paginacao.filtro,
+        pagina: String(paginacao.pagina),
+        por: String(paginacao.porPagina),
+        ...Object.fromEntries(Object.entries(mudancas).map(([k, v]) => [k, String(v)])),
+      };
+      if (mudancas.q !== undefined || mudancas.filtro !== undefined) base.pagina = "1";
+      for (const [k, v] of Object.entries(base)) if (v && v !== "0" && v !== "all") p.set(k, v);
+      router.push(`/orcamentos${p.toString() ? `?${p}` : ""}`);
+    },
+    [router, paginacao]
+  );
+
+  const setFilter = useCallback((valor: string) => irPara({ filtro: valor }), [irPara]);
+
+  useEffect(() => {
+    if (q === paginacao.busca) return;
+    const t = setTimeout(() => irPara({ q }), 300);
+    return () => clearTimeout(t);
+  }, [q, paginacao.busca, irPara]);
   const [editorOpen, setEditorOpen] = useState(false);
   const [editId, setEditId] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
@@ -101,7 +141,9 @@ export function QuotesClient({
 
   /* Busca inteligente + filtro */
   const filtered = useMemo(() => {
-    const term = q.trim().toLowerCase();
+    /* O servidor já filtrou; isto só cobre o instante entre digitar e
+       a página chegar. */
+    const term = paginacao.busca.trim().toLowerCase();
     return quotes.filter((quote) => {
       const c = custName(quote.customerId);
       const qItems = items.filter((i) => Number(i.quoteId) === Number(quote.id));
@@ -116,7 +158,7 @@ export function QuotesClient({
       if (!matchTerm) return false;
       return filter === "all" || quote.status === filter;
     });
-  }, [quotes, q, filter, custName, items]);
+  }, [quotes, paginacao.busca, filter, custName, items]);
 
   /* Cálculo de totais com money.ts */
   const totals = useMemo(() => {
@@ -344,7 +386,8 @@ export function QuotesClient({
   }
 
   const hasOrder = (quoteId: number) => orders.some((o) => Number(o.quoteId) === quoteId);
-  const counts = STATUSES.map((s) => ({ s, n: quotes.filter((q) => q.status === s).length }));
+  /* Contadores do servidor: somam a base inteira, não a página. */
+  const counts = STATUSES.map((s) => ({ s, n: paginacao.contadores[s] ?? 0 }));
 
   const customerOptions = useMemo(
     () =>
@@ -382,7 +425,7 @@ export function QuotesClient({
                 : "border-paper-300 bg-paper-50 text-ink-500 hover:border-ink-400"
             )}
           >
-            Todos · {quotes.length}
+            Todos · {paginacao.contadores.todos ?? 0}
           </button>
           {counts.map(({ s, n }) => (
             <button
@@ -518,6 +561,64 @@ export function QuotesClient({
             })}
           </tbody>
         </TableWrap>
+      )}
+
+      {/* ── PAGINAÇÃO ── mesma dupla de Pedidos: rolagem no celular,
+         páginas numeradas no computador. */}
+      {paginacao.total > 0 && (
+        <div className="mt-5 flex flex-col items-center gap-3 border-t border-paper-200 pt-4">
+          <p className="text-xs text-ink-500">
+            Mostrando{"\u00a0"}
+            <strong className="text-ink-700">
+              {(paginacao.pagina - 1) * paginacao.porPagina + 1}
+              {"\u00a0"}a{"\u00a0"}
+              {Math.min(paginacao.pagina * paginacao.porPagina, paginacao.total)}
+            </strong>
+            {"\u00a0"}de{"\u00a0"}<strong className="text-ink-700">{paginacao.total}</strong>
+            {"\u00a0"}
+            {paginacao.total === 1 ? "orçamento" : "orçamentos"}
+            {paginacao.busca ? ` para "${paginacao.busca}"` : ""}
+          </p>
+
+          {paginacao.totalPaginas > 1 && (
+            <>
+              <div className="flex w-full sm:hidden">
+                {paginacao.pagina < paginacao.totalPaginas && (
+                  <Button
+                    variant="outline"
+                    className="w-full"
+                    onClick={() => irPara({ pagina: paginacao.pagina + 1 })}
+                  >
+                    Carregar mais
+                  </Button>
+                )}
+              </div>
+
+              <div className="hidden items-center gap-1.5 sm:flex">
+                <Button
+                  variant="outline"
+                  disabled={paginacao.pagina <= 1}
+                  onClick={() => irPara({ pagina: paginacao.pagina - 1 })}
+                >
+                  Anterior
+                </Button>
+                <span className="px-3 text-xs text-ink-500">
+                  Página{"\u00a0"}
+                  <strong className="text-ink-700">{paginacao.pagina}</strong>
+                  {"\u00a0"}de{"\u00a0"}
+                  <strong className="text-ink-700">{paginacao.totalPaginas}</strong>
+                </span>
+                <Button
+                  variant="outline"
+                  disabled={paginacao.pagina >= paginacao.totalPaginas}
+                  onClick={() => irPara({ pagina: paginacao.pagina + 1 })}
+                >
+                  Próxima
+                </Button>
+              </div>
+            </>
+          )}
+        </div>
       )}
 
       {/* ── EDITOR / FORMULÁRIO DO ORÇAMENTO ── */}
@@ -872,7 +973,7 @@ export function QuotesClient({
       >
         {view && (
           <div className="space-y-5">
-            <div className="grid grid-cols-3 gap-2.5">
+            <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
               {[
                 { k: "Subtotal", v: formatBRL(Number(view.subtotal || 0)) },
                 { k: "Desconto", v: `− ${formatBRL(Number(view.discount || 0))}` },
@@ -958,13 +1059,17 @@ export function QuotesClient({
         }
       >
         {printDoc && (
-          <div className="bg-paper-100 p-4 rounded-xl border border-paper-300">
-            <CommercialProposalA4
-              quote={printDoc.quote}
-              quoteItems={items.filter((i) => Number(i.quoteId) === Number(printDoc.quote.id))}
-              customer={custName(printDoc.quote.customerId)}
-              company={company}
-            />
+          <div className="bg-paper-100 p-4 rounded-xl border border-paper-300 overflow-x-auto">
+            {/* Reduz a folha para caber na largura do aparelho; no
+               computador volta ao tamanho real. */}
+            <div className="[zoom:0.42] sm:[zoom:1] w-[800px] sm:mx-auto">
+              <CommercialProposalA4
+                quote={printDoc.quote}
+                quoteItems={items.filter((i) => Number(i.quoteId) === Number(printDoc.quote.id))}
+                customer={custName(printDoc.quote.customerId)}
+                company={company}
+              />
+            </div>
           </div>
         )}
       </Drawer>
@@ -1017,7 +1122,9 @@ function CommercialProposalA4({
     <div
       className={cn(
         "font-sans text-ink-900 bg-white text-[12px] leading-snug select-text",
-        isPrint ? "w-full p-8" : "p-8 max-w-[800px] mx-auto shadow-sm rounded border border-paper-300"
+        /* Mesma correção do pedido: a folha mantém a largura real e é
+           reduzida por inteiro no celular, em vez de espremida. */
+        isPrint ? "w-full p-8" : "w-[800px] shrink-0 p-8 shadow-sm rounded border border-paper-300"
       )}
       style={{ fontFamily: "'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif" }}
     >

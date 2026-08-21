@@ -1,20 +1,52 @@
 import type { Metadata } from "next";
 import { db } from "@/db";
-import { customers, crmLeads, crmActivities, quotes, orders, sales, registrationLinks } from "@/db/schema";
-import { desc, asc, inArray } from "drizzle-orm";
+import { crmLeads, crmActivities, quotes, orders, sales, registrationLinks } from "@/db/schema";
+import { desc, inArray } from "drizzle-orm";
+import { getCustomersPage, TAMANHO_PAGINA_PADRAO } from "@/lib/queries";
 import { ClientsClient } from "@/components/modules/ClientsClient";
 
 export const metadata: Metadata = { title: "Clientes & CRM" };
 export const dynamic = "force-dynamic";
 
-export default async function ClientesPage() {
-  const [customerRows, leads, activities, quoteRows, orderRows, saleRows, regLinks] = await Promise.all([
-    db.select().from(customers).orderBy(asc(customers.name)),
+/* v3.62.0 — a carteira passou a vir por página, com busca e filtros no
+   servidor. Histórico (orçamentos, pedidos, vendas e atividades) só é
+   carregado para os clientes visíveis: ele só aparece na ficha que o
+   operador abre. */
+export default async function ClientesPage({
+  searchParams,
+}: {
+  searchParams: Promise<{
+    q?: string;
+    status?: string;
+    origem?: string;
+    pagina?: string;
+    por?: string;
+  }>;
+}) {
+  const sp = await searchParams;
+  const busca = sp.q || "";
+  const status = sp.status || "all";
+  const origem = sp.origem || "all";
+  const pagina = Number(sp.pagina) || 1;
+  const porPagina = Number(sp.por) || TAMANHO_PAGINA_PADRAO;
+
+  const pageClientes = await getCustomersPage({ pagina, porPagina, busca, status, origem });
+  const idsVisiveis = pageClientes.linhas.map((c) => Number(c.id));
+
+  const [leads, activities, quoteRows, orderRows, saleRows, regLinks] = await Promise.all([
     db.select().from(crmLeads).orderBy(desc(crmLeads.updatedAt)),
-    db.select().from(crmActivities).orderBy(desc(crmActivities.createdAt)),
-    db.select().from(quotes).orderBy(desc(quotes.createdAt)),
-    db.select().from(orders).orderBy(desc(orders.createdAt)),
-    db.select().from(sales).orderBy(desc(sales.createdAt)),
+    idsVisiveis.length
+      ? db.select().from(crmActivities).where(inArray(crmActivities.customerId, idsVisiveis)).orderBy(desc(crmActivities.createdAt))
+      : Promise.resolve([]),
+    idsVisiveis.length
+      ? db.select().from(quotes).where(inArray(quotes.customerId, idsVisiveis)).orderBy(desc(quotes.createdAt))
+      : Promise.resolve([]),
+    idsVisiveis.length
+      ? db.select().from(orders).where(inArray(orders.customerId, idsVisiveis)).orderBy(desc(orders.createdAt))
+      : Promise.resolve([]),
+    idsVisiveis.length
+      ? db.select().from(sales).where(inArray(sales.customerId, idsVisiveis)).orderBy(desc(sales.createdAt))
+      : Promise.resolve([]),
     /* Só os links que ainda significam alguma coisa. Cancelado e
        expirado não interessam ao operador — poluiriam a ficha. */
     db
@@ -26,7 +58,19 @@ export default async function ClientesPage() {
 
   return (
     <ClientsClient
-      customers={customerRows}
+      customers={pageClientes.linhas}
+      paginacao={{
+        total: pageClientes.total,
+        totalCarteira: pageClientes.totalCarteira,
+        pagina: pageClientes.pagina,
+        porPagina: pageClientes.porPagina,
+        totalPaginas: pageClientes.totalPaginas,
+        ltv: pageClientes.ltv,
+        origens: pageClientes.origens,
+        busca,
+        status,
+        origem,
+      }}
       leads={leads}
       activities={activities}
       quotes={quoteRows}

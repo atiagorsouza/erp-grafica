@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { mutate } from "@/lib/mutate";
 import { formatMoney } from "@/lib/format";
@@ -101,8 +101,23 @@ const COL_COLOR: Record<string, string> = {
 const SOURCES = ["balcao", "instagram", "site", "indicacao", "google", "facebook", "marketplace", "outro"];
 const ACTIVITY_TYPES = ["nota", "ligacao", "reuniao", "tarefa", "visita", "proposta"];
 
-export function ClientsClient({ customers, leads, activities, quotes, orders, sales, registrationLinks = [] }: {
+/* Estado da paginação da carteira, calculado no servidor (v3.62.0). */
+type PaginacaoClientes = {
+  total: number;
+  totalCarteira: number;
+  pagina: number;
+  porPagina: number;
+  totalPaginas: number;
+  ltv: Record<number, number>;
+  origens: [string, number][];
+  busca: string;
+  status: string;
+  origem: string;
+};
+
+export function ClientsClient({ customers, leads, activities, quotes, orders, sales, registrationLinks = [], paginacao }: {
   customers: Row[];
+  paginacao: PaginacaoClientes;
   leads: Row[];
   activities: Row[];
   quotes: Row[];
@@ -116,9 +131,42 @@ export function ClientsClient({ customers, leads, activities, quotes, orders, sa
   const refresh = () => router.refresh();
   const params = useSearchParams();
   const [tab, setTab] = useState<"carteira" | "pipeline">("carteira");
-  const [q, setQ] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
-  const [originFilter, setOriginFilter] = useState("all");
+
+  /* Busca e filtros da carteira vivem na URL: quem filtra é o banco
+     (v3.62.0). `q` é só o texto enquanto se digita. */
+  const [q, setQ] = useState(paginacao.busca);
+  const statusFilter = paginacao.status;
+  const originFilter = paginacao.origem;
+
+  const irPara = useCallback(
+    (mudancas: Record<string, string | number>) => {
+      const p = new URLSearchParams();
+      const base: Record<string, string> = {
+        q: paginacao.busca,
+        status: paginacao.status,
+        origem: paginacao.origem,
+        pagina: String(paginacao.pagina),
+        por: String(paginacao.porPagina),
+        ...Object.fromEntries(Object.entries(mudancas).map(([k, v]) => [k, String(v)])),
+      };
+      // Mudar busca ou filtro volta à primeira página.
+      if (mudancas.q !== undefined || mudancas.status !== undefined || mudancas.origem !== undefined) {
+        base.pagina = "1";
+      }
+      for (const [k, v] of Object.entries(base)) if (v && v !== "0" && v !== "all") p.set(k, v);
+      router.push(`/clientes${p.toString() ? `?${p}` : ""}`);
+    },
+    [router, paginacao]
+  );
+
+  const setStatusFilter = useCallback((v: string) => irPara({ status: v }), [irPara]);
+  const setOriginFilter = useCallback((v: string) => irPara({ origem: v }), [irPara]);
+
+  useEffect(() => {
+    if (q === paginacao.busca) return;
+    const t = setTimeout(() => irPara({ q }), 300);
+    return () => clearTimeout(t);
+  }, [q, paginacao.busca, irPara]);
 
   const [importOpen, setImportOpen] = useState(false);
   const [custModal, setCustModal] = useState<null | { edit?: Row }>(null);
@@ -164,36 +212,33 @@ export function ClientsClient({ customers, leads, activities, quotes, orders, sa
     return map;
   }, [registrationLinks]);
 
-  /* LTV por cliente — soma vendas PDV + pedidos */
+  /* LTV vem pronto do servidor, calculado só para os clientes da
+     página — antes exigia baixar vendas e pedidos inteiros. */
   const ltv = useMemo(() => {
     const map = new Map<number, number>();
-    for (const s of sales) map.set(Number(s.customerId), (map.get(Number(s.customerId)) || 0) + Number(s.total || 0));
-    for (const o of orders) map.set(Number(o.customerId), (map.get(Number(o.customerId)) || 0) + Number(o.total || 0));
+    for (const [id, v] of Object.entries(paginacao.ltv)) map.set(Number(id), Number(v) || 0);
     return map;
-  }, [sales, orders]);
+  }, [paginacao.ltv]);
 
   /* Filtro de clientes */
+  /* O servidor já filtrou; isto cobre só o intervalo entre digitar e
+     a página chegar. */
   const filtered = useMemo(() => customers.filter((c) => {
     /* Busca também por IE, RG, WhatsApp e contato PJ: são os números
        que o cliente informa ao telefone quando não lembra o CNPJ. */
-    const mq = !q || [
+    const mq = !paginacao.busca || [
       c.name, c.tradeName, c.document, c.email, c.phone,
       c.whatsapp, c.stateRegistration, c.municipalRegistration, c.rg, c.contactName,
-    ].some((v) => String(v || "").toLowerCase().includes(q.toLowerCase()));
+    ].some((v) => String(v || "").toLowerCase().includes(paginacao.busca.toLowerCase()));
     const ms = statusFilter === "all" || c.status === statusFilter;
     const mo = originFilter === "all" || String(c.origin || "") === originFilter;
     return mq && ms && mo;
-  }), [customers, q, statusFilter, originFilter]);
+  }), [customers, paginacao.busca, statusFilter, originFilter]);
 
   /* Origens presentes na carteira, da mais comum para a menos comum. */
-  const originsInUse = useMemo(() => {
-    const acc = new Map<string, number>();
-    for (const c of customers) {
-      const k = String(c.origin || "").trim();
-      if (k) acc.set(k, (acc.get(k) || 0) + 1);
-    }
-    return [...acc.entries()].sort((a, b) => b[1] - a[1]);
-  }, [customers]);
+  /* Origens da carteira inteira (do servidor), não só da página —
+     senão o filtro perderia opções conforme se navega. */
+  const originsInUse = paginacao.origens;
 
   /* Autopreenchimento ViaCEP */
   const handleCepBlur = useCallback(async () => {
@@ -387,7 +432,7 @@ export function ClientsClient({ customers, leads, activities, quotes, orders, sa
           value={tab}
           onChange={setTab}
           options={[
-            { value: "carteira", label: "Carteira", count: customers.length },
+            { value: "carteira", label: "Carteira", count: paginacao.totalCarteira },
             { value: "pipeline", label: "Pipeline comercial", count: leads.filter((l) => l.column !== "ganho" && l.column !== "perdido").length },
           ]}
         />
@@ -496,6 +541,64 @@ export function ClientsClient({ customers, leads, activities, quotes, orders, sa
             </tbody>
           </TableWrap>
         )
+      )}
+
+      {/* ── PAGINAÇÃO DA CARTEIRA ── carregar mais no celular, páginas
+         numeradas no computador. */}
+      {tab === "carteira" && paginacao.total > 0 && (
+        <div className="mt-5 flex flex-col items-center gap-3 border-t border-paper-200 pt-4">
+          <p className="text-xs text-ink-500">
+            Mostrando{"\u00a0"}
+            <strong className="text-ink-700">
+              {(paginacao.pagina - 1) * paginacao.porPagina + 1}
+              {"\u00a0"}a{"\u00a0"}
+              {Math.min(paginacao.pagina * paginacao.porPagina, paginacao.total)}
+            </strong>
+            {"\u00a0"}de{"\u00a0"}<strong className="text-ink-700">{paginacao.total}</strong>
+            {"\u00a0"}
+            {paginacao.total === 1 ? "cliente" : "clientes"}
+            {paginacao.busca ? ` para "${paginacao.busca}"` : ""}
+          </p>
+
+          {paginacao.totalPaginas > 1 && (
+            <>
+              <div className="flex w-full sm:hidden">
+                {paginacao.pagina < paginacao.totalPaginas && (
+                  <Button
+                    variant="outline"
+                    className="w-full"
+                    onClick={() => irPara({ pagina: paginacao.pagina + 1 })}
+                  >
+                    Carregar mais
+                  </Button>
+                )}
+              </div>
+
+              <div className="hidden items-center gap-1.5 sm:flex">
+                <Button
+                  variant="outline"
+                  disabled={paginacao.pagina <= 1}
+                  onClick={() => irPara({ pagina: paginacao.pagina - 1 })}
+                >
+                  Anterior
+                </Button>
+                <span className="px-3 text-xs text-ink-500">
+                  Página{"\u00a0"}
+                  <strong className="text-ink-700">{paginacao.pagina}</strong>
+                  {"\u00a0"}de{"\u00a0"}
+                  <strong className="text-ink-700">{paginacao.totalPaginas}</strong>
+                </span>
+                <Button
+                  variant="outline"
+                  disabled={paginacao.pagina >= paginacao.totalPaginas}
+                  onClick={() => irPara({ pagina: paginacao.pagina + 1 })}
+                >
+                  Próxima
+                </Button>
+              </div>
+            </>
+          )}
+        </div>
       )}
 
       {/* ── PIPELINE CRM ── */}
@@ -1011,7 +1114,7 @@ export function ClientsClient({ customers, leads, activities, quotes, orders, sa
             </div>
 
             {/* LTV por canal */}
-            <div className="grid grid-cols-3 gap-2.5">
+            <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
               {[
                 { k: "Orçamentos", v: quotes.filter((x) => Number(x.customerId) === Number(drawer.id)).length, money: quotes.filter((x) => Number(x.customerId) === Number(drawer.id)).reduce((s, x) => s + Number(x.total || 0), 0) },
                 { k: "Pedidos", v: orders.filter((x) => Number(x.customerId) === Number(drawer.id)).length, money: orders.filter((x) => Number(x.customerId) === Number(drawer.id)).reduce((s, x) => s + Number(x.total || 0), 0) },
@@ -1344,7 +1447,7 @@ function ImportCustomersModal({
 
         {result && (
           <>
-            <div className="grid grid-cols-4 gap-2">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               {[
                 { label: "fichas lidas", value: result.totalFichas, tone: "text-ink-800" },
                 { label: "novos", value: result.imported, tone: "text-emerald-700" },
@@ -1375,7 +1478,7 @@ function ImportCustomersModal({
             )}
 
             {result.preview.length > 0 && (
-              <div className="max-h-56 overflow-y-auto rounded-lg border border-paper-200">
+              <div className="max-h-56 overflow-x-auto overflow-y-auto rounded-lg border border-paper-200">
                 <table className="w-full text-[12px]">
                   <thead className="sticky top-0 bg-paper-50 text-left font-mono text-[10px] tracking-wider text-ink-500 uppercase">
                     <tr>

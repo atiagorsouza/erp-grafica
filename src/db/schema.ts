@@ -10,6 +10,7 @@ import {
   pgEnum,
   date,
   uniqueIndex,
+  index,
 } from "drizzle-orm/pg-core";
 /* Tipo só para a auto-referência de item_categories.parent_id: sem
    ele o TypeScript entra em recursão infinita ao inferir a tabela. */
@@ -191,6 +192,11 @@ export const customers = pgTable("customers", {
   uniqueIndex("customers_phone_e164_unique_idx")
     .on(table.phoneE164)
     .where(sql`coalesce(phone_e164, '') <> ''`),
+  /* Busca de cliente por nome/fantasia — é a mais usada do sistema.
+     Sem isto, cada tecla digitada varre a tabela inteira. */
+  index("customers_created_idx").on(table.createdAt),
+  index("customers_name_busca_idx").using("btree", sql`lower(name) text_pattern_ops`),
+  index("customers_trade_busca_idx").using("btree", sql`lower(coalesce(trade_name, '')) text_pattern_ops`),
 ]);
 
 /* ------------------------------------------------------------------ */
@@ -417,7 +423,10 @@ export const stockMovements = pgTable("stock_movements", {
   notes: text("notes"),
   automatic: boolean("automatic").default(false), // gerado pelo sistema (venda/produção)
   createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
-});
+}, (table) => [
+  index("stock_movements_created_idx").on(table.createdAt),
+  index("stock_movements_material_idx").on(table.materialId),
+]);
 
 /* ------------------------------------------------------------------ */
 /*  FORNECEDORES E COMPRAS                                             */
@@ -799,7 +808,13 @@ export const quotes = pgTable("quotes", {
   sellerName: text("seller_name"),
   notes: text("notes"),
   createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
-});
+}, (table) => [
+  /* Listagem por data e busca por número — ver comentário em `orders`. */
+  index("quotes_created_idx").on(table.createdAt),
+  index("quotes_customer_idx").on(table.customerId),
+  index("quotes_status_idx").on(table.status),
+  index("quotes_number_busca_idx").using("btree", sql`lower(number) text_pattern_ops`),
+]);
 
 export const quoteItems = pgTable("quote_items", {
   id: serial("id").primaryKey(),
@@ -877,6 +892,19 @@ export const orders = pgTable("orders", {
   uniqueIndex("orders_one_per_quote_idx")
     .on(table.quoteId)
     .where(sql`quote_id is not null`),
+  /* ── LISTAGEM E BUSCA (v3.62.0) ──
+     Só existiam índices de unicidade. Toda listagem ordena por
+     created_at desc e a busca filtra por nome/número — sem índice o
+     banco varria a tabela inteira a cada abertura de tela. Com 125
+     pedidos/mês são 1.500 linhas em um ano.
+
+     `lower(x) text_pattern_ops` é o que o Postgres aproveita em
+     `lower(x) LIKE 'termo%'`. Busca com % no início continua varrendo;
+     para isso o caminho seria pg_trgm, que só vale se virar rotina. */
+  index("orders_created_idx").on(table.createdAt),
+  index("orders_customer_idx").on(table.customerId),
+  index("orders_status_idx").on(table.status),
+  index("orders_number_busca_idx").using("btree", sql`lower(number) text_pattern_ops`),
 ]);
 
 export const artApprovals = pgTable("art_approvals", {
@@ -969,7 +997,10 @@ export const sales = pgTable("sales", {
   canceledAt: timestamp("canceled_at", { mode: "date" }),
   cancelReason: text("cancel_reason"),
   createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
-});
+}, (table) => [
+  index("sales_created_idx").on(table.createdAt),
+  index("sales_customer_idx").on(table.customerId),
+]);
 
 /* ------------------------------------------------------------------ */
 /*  KANBAN                                                            */
@@ -1085,7 +1116,10 @@ export const transactions = pgTable("transactions", {
   archiveReason: text("archive_reason"),
   notes: text("notes"),
   createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
-});
+}, (table) => [
+  index("transactions_created_idx").on(table.createdAt),
+  index("transactions_due_idx").on(table.dueDate),
+]);
 
 /* ------------------------------------------------------------------ */
 /*  API INTEGRATIONS (WhatsApp, VoIP, Portal - external systems)      */

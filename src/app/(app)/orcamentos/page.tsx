@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
 import { db } from "@/db";
-import { quotes, quoteItems, customers, orders } from "@/db/schema";
-import { desc, asc } from "drizzle-orm";
-import { listProducts } from "@/lib/queries";
+import { customers, orders } from "@/db/schema";
+import { asc, isNotNull } from "drizzle-orm";
+import { listProducts, getQuotesPage, TAMANHO_PAGINA_PADRAO } from "@/lib/queries";
 import { getServices } from "@/lib/queries-extra";
 import { getPricingDefaults } from "@/lib/settings";
 import { QuotesClient } from "@/components/modules/QuotesClient";
@@ -11,26 +11,48 @@ import { expireStaleQuotes } from "@/lib/quotes";
 export const metadata: Metadata = { title: "Orçamentos" };
 export const dynamic = "force-dynamic";
 
-export default async function OrcamentosPage() {
+export default async function OrcamentosPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ q?: string; filtro?: string; pagina?: string; por?: string }>;
+}) {
+  const sp = await searchParams;
+  const busca = sp.q || "";
+  const filtro = sp.filtro || "all";
+  const paginaAtual = Number(sp.pagina) || 1;
+  const porPagina = Number(sp.por) || TAMANHO_PAGINA_PADRAO;
   /* Propostas vencidas passam a "expirado" antes da leitura: sem isto,
      a expiração só acontecia no install/update e o funil ficava
      otimista entre um deploy e outro. */
   await expireStaleQuotes();
 
-  const [quoteRows, items, customerRows, productRows, serviceRows, orderRows, defaults] = await Promise.all([
-    db.select().from(quotes).orderBy(desc(quotes.createdAt)),
-    db.select().from(quoteItems),
+  const [pageOrc, customerRows, productRows, serviceRows, orderRows, defaults] = await Promise.all([
+    getQuotesPage({ pagina: paginaAtual, porPagina, busca, filtro }),
     db.select().from(customers).orderBy(asc(customers.name)),
     listProducts(),
     getServices(),
-    db.select().from(orders),
+    /* A tela só pergunta "este orçamento já virou pedido?", então basta
+       o vínculo — não a tabela de pedidos inteira. */
+    db.select({ id: orders.id, quoteId: orders.quoteId }).from(orders).where(isNotNull(orders.quoteId)),
     getPricingDefaults(),
   ]);
+
+  const quoteRows = pageOrc.linhas;
+  const items = pageOrc.itens;
 
   return (
     <QuotesClient
       quotes={quoteRows}
       items={items}
+      paginacao={{
+        total: pageOrc.total,
+        pagina: pageOrc.pagina,
+        porPagina: pageOrc.porPagina,
+        totalPaginas: pageOrc.totalPaginas,
+        contadores: pageOrc.contadores,
+        busca,
+        filtro,
+      }}
       customers={customerRows}
       products={productRows}
       services={serviceRows}
