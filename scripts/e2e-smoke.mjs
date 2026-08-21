@@ -1573,6 +1573,64 @@ async function main() {
     assert(ruim.status === 400, "id inválido no envio por WhatsApp responde 400");
   }
 
+  // 11.7-sexies) Senha de e-mail e tokens não vazam (v3.65.0)
+  //
+  // A API já mascarava (v3.63.0), mas a PÁGINA /configuracoes é outro
+  // caminho: lê o banco direto e injeta no HTML. A senha aparecia em
+  // texto puro no código-fonte, mesmo com o campo em branco na tela.
+  // Duas listas precisam andar juntas — a da API e a da página.
+  {
+    const [antes] = await sql("select value from settings where key='smtp_password'");
+    const original = antes ? antes.value : null;
+    await sql(
+      "insert into settings (key,value,category) values ('smtp_password',$1,'email') " +
+      "on conflict (key) do update set value=excluded.value",
+      ["SenhaDeTesteE2E#123"]
+    );
+
+    const painel = await req("/api/crud/settings");
+    const campo = painel.rows.find((r) => r.key === "smtp_password");
+    assert(campo && campo.value === "__SET__", "senha de e-mail é mascarada na API");
+
+    const html = await (await fetch(`${BASE_URL}/configuracoes`)).text();
+    assert(!html.includes("SenhaDeTesteE2E#123"),
+      "senha de e-mail não aparece no HTML da página de configurações");
+
+    const eco = await fetch(`${BASE_URL}/api/crud/settings`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ op: "save", data: { key: "smtp_password", value: "__SET__", category: "email" } }),
+    });
+    assert(eco.status === 422, "reenviar __SET__ na senha é recusado (422)");
+    const [depois] = await sql("select value from settings where key='smtp_password'");
+    assert(depois.value === "SenhaDeTesteE2E#123", "a senha continua intacta");
+
+    if (original === null) await sql("delete from settings where key='smtp_password'");
+    else await sql("update settings set value=$1 where key='smtp_password'", [original]);
+  }
+
+  // 11.7-septies) Teste de e-mail dá erro em português (v3.65.0)
+  {
+    const [h] = await sql("select value from settings where key='smtp_host'");
+    const hostOriginal = h ? h.value : null;
+    await sql(
+      "insert into settings (key,value,category) values ('smtp_host','','email') " +
+      "on conflict (key) do update set value=''"
+    );
+    const r = await fetch(`${BASE_URL}/api/email/testar`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    const d = await r.json();
+    assert(r.status === 422, "teste sem servidor configurado responde 422");
+    assert(/servidor/i.test(d.error || ""),
+      "a mensagem de erro do e-mail é legível em português");
+    if (hostOriginal !== null) {
+      await sql("update settings set value=$1 where key='smtp_host'", [hostOriginal]);
+    }
+  }
+
   // 11.8) Versão carimbada no banco (v3.53.2)
   //
   // `settings.app_version` era NULL para sempre: check-version só

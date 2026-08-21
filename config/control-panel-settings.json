@@ -1,5 +1,5 @@
 {
-  "version": "3.60.0",
+  "version": "3.65.0",
   "groups": [
     {
       "id": "empresa",
@@ -814,6 +814,14 @@
       "color": "text-emerald-600",
       "fields": [
         {
+          "key": "wa_token",
+          "label": "Token do serviço",
+          "type": "password",
+          "span2": true,
+          "hint": "Senha que o ERP usa para falar com o robô. Deixe em branco para manter a atual.",
+          "defaultValue": ""
+        },
+        {
           "key": "wa_empresa_nome",
           "label": "Como o robô se apresenta",
           "hint": "Usado na variável {empresa} das mensagens. Vazio usa o nome fantasia.",
@@ -874,6 +882,85 @@
           "suffix": "segundos",
           "hint": "O sistema sorteia um tempo entre o mínimo e o máximo a cada mensagem.",
           "defaultValue": "25"
+        }
+      ]
+    },
+    {
+      "id": "email",
+      "title": "E-mail (SMTP)",
+      "desc": "Para o sistema enviar orçamentos, avisos e recibos por e-mail.",
+      "icon": "mail",
+      "color": "text-proc-c",
+      "fields": [
+        {
+          "key": "smtp_host",
+          "label": "Servidor de saída",
+          "mono": true,
+          "hint": "Na Hostinger é smtp.hostinger.com",
+          "defaultValue": "smtp.hostinger.com"
+        },
+        {
+          "key": "smtp_port",
+          "label": "Porta",
+          "type": "number",
+          "hint": "465 com SSL, ou 587 com TLS",
+          "defaultValue": "465"
+        },
+        {
+          "key": "smtp_secure",
+          "label": "Segurança",
+          "type": "select",
+          "options": [
+            {
+              "value": "ssl",
+              "label": "SSL — porta 465 (recomendado)"
+            },
+            {
+              "value": "tls",
+              "label": "TLS/STARTTLS — porta 587"
+            }
+          ],
+          "hint": "Se 465 não funcionar, tente 587 com TLS.",
+          "defaultValue": "ssl"
+        },
+        {
+          "key": "smtp_user",
+          "label": "Usuário (e-mail de envio)",
+          "span2": true,
+          "mono": true,
+          "hint": "A conta que envia. Sugerido: noreply@vtdigital.com.br",
+          "defaultValue": ""
+        },
+        {
+          "key": "smtp_password",
+          "label": "Senha",
+          "type": "password",
+          "span2": true,
+          "hint": "Deixe em branco para manter a senha atual.",
+          "defaultValue": ""
+        },
+        {
+          "key": "smtp_from_name",
+          "label": "Nome que aparece para o cliente",
+          "span2": true,
+          "hint": "Aparece como remetente na caixa de entrada dele.",
+          "defaultValue": "VTDIGITAL Art Studio"
+        },
+        {
+          "key": "smtp_reply_to",
+          "label": "Responder para (Reply-To)",
+          "span2": true,
+          "mono": true,
+          "hint": "Quando o cliente responder, cai aqui — não no noreply.",
+          "defaultValue": "contato.vt@vtdigital.com.br"
+        },
+        {
+          "key": "smtp_test_to",
+          "label": "Enviar teste para",
+          "span2": true,
+          "mono": true,
+          "hint": "Endereço usado pelo botão de teste.",
+          "defaultValue": "contato.vt@vtdigital.com.br"
         }
       ]
     },
@@ -1043,8 +1130,9 @@
           "label": "Token da API SuperFrete",
           "span2": true,
           "mono": true,
-          "hint": "Gere em superfrete.com → Integrações → Token. Pode usar a variável SUPERFRETE_TOKEN.",
-          "defaultValue": ""
+          "hint": "Deixe em branco para manter o token atual. Gere em superfrete.com → Integrações → Token. Pode usar a variável SUPERFRETE_TOKEN.",
+          "defaultValue": "",
+          "type": "password"
         },
         {
           "key": "superfrete_sandbox",
