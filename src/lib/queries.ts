@@ -257,6 +257,117 @@ export async function getQuotesPage(opcoes: {
   };
 }
 
+/* ── CLIENTES ─────────────────────────────────────────────────
+   A busca desta tela varre DEZ campos, incluindo IE, RG e nome do
+   contato — segundo o comentário do código, são os números que o
+   cliente informa ao telefone quando não lembra o CNPJ. Reduzir
+   isso a "nome e documento" quebraria o atendimento sem avisar. */
+
+function condicaoBuscaCliente(termo: string) {
+  const t = termo.trim().toLowerCase();
+  if (!t) return sql`TRUE`;
+  const like = `%${t}%`;
+  return sql`(
+    lower(${customers.name}) LIKE ${like}
+    OR lower(coalesce(${customers.tradeName}, '')) LIKE ${like}
+    OR lower(coalesce(${customers.document}, '')) LIKE ${like}
+    OR lower(coalesce(${customers.email}, '')) LIKE ${like}
+    OR lower(coalesce(${customers.phone}, '')) LIKE ${like}
+    OR lower(coalesce(${customers.whatsapp}, '')) LIKE ${like}
+    OR lower(coalesce(${customers.stateRegistration}, '')) LIKE ${like}
+    OR lower(coalesce(${customers.municipalRegistration}, '')) LIKE ${like}
+    OR lower(coalesce(${customers.rg}, '')) LIKE ${like}
+    OR lower(coalesce(${customers.contactName}, '')) LIKE ${like}
+  )`;
+}
+
+export async function getCustomersPage(opcoes: {
+  pagina?: number;
+  porPagina?: number;
+  busca?: string;
+  status?: string;
+  origem?: string;
+} = {}) {
+  const porPagina = Math.min(Math.max(opcoes.porPagina || TAMANHO_PAGINA_PADRAO, 1), 200);
+  const busca = opcoes.busca || "";
+  const status = opcoes.status || "all";
+  const origem = opcoes.origem || "all";
+
+  const partes = [condicaoBuscaCliente(busca)];
+  if (status !== "all") partes.push(sql`${customers.status} = ${status}`);
+  if (origem !== "all") partes.push(sql`coalesce(${customers.origin}, '') = ${origem}`);
+  const where = partes.reduce((acc, p) => sql`${acc} AND ${p}`);
+
+  const [{ total }] = await db
+    .select({ total: sql<number>`count(*)::int` })
+    .from(customers)
+    .where(where);
+
+  const totalPaginas = Math.max(1, Math.ceil(total / porPagina));
+  const pagina = Math.min(Math.max(opcoes.pagina || 1, 1), totalPaginas);
+
+  const linhas = await db
+    .select()
+    .from(customers)
+    .where(where)
+    .orderBy(asc(customers.name))
+    .limit(porPagina)
+    .offset((pagina - 1) * porPagina);
+
+  /* LTV (vendas do PDV + pedidos) calculado no banco e só para os
+     clientes visíveis. Antes a tela somava isso no navegador, o que
+     exigia baixar as tabelas de vendas e pedidos inteiras.
+
+     Diferença de comportamento, de propósito: a soma antiga incluía
+     vendas CANCELADAS no faturamento do cliente. O resto do sistema
+     já as exclui (`reports.ts` e `getDashboardStats`), então o LTV
+     era a exceção — agora segue a mesma regra. Onde houver venda
+     cancelada, o valor exibido cai; o número novo é o certo. */
+  const ids = linhas.map((c) => Number(c.id));
+  const ltv: Record<number, number> = {};
+  if (ids.length) {
+    const somas = await db.execute(sql`
+      SELECT cid, SUM(t)::float8 AS total FROM (
+        SELECT customer_id AS cid, COALESCE(total, 0) AS t FROM ${sales}
+         WHERE customer_id IN (${sql.join(ids.map((i) => sql`${i}`), sql`, `)})
+           AND status IS DISTINCT FROM 'cancelada'
+        UNION ALL
+        SELECT customer_id AS cid, COALESCE(total, 0) AS t FROM ${orders}
+         WHERE customer_id IN (${sql.join(ids.map((i) => sql`${i}`), sql`, `)})
+      ) u GROUP BY cid`);
+    for (const r of somas.rows as Array<{ cid: number; total: number }>) {
+      ltv[Number(r.cid)] = Number(r.total) || 0;
+    }
+  }
+
+  /* Contadores e lista de origens sempre sobre a carteira inteira:
+     são o retrato da base, não da página. */
+  const [tot] = await db
+    .select({ todos: sql<number>`count(*)::int` })
+    .from(customers);
+
+  const origensRows = await db
+    .select({
+      origem: sql<string>`coalesce(${customers.origin}, '')`,
+      n: sql<number>`count(*)::int`,
+    })
+    .from(customers)
+    .where(sql`coalesce(${customers.origin}, '') <> ''`)
+    .groupBy(sql`coalesce(${customers.origin}, '')`)
+    .orderBy(sql`count(*) DESC`);
+
+  return {
+    linhas,
+    ltv,
+    origens: origensRows.map((r) => [r.origem, Number(r.n)] as [string, number]),
+    total,
+    totalCarteira: Number(tot?.todos ?? 0),
+    pagina,
+    porPagina,
+    totalPaginas,
+  };
+}
+
 export async function getCategoriesByModule(
   module: "product" | "material" | "service" | "finishing" | "pricing_table"
 ) {
