@@ -35,7 +35,7 @@ export interface DefinicaoMensagem {
   /** Variáveis aceitas, com explicação para a tela. */
   variaveis: { nome: string; descricao: string }[];
   /** Agrupamento na tela. */
-  grupo: "bot" | "cadastro";
+  grupo: "bot" | "cadastro" | "orcamento";
   /** false = mensagem essencial, não pode ser desligada. */
   desligavel?: boolean;
 }
@@ -149,6 +149,37 @@ export const CATALOGO: DefinicaoMensagem[] = [
       "Para seguir com seu orçamento, preciso do seu cadastro completo. Leva 1 minuto:\n" +
       "{link}\n\n" +
       "Já deixei seu nome e telefone preenchidos. O link vale {validade} dias.\n\n" +
+      "— {empresa}",
+  },
+
+  /* ── Orçamento por WhatsApp ──
+     Nasceu do balcão: o cliente pede orçamento e o sistema só sabia
+     imprimir. O texto fica aqui, editável pelo Painel, porque a forma
+     de falar com o cliente é do dono — não do programador.
+
+     `itens` chega pronto (uma linha por item) porque o preenchimento
+     é troca simples de {chave}: não sabe montar lista. */
+  {
+    slug: "orcamento.enviar",
+    titulo: "Envio do orçamento por WhatsApp",
+    quando: 'Você clica em "WhatsApp" na tela de Orçamentos.',
+    grupo: "orcamento",
+    variaveis: [
+      VAR_NOME,
+      VAR_EMPRESA,
+      { nome: "numero", descricao: "Número do orçamento (ex.: ORC-2026-0042)" },
+      { nome: "itens", descricao: "Lista dos itens, um por linha, já formatada" },
+      { nome: "total", descricao: "Valor total (ex.: R$ 300,00)" },
+      { nome: "validade", descricao: "Data até quando a proposta vale" },
+    ],
+    padrao:
+      "Olá, {nome}! 🙂\n\n" +
+      "Segue o orçamento que você pediu:\n\n" +
+      "*{numero}*\n" +
+      "{itens}\n\n" +
+      "*Total: {total}*\n" +
+      "_Válido até {validade}_\n\n" +
+      "Qualquer dúvida é só chamar. Se aprovar, me avisa que já coloco na produção!\n\n" +
       "— {empresa}",
   },
 ];

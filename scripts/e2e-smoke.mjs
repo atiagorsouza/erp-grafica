@@ -1524,6 +1524,55 @@ async function main() {
     assert(!achado, "material com estoque negativo não foi gravado");
   }
 
+  // 11.7-quinquies) Orçamento por WhatsApp (v3.64.0)
+  //
+  // O orçamento só sabia imprimir. O texto sai do catálogo editável
+  // (Painel → Mensagens), não do código: a forma de falar com o cliente
+  // é do dono.
+  {
+    const [orc] = await sql(
+      "select q.id from quotes q join quote_items i on i.quote_id=q.id group by q.id limit 1"
+    );
+    if (orc) {
+      const r = await fetch(`${BASE_URL}/api/quotes/whatsapp`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ id: Number(orc.id) }),
+      });
+      assert(r.status === 200, "texto do orçamento para WhatsApp é montado");
+      const d = await r.json();
+      assert(typeof d.texto === "string" && d.texto.length > 20,
+        "o texto vem preenchido");
+      assert(!/\{\w+\}/.test(d.texto),
+        "nenhuma variável ficou por expandir no texto");
+      assert(d.texto.includes("R$"),
+        "o texto traz os valores em reais");
+
+      // Editar o padrão pelo Painel tem de mudar o que o cliente recebe.
+      await sql(
+        "insert into message_templates (slug, body, active) values ('orcamento.enviar',$1,true) " +
+        "on conflict (slug) do update set body=excluded.body",
+        ["TESTE-E2E {numero} total {total}"]
+      );
+      const r2 = await fetch(`${BASE_URL}/api/quotes/whatsapp`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ id: Number(orc.id) }),
+      });
+      const d2 = await r2.json();
+      assert(d2.texto.startsWith("TESTE-E2E"),
+        "texto editado no Painel é o que sai para o cliente");
+      await sql("delete from message_templates where slug='orcamento.enviar'");
+    }
+
+    const ruim = await fetch(`${BASE_URL}/api/quotes/whatsapp`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: 999999999999 }),
+    });
+    assert(ruim.status === 400, "id inválido no envio por WhatsApp responde 400");
+  }
+
   // 11.8) Versão carimbada no banco (v3.53.2)
   //
   // `settings.app_version` era NULL para sempre: check-version só

@@ -25,7 +25,7 @@ import {
 } from "@/components/ui";
 import { Icon } from "@/components/icons";
 import { cn } from "@/lib/format";
-import { formatCEP, formatDocumentAuto, formatPhone } from "@/lib/validators";
+import { formatCEP, formatDocumentAuto, formatPhone, isWhatsAppBlocked, whatsappNumber } from "@/lib/validators";
 import { applyDiscount, formatBRL, round2, toNumber, toPositive } from "@/lib/money";
 
 import type { CompanyIdentity } from "@/lib/company";
@@ -127,6 +127,37 @@ export function QuotesClient({
   const [viewId, setViewId] = useState<number | null>(null);
   const [newCustomerOpen, setNewCustomerOpen] = useState(false);
   const [printDoc, setPrintDoc] = useState<{ quote: Row; mode: "a4" | "thermal" } | null>(null);
+
+  /* Prévia do WhatsApp: o texto vem pronto do servidor (catálogo
+     editável) e fica editável aqui antes de sair. Mandar orçamento é a
+     cara da empresa indo para o cliente — ninguém envia às cegas. */
+  const [zap, setZap] = useState<null | {
+    quote: Row;
+    texto: string;
+    cliente: { nome: string; phone: string | null; whatsapp: string | null; whatsappOptOut: boolean | null } | null;
+  }>(null);
+  const [zapCarregando, setZapCarregando] = useState(false);
+
+  async function abrirWhatsApp(quote: Row) {
+    setZapCarregando(true);
+    try {
+      const r = await fetch("/api/quotes/whatsapp", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ id: Number(quote.id) }),
+      });
+      const d = await r.json();
+      if (!r.ok) {
+        toast.error("Não foi possível montar a mensagem", d?.error || "Tente de novo.");
+        return;
+      }
+      setZap({ quote, texto: d.texto, cliente: d.cliente });
+    } catch {
+      toast.error("Não foi possível montar a mensagem", "Verifique a conexão.");
+    } finally {
+      setZapCarregando(false);
+    }
+  }
 
   const view = useMemo(() => quotes.find((q) => Number(q.id) === viewId) || null, [quotes, viewId]);
   const viewItems = useMemo(
@@ -1043,15 +1074,30 @@ export function QuotesClient({
         width="max-w-4xl"
         footer={
           <div className="flex items-center justify-between w-full">
-            <Button
-              variant="ink"
-              icon="printer"
-              onClick={() => {
-                window.print();
-              }}
-            >
-              Imprimir A4
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="ink"
+                icon="printer"
+                onClick={() => {
+                  window.print();
+                }}
+              >
+                Imprimir A4
+              </Button>
+              <Button
+                variant="soft"
+                icon="whatsapp"
+                disabled={zapCarregando}
+                onClick={() => {
+                  if (!printDoc) return;
+                  const q = printDoc.quote;
+                  setPrintDoc(null);
+                  abrirWhatsApp(q);
+                }}
+              >
+                {zapCarregando ? "Montando…" : "WhatsApp"}
+              </Button>
+            </div>
             <Button variant="ghost" onClick={() => setPrintDoc(null)}>
               Fechar
             </Button>
@@ -1073,6 +1119,84 @@ export function QuotesClient({
           </div>
         )}
       </Drawer>
+
+      {/* ── PRÉVIA DO WHATSAPP ──
+         O texto sai do catálogo editável (Painel → Mensagens) e pode
+         ser ajustado aqui antes de enviar, sem virar padrão. */}
+      <Modal
+        open={!!zap}
+        onClose={() => setZap(null)}
+        title="Enviar orçamento por WhatsApp"
+        subtitle="Confira e ajuste o texto antes de enviar. Para mudar o padrão, use Painel → Mensagens."
+        width="max-w-lg"
+        footer={
+          <div className="flex w-full items-center justify-between gap-2">
+            <Button variant="ghost" onClick={() => setZap(null)}>
+              Cancelar
+            </Button>
+            <Button
+              icon="whatsapp"
+              onClick={() => {
+                if (!zap) return;
+                const c = zap.cliente;
+
+                /* Opt-out: não preenchemos o destinatário. A mensagem
+                   abre em branco e o operador decide — mesma conduta já
+                   adotada em Pedidos. */
+                if (c && isWhatsAppBlocked(c as Row)) {
+                  toast.info(
+                    "Cliente não aceita WhatsApp",
+                    "O texto abrirá sem destinatário — escolha outro canal se possível."
+                  );
+                }
+
+                const numero = c && !isWhatsAppBlocked(c as Row) ? whatsappNumber(c as Row) : "";
+                const url = numero
+                  ? `https://wa.me/55${numero}?text=${encodeURIComponent(zap.texto)}`
+                  : `https://wa.me/?text=${encodeURIComponent(zap.texto)}`;
+                window.open(url, "_blank");
+                setZap(null);
+              }}
+            >
+              Abrir WhatsApp
+            </Button>
+          </div>
+        }
+      >
+        {zap && (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-2 text-[11.5px]">
+              <span className="text-ink-500">
+                Para:{"\u00a0"}
+                <strong className="text-ink-700">
+                  {zap.cliente?.nome || "— sem cliente —"}
+                </strong>
+              </span>
+              {zap.cliente && isWhatsAppBlocked(zap.cliente as Row) ? (
+                <Badge tone="magenta">Não aceita WhatsApp</Badge>
+              ) : whatsappNumber((zap.cliente || {}) as Row) ? (
+                <span className="font-mono text-ink-500">
+                  {formatPhone(String(zap.cliente?.whatsapp || zap.cliente?.phone || ""))}
+                </span>
+              ) : (
+                <Badge tone="cyan">Sem número — você escolhe</Badge>
+              )}
+            </div>
+
+            <Textarea
+              value={zap.texto}
+              onChange={(e) => setZap({ ...zap, texto: e.target.value })}
+              rows={12}
+              className="font-mono text-[12px] leading-relaxed"
+            />
+
+            <p className="text-[11px] text-ink-400">
+              O WhatsApp mostra *texto entre asteriscos* em negrito e
+              _entre sublinhados_ em itálico.
+            </p>
+          </div>
+        )}
+      </Modal>
 
       {/* ÁREA ISOLADA DE IMPRESSÃO A4 PROPOSTA COMERCIAL */}
       {printDoc && (
