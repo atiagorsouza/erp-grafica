@@ -1449,6 +1449,81 @@ async function main() {
     }
   }
 
+  // 11.7-bis) Segredos não saem em texto puro (auditoria v3.62.0)
+  //
+  // GET /api/crud/settings devolvia TODOS os valores sem máscara — só
+  // as logos eram protegidas. Assim que o dono preenchesse o token do
+  // SuperFrete (ou a senha de SMTP), a credencial passaria a ser
+  // devolvida a quem abrisse o endereço.
+  {
+    const [antes] = await sql("select value from settings where key='superfrete_token'");
+    const original = antes ? antes.value : null;
+
+    await sql(
+      "insert into settings (key,value,category) values ('superfrete_token',$1,'integracao') " +
+      "on conflict (key) do update set value=excluded.value",
+      ["SEGREDO-DE-TESTE-abc123"]
+    );
+
+    const painel = await req("/api/crud/settings");
+    const token = painel.rows.find((r) => r.key === "superfrete_token");
+    assert(token && token.value === "__SET__",
+      "token de integração é mascarado no painel");
+
+    // A chave PIX é pública (sai no cupom): não pode ser mascarada.
+    const pix = painel.rows.find((r) => r.key === "pix_key");
+    assert(!pix || pix.value !== "__SET__",
+      "chave PIX continua visível (é pública, sai no cupom)");
+
+    // Devolver o marcador não pode apagar o segredo guardado.
+    const eco = await fetch(`${BASE_URL}/api/crud/settings`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ op: "save", data: { key: "superfrete_token", value: "__SET__", category: "integracao" } }),
+    });
+    assert(eco.status === 422, "reenviar __SET__ num segredo é recusado (422)");
+    const [depois] = await sql("select value from settings where key='superfrete_token'");
+    assert(depois.value === "SEGREDO-DE-TESTE-abc123",
+      "o segredo continua intacto depois da tentativa");
+
+    if (original === null) await sql("delete from settings where key='superfrete_token'");
+    else await sql("update settings set value=$1 where key='superfrete_token'", [original]);
+  }
+
+  // 11.7-ter) Entradas inválidas viram 400, não 500 (auditoria v3.62.0)
+  //
+  // IDs do banco são integer de 4 bytes (teto 2.147.483.647).
+  // `Number.isFinite` aceitava 999999999999, o valor chegava ao Postgres
+  // e estourava lá: o operador via "erro interno" no que era só um id
+  // inválido, e o log de produção enchia de ruído.
+  {
+    for (const rota of ["customers", "orders", "quotes", "products", "transactions", "sales"]) {
+      const r = await fetch(`${BASE_URL}/api/crud/${rota}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ op: "update", id: 999999999999, data: {} }),
+      });
+      assert(r.status === 400, `id acima do limite em /${rota} responde 400 (não 500)`);
+    }
+  }
+
+  // 11.7-quater) Estoque negativo é recusado no cadastro (auditoria v3.62.0)
+  //
+  // A API aceitava stock:-999 com 200 OK e gravava. Não existe CHECK
+  // constraint no banco, então a aplicação é a única defesa.
+  // Movimentação continua podendo deixar saldo negativo — ela ajusta
+  // por `stock + delta` e não passa por este schema.
+  {
+    const r = await fetch(`${BASE_URL}/api/crud/materials`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ op: "create", data: { name: "E2E Estoque Negativo", unit: "un", stock: -999 } }),
+    });
+    assert(r.status === 400, "estoque negativo no cadastro é recusado (400)");
+    const [achado] = await sql("select id from materials where name='E2E Estoque Negativo'");
+    assert(!achado, "material com estoque negativo não foi gravado");
+  }
+
   // 11.8) Versão carimbada no banco (v3.53.2)
   //
   // `settings.app_version` era NULL para sempre: check-version só

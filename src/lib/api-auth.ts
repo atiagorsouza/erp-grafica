@@ -192,3 +192,16 @@ export function guardPublicApi(req: Request): Response | null {
 
   return null;
 }
+
+/* IDs do banco são `serial` (integer de 4 bytes): o teto é 2.147.483.647.
+   `Number.isFinite(id)` aceitava 999999999999, o valor chegava ao
+   Postgres e estourava lá — o operador via "erro interno" (500) no que
+   deveria ser um simples "id inválido" (400), e o log de produção
+   enchia de ruído. Auditoria v3.62.0. */
+export const MAX_ID_BANCO = 2147483647;
+
+/** `true` quando o id é utilizável como chave primária no Postgres. */
+export function idValido(id: unknown): boolean {
+  const n = Number(id);
+  return Number.isInteger(n) && n > 0 && n <= MAX_ID_BANCO;
+}

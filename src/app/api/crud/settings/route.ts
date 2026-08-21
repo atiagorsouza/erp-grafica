@@ -61,10 +61,33 @@ async function upsertSetting(data: Record<string, unknown>) {
    Devolvemos só o indicador de que existe. */
 const CHAVES_LOGO = new Set(["company_logo", "company_logo_dark", "company_logo_icon"]);
 
+/* Segredos: token de integração e senha de e-mail não podem sair daqui
+   em texto puro. Este endpoint não exige autenticação, então quem
+   abrisse o endereço leria a credencial inteira.
+
+   Mesma técnica das logos: a tela recebe "__SET__" (só o indicador de
+   que existe) e o POST recusa esse marcador de volta, para não gravar
+   a string por cima do valor real.
+
+   `pix_key` NÃO entra aqui de propósito: ela é pública — sai impressa
+   no cupom e no orçamento. `*_webhook_url` também não: é endereço de
+   destino, não credencial.
+
+   Ao criar campo novo de senha/token no Painel, acrescente a chave
+   nesta lista. O teste `e2e-smoke` cobre isso. */
+const CHAVES_SEGREDO = new Set([
+  "superfrete_token",
+  "smtp_password",
+  "wa_token",
+  "infinitepay_api_key",
+]);
+
 export async function GET() {
   const linhas = await db.select().from(settings).orderBy(asc(settings.category), asc(settings.key));
   const rows = linhas.map((r) =>
-    CHAVES_LOGO.has(r.key) && (r.value?.length ?? 0) > 0 ? { ...r, value: "__SET__" } : r
+    (CHAVES_LOGO.has(r.key) || CHAVES_SEGREDO.has(r.key)) && (r.value?.length ?? 0) > 0
+      ? { ...r, value: "__SET__" }
+      : r
   );
   return Response.json({
     ok: true,
@@ -98,6 +121,19 @@ export async function POST(req: Request) {
      A tela já pula esses campos, mas a regra tem de morar aqui: é o
      servidor que protege o dado, não a interface. */
   if (String(data.value ?? "") === "__SET__") {
+    const chave = String(data.key ?? "");
+    /* Para segredos a mensagem é outra: o campo é editável, o usuário só
+       não pode reenviar o marcador. Se ele não digitou nada, o valor
+       guardado deve permanecer como está. */
+    if (CHAVES_SEGREDO.has(chave)) {
+      return Response.json(
+        {
+          error: "Deixe em branco para manter a senha atual, ou digite a nova.",
+          details: { code: "SECRET_PLACEHOLDER" },
+        },
+        { status: 422 }
+      );
+    }
     return Response.json(
       {
         error: "Este campo é gravado pelo upload de imagem, não pelo formulário.",

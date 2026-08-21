@@ -41,7 +41,15 @@ const materialSchema = z.object({
   packQuantity: finite.min(0).max(999999999).default(0),
   packCost: finite.min(0).max(999999999).default(0),
   supplier: z.string().trim().max(180).nullable().optional(),
-  stock: finite.min(-999999999).max(999999999).default(0),
+  /* Saldo digitado à mão no cadastro não pode ser negativo — é sempre
+     erro de digitação, e a API aceitava `-999` com 200 OK (auditoria
+     v3.62.0). Todos os outros campos numéricos aqui já usavam .min(0).
+
+     Isto NÃO impede saldo negativo real: as movimentações de estoque
+     ajustam por `stock + delta` direto no banco e não passam por este
+     schema, então uma baixa maior que o saldo continua registrando o
+     negativo — que é informação legítima de inventário. */
+  stock: finite.min(0, "Estoque não pode ser negativo").max(999999999).default(0),
   minStock: finite.min(0).max(999999999).default(0),
   notes: z.string().trim().max(1000).nullable().optional(),
 });

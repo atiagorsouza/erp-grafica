@@ -1,4 +1,5 @@
 import { archiveCustomer, createCustomer, updateCustomer } from "@/lib/crm";
+import { idValido } from "@/lib/api-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -21,13 +22,13 @@ export async function POST(req: Request) {
       return Response.json(result);
     }
     if (op === "update") {
-      if (!Number.isFinite(id)) return Response.json({ error: "id obrigatório" }, { status: 400 });
+      if (!idValido(id)) return Response.json({ error: "id obrigatório" }, { status: 400 });
       const result = await updateCustomer(id, data);
       if ("error" in result) return Response.json(result, { status: result.status });
       return Response.json(result);
     }
     if (op === "delete" || op === "archive") {
-      if (!Number.isFinite(id)) return Response.json({ error: "id obrigatório" }, { status: 400 });
+      if (!idValido(id)) return Response.json({ error: "id obrigatório" }, { status: 400 });
       const result = await archiveCustomer(id, String(data.reason || "Arquivado pelo CRM"));
       if ("error" in result) return Response.json(result, { status: result.status });
       return Response.json(result);
