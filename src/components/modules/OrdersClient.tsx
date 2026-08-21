@@ -1392,7 +1392,12 @@ export function OrdersClient({
         }
       >
         {printDoc && (
-          <div className="bg-paper-100 p-4 rounded-xl border border-paper-300">
+          <div className="bg-paper-100 p-4 rounded-xl border border-paper-300 overflow-x-auto">
+            {/* Reduz a folha inteira para caber na largura do aparelho.
+               Uso `zoom` em vez de `scale` porque ele recalcula a altura
+               do bloco — `scale` deixaria uma faixa vazia embaixo. No
+               computador o valor volta a 1 e nada muda. */}
+            <div className="[zoom:0.42] sm:[zoom:1] w-[800px] sm:mx-auto">
             {printDoc.mode === "a4" ? (
               <ProductionOrderA4
                 order={printDoc.order}
@@ -1406,6 +1411,7 @@ export function OrdersClient({
                 company={company}
               />
             )}
+            </div>
           </div>
         )}
       </Drawer>
@@ -1553,7 +1559,13 @@ function ProductionOrderA4({
     <div
       className={cn(
         "font-sans text-ink-900 bg-white text-[12px] leading-snug select-text",
-        isPrint ? "w-full p-8" : "p-8 max-w-[800px] mx-auto shadow-sm rounded border border-paper-300"
+        /* Na tela o documento tem largura de folha; no celular ele era
+           espremido para ~360px e as colunas colidiam uma sobre a outra
+           (Subtotal por cima do valor, "AGUARDANDO"/"PAGO" embolados).
+           A folha agora mantém a largura real e é reduzida por inteiro,
+           que é como se lê um documento — não reflowada. A impressão
+           usa `isPrint` e não passa por aqui. */
+        isPrint ? "w-full p-8" : "w-[800px] shrink-0 p-8 shadow-sm rounded border border-paper-300"
       )}
       style={{ fontFamily: "'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif" }}
     >

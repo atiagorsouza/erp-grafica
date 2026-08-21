@@ -1059,13 +1059,17 @@ export function QuotesClient({
         }
       >
         {printDoc && (
-          <div className="bg-paper-100 p-4 rounded-xl border border-paper-300">
-            <CommercialProposalA4
-              quote={printDoc.quote}
-              quoteItems={items.filter((i) => Number(i.quoteId) === Number(printDoc.quote.id))}
-              customer={custName(printDoc.quote.customerId)}
-              company={company}
-            />
+          <div className="bg-paper-100 p-4 rounded-xl border border-paper-300 overflow-x-auto">
+            {/* Reduz a folha para caber na largura do aparelho; no
+               computador volta ao tamanho real. */}
+            <div className="[zoom:0.42] sm:[zoom:1] w-[800px] sm:mx-auto">
+              <CommercialProposalA4
+                quote={printDoc.quote}
+                quoteItems={items.filter((i) => Number(i.quoteId) === Number(printDoc.quote.id))}
+                customer={custName(printDoc.quote.customerId)}
+                company={company}
+              />
+            </div>
           </div>
         )}
       </Drawer>
@@ -1118,7 +1122,9 @@ function CommercialProposalA4({
     <div
       className={cn(
         "font-sans text-ink-900 bg-white text-[12px] leading-snug select-text",
-        isPrint ? "w-full p-8" : "p-8 max-w-[800px] mx-auto shadow-sm rounded border border-paper-300"
+        /* Mesma correção do pedido: a folha mantém a largura real e é
+           reduzida por inteiro no celular, em vez de espremida. */
+        isPrint ? "w-full p-8" : "w-[800px] shrink-0 p-8 shadow-sm rounded border border-paper-300"
       )}
       style={{ fontFamily: "'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif" }}
     >
