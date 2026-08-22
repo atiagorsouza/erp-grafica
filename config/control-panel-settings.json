@@ -803,6 +803,13 @@
           "type": "number",
           "hint": "Lead sem contato depois desse prazo vai para Perdido",
           "defaultValue": "30"
+        },
+        {
+          "key": "cadastro_link_validade_dias",
+          "label": "Validade do link de cadastro (dias)",
+          "type": "number",
+          "hint": "Quanto tempo o link enviado ao cliente continua valendo. Entre 1 e 90 dias.",
+          "defaultValue": "7"
         }
       ]
     },

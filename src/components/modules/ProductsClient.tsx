@@ -337,7 +337,14 @@ export function ProductsClient({
   }
 
   const filtered = products.filter((p) => {
-    const matchQ = !q || String(p.name).toLowerCase().includes(q.toLowerCase()) || String(p.sku || "").toLowerCase().includes(q.toLowerCase());
+    /* Busca também pelo código de barras: quem tem o leitor na mão
+       espera bipar e achar o produto, do mesmo jeito que no PDV. */
+    const termo = q.toLowerCase();
+    const matchQ =
+      !q ||
+      String(p.name).toLowerCase().includes(termo) ||
+      String(p.sku || "").toLowerCase().includes(termo) ||
+      String(p.barcode || "").includes(q.trim());
     /* Filtrar por uma mestre traz tudo que está abaixo dela — é o que
        o operador espera ao escolher "Brindes & Estamparia". */
     const filhosDoFiltro = productCats
@@ -547,6 +554,15 @@ export function ProductsClient({
             <section className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <Field label="Nome" required className="sm:col-span-2">
                 <Input value={form.name || ""} onChange={set("name")} placeholder="Ex.: Cartão de Visita 4x4 (100un)" />
+              </Field>
+              {/* O PDV já lia o código de barras, mas não havia onde
+                  cadastrá-lo: só entrava por importação. Com o leitor,
+                  basta clicar no campo e bipar. */}
+              <Field label="Código de barras" hint="Clique aqui e bipe com o leitor">
+                <Input mono value={form.barcode || ""} onChange={set("barcode")} placeholder="7891234567890" />
+              </Field>
+              <Field label="Código interno (SKU)" hint="Em branco, o sistema gera um">
+                <Input mono value={form.sku || ""} onChange={set("sku")} placeholder="CAR-4X4-100" />
               </Field>
               <Field label="Descrição" className="sm:col-span-2">
                 <Textarea value={form.description || ""} onChange={set("description")} placeholder="Detalhes comerciais do produto…" className="min-h-[60px]" />

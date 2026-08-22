@@ -1690,6 +1690,89 @@ async function main() {
     }
   }
 
+  // 11.7-octies) Código de barras no material (v3.66.0)
+  //
+  // O leitor só vale se o código for único: com dois materiais no mesmo
+  // código, bipar vira sorteio. E o campo tem que aceitar EAN-13 puro,
+  // sem máscara.
+  {
+    const cod = String(Date.now()).slice(-13).padStart(13, "7");
+    const criar = (nome, barcode) =>
+      fetch(`${BASE_URL}/api/crud/materials`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ op: "create", data: { name: nome, unit: "folha", barcode } }),
+      });
+
+    const r1 = await criar(`ZZ BARCODE ${stamp}`, cod);
+    const d1 = await r1.json();
+    assert(r1.ok && d1.row?.barcode === cod, `material salva o código de barras (${d1.row?.barcode})`);
+
+    /* O segundo material com o MESMO código tem que ser recusado, e a
+       mensagem precisa dizer qual material já usa — senão o operador
+       fica procurando às cegas. */
+    const r2 = await criar(`ZZ BARCODE DUP ${stamp}`, cod);
+    const d2 = await r2.json();
+    assert(r2.status === 422, `código de barras repetido é recusado (${r2.status})`);
+    assert(
+      /já está em/.test(String(d2.error || "")),
+      `o erro diz qual material já usa o código (${d2.error})`
+    );
+
+    /* Letra no meio não é código de barras — o leitor nunca manda isso,
+       mas a digitação manual manda. Aqui o 400 vem do schema (formato),
+       enquanto o duplicado acima dá 422 (regra de negócio): são erros
+       de natureza diferente e o sistema já os separa assim. */
+    const r3 = await criar(`ZZ BARCODE RUIM ${stamp}`, "78912ABC");
+    const d3 = await r3.json();
+    assert(r3.status === 400, `código de barras com letra é recusado (${r3.status})`);
+    assert(
+      /dígitos/.test(String(d3.error || "")),
+      `o erro explica o formato esperado (${d3.error})`
+    );
+
+    await sql("delete from materials where name like $1", [`ZZ BARCODE%${stamp}`]);
+  }
+
+  // 11.7-nonies) Validade do link de cadastro vem do painel (v3.66.0)
+  //
+  // Era constante no código: mudar exigia programador. O dono reclamou
+  // que 7 dias é pouco para quem manda orçamento na sexta.
+  {
+    const [antes] = await sql(
+      "select value from settings where key='cadastro_link_validade_dias'"
+    );
+    const original = antes?.value ?? null;
+
+    await sql(
+      `insert into settings (key,value,category) values ('cadastro_link_validade_dias','30','crm')
+       on conflict (key) do update set value='30'`
+    );
+
+    const r = await fetch(`${BASE_URL}/api/crm/registration-link`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ op: "criar", customerId }),
+    });
+    const d = await r.json();
+    assert(r.ok, "link de cadastro é criado com validade do painel");
+
+    /* 30 dias a partir de agora, com folga de 1 dia para não quebrar
+       por causa do relógio virando durante o teste. */
+    const dias = (new Date(d.link?.expiresAt).getTime() - Date.now()) / 86400000;
+    assert(
+      dias > 28.5 && dias < 30.5,
+      `o link passa a valer 30 dias quando o painel manda (${dias.toFixed(1)})`
+    );
+
+    if (original === null) {
+      await sql("delete from settings where key='cadastro_link_validade_dias'");
+    } else {
+      await sql("update settings set value=$1 where key='cadastro_link_validade_dias'", [original]);
+    }
+    await sql("delete from registration_links where customer_id=$1", [customerId]);
+  }
+
   // 11.8) Versão carimbada no banco (v3.53.2)
   //
   // `settings.app_version` era NULL para sempre: check-version só

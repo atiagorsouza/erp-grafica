@@ -34,7 +34,13 @@ function round3(n: number): number {
 const finite = z.coerce.number().finite();
 const materialSchema = z.object({
   name: z.string().trim().min(2, "Nome obrigatório").max(180),
+  /* Código de barras: só dígitos, 6 a 20 posições. EAN-13 e DUN-14 são
+     os formatos que aparecem em embalagem de insumo; o intervalo largo
+     aceita também EAN-8 e códigos internos numéricos. */
+  barcode: z.string().trim().regex(/^\d{6,20}$/, "Código de barras deve ter de 6 a 20 dígitos").nullable().optional(),
+  sku: z.string().trim().max(60).nullable().optional(),
   categoryId: z.coerce.number().int().positive().nullable().optional(),
+  supplierId: z.coerce.number().int().positive().nullable().optional(),
   unit: z.string().trim().min(1).max(40).default("unidade"),
   unitCost: finite.min(0).max(999999999).default(0),
   packName: z.string().trim().max(120).nullable().optional(),
@@ -158,7 +164,25 @@ export async function saveMaterial(raw: unknown, id?: number) {
      custeado pelo valor velho. */
   const derived = derivedUnitCost(d.packCost, d.packQuantity);
   const effectiveUnitCost = derived ?? d.unitCost;
-  const data = { name: d.name, categoryId: d.categoryId || null, unit: d.unit, unitCost: toDecimalString(effectiveUnitCost, 4), packName: nullable(d.packName), packQuantity: toDecimalString(d.packQuantity, 3), packCost: toDecimalString(d.packCost, 4), supplier: nullable(d.supplier), stock: toDecimalString(d.stock, 3), minStock: toDecimalString(d.minStock, 3), notes: nullable(d.notes) };
+
+  /* Código de barras repetido quebra o uso que justifica o campo: bipar
+     e achar o insumo. Com dois materiais no mesmo código, o leitor vira
+     sorteio. Avisa qual já usa em vez de só recusar. */
+  if (d.barcode) {
+    const iguais = await db
+      .select({ id: materials.id, name: materials.name })
+      .from(materials)
+      .where(eq(materials.barcode, d.barcode))
+      .limit(2);
+    const conflito = iguais.find((m) => m.id !== id);
+    if (conflito) {
+      return {
+        error: `O código ${d.barcode} já está em "${conflito.name}".`,
+        status: 422,
+      } satisfies StockError;
+    }
+  }
+  const data = { name: d.name, barcode: nullable(d.barcode), sku: nullable(d.sku), categoryId: d.categoryId || null, supplierId: d.supplierId || null, unit: d.unit, unitCost: toDecimalString(effectiveUnitCost, 4), packName: nullable(d.packName), packQuantity: toDecimalString(d.packQuantity, 3), packCost: toDecimalString(d.packCost, 4), supplier: nullable(d.supplier), stock: toDecimalString(d.stock, 3), minStock: toDecimalString(d.minStock, 3), notes: nullable(d.notes) };
   if (id) {
     const [row] = await db.update(materials).set(data).where(eq(materials.id, id)).returning();
     if (!row) return { error: "Material não encontrado", status: 404 } satisfies StockError;

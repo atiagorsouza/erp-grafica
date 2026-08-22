@@ -14,7 +14,7 @@ import {
   cancelarLink,
   criarLinkCadastro,
   marcarEnviado,
-  VALIDADE_DIAS,
+  getValidadeDias,
 } from "@/lib/registration-links";
 import { getPricingDefaults } from "@/lib/settings";
 import { mensagem } from "@/lib/mensagens";
@@ -58,7 +58,7 @@ async function textoDoPedido(nome: string, url: string, empresa: string) {
     nome: primeiro,
     link: url,
     empresa,
-    validade: String(VALIDADE_DIAS),
+    validade: String(await getValidadeDias()),
   });
   return m.texto;
 }

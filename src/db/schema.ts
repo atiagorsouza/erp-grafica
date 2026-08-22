@@ -365,6 +365,13 @@ export const printFormats = pgTable("print_formats", {
 export const materials = pgTable("materials", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(), // Papel A4 75g, Papel Cartolina, Vinil, TNT...
+  /** código interno do insumo, se a gráfica usar um */
+  sku: text("sku"),
+  /* Código de barras da embalagem (EAN/UPC/DUN).
+     Com o leitor na mão, cadastrar e conferir estoque deixa de ser
+     digitação: bipa e o campo preenche. É o mesmo caminho que o PDV
+     já usa para produtos. */
+  barcode: text("barcode"),
   categoryId: integer("category_id").references(() => itemCategories.id, {
     onDelete: "set null",
   }),
@@ -390,7 +397,17 @@ export const materials = pgTable("materials", {
   packQuantity: numeric("pack_quantity", { precision: 12, scale: 3 }).default("0"),
   /** preço pago na embalagem fechada */
   packCost: numeric("pack_cost", { precision: 12, scale: 4 }).default("0"),
+  /* Fornecedor como TEXTO — legado. Continua sendo gravado e exibido
+     para não perder o que já foi digitado em centenas de materiais.
+     O cadastro de verdade é `supplierId`; este campo vira só o nome
+     de quem ainda não foi vinculado. */
   supplier: text("supplier"),
+  /** fornecedor cadastrado: liga o insumo a CNPJ, contato e prazo.
+      A referência é preguiçosa (arrow) porque `suppliers` só é
+      declarada mais abaixo neste arquivo. */
+  supplierId: integer("supplier_id").references((): AnyPgColumn => suppliers.id, {
+    onDelete: "set null",
+  }),
   stock: numeric("stock", { precision: 12, scale: 3 }).default("0"),
   minStock: numeric("min_stock", { precision: 12, scale: 3 }).default("0"),
   notes: text("notes"),

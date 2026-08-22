@@ -50,12 +50,40 @@ export function StockClient({ materials, suppliers, purchases, materialCats, mov
   const [buyModal, setBuyModal] = useState(false);
   const [buyItems, setBuyItems] = useState<{ materialId: string; quantity: string; unitCost: string }[]>([]);
   const [onlyLow, setOnlyLow] = useState(false);
+  const [busca, setBusca] = useState("");
 
   const set = (k: string) => (e: { target: { value: string } }) => setForm((f) => ({ ...f, [k]: e.target.value }));
   const catName = (id: unknown) => materialCats.find((c) => Number(c.id) === Number(id));
 
   const lowCount = materials.filter((m) => Number(m.stock) <= Number(m.minStock || 0)).length;
-  const shown = materials.filter((m) => !onlyLow || Number(m.stock) <= Number(m.minStock || 0));
+
+  /* Busca do estoque, pensada para o leitor de código de barras.
+     O leitor digita o código e dá Enter — então o campo aceita tanto
+     texto (nome, SKU, fornecedor) quanto o código bipado. Quando o
+     termo é só dígitos e casa exatamente com um barcode, esse material
+     vem primeiro: bipar tem que achar UM item, não uma lista. */
+  const supName = (id: unknown) => suppliers.find((s) => Number(s.id) === Number(id))?.name;
+  const termo = busca.trim().toLowerCase();
+  const soDigitos = /^\d{6,20}$/.test(termo);
+  const shown = materials
+    .filter((m) => {
+      if (onlyLow && Number(m.stock) > Number(m.minStock || 0)) return false;
+      if (!termo) return true;
+      if (soDigitos && String(m.barcode || "") === termo) return true;
+      return (
+        String(m.name || "").toLowerCase().includes(termo) ||
+        String(m.sku || "").toLowerCase().includes(termo) ||
+        String(m.barcode || "").includes(termo) ||
+        String(m.supplier || "").toLowerCase().includes(termo) ||
+        String(supName(m.supplierId) || "").toLowerCase().includes(termo)
+      );
+    })
+    .sort((a, b) => {
+      if (!soDigitos) return 0;
+      const ea = String(a.barcode || "") === termo ? 0 : 1;
+      const eb = String(b.barcode || "") === termo ? 0 : 1;
+      return ea - eb;
+    });
 
   /* ── Agrupamento por categoria (v3.57.0) ──────────────────────
      A lista era plana, com a categoria só numa coluna. Com papelaria,
@@ -86,7 +114,6 @@ export function StockClient({ materials, suppliers, purchases, materialCats, mov
     });
   })();
   const matName = (id: unknown) => materials.find((m) => Number(m.id) === Number(id))?.name;
-  const supName = (id: unknown) => suppliers.find((s) => Number(s.id) === Number(id))?.name;
 
   async function run(fn: () => Promise<unknown>, ok: string) {
     setSaving(true);
@@ -107,7 +134,12 @@ export function StockClient({ materials, suppliers, purchases, materialCats, mov
     run(async () => {
       const data = {
         name: form.name,
+        /* Só dígitos: o leitor às vezes manda espaço no fim, e um
+           barcode com espaço nunca casa na busca. */
+        barcode: String(form.barcode || "").replace(/\D/g, "") || null,
+        sku: form.sku?.trim() || null,
         categoryId: form.categoryId || null,
+        supplierId: form.supplierId || null,
         unit: form.unit || "unidade",
         unitCost: form.unitCost || "0",
         packName: form.packName || null,
@@ -256,11 +288,33 @@ export function StockClient({ materials, suppliers, purchases, materialCats, mov
         )}
       </div>
 
+      {/* ── BUSCA DOS MATERIAIS ──
+          Serve para digitar e para bipar: o leitor manda o código e um
+          Enter, e o material aparece sozinho. */}
+      {tab === "materiais" && (
+        <div className="mb-4">
+          <Input
+            value={busca}
+            onChange={(e) => setBusca(e.target.value)}
+            placeholder="Buscar material, código interno, fornecedor — ou bipe o código de barras"
+          />
+          {termo && (
+            <p className="mt-1.5 font-mono text-[10.5px] text-ink-400">
+              {shown.length === 0
+                ? soDigitos
+                  ? `Nenhum material com o código ${termo}. Cadastre-o em "Novo material".`
+                  : "Nada encontrado."
+                : `${shown.length} de ${materials.length}`}
+            </p>
+          )}
+        </div>
+      )}
+
       {/* ── MATERIAIS ── */}
       {tab === "materiais" && (
-        shown.length === 0 ? (
+        shown.length === 0 && !termo ? (
           <EmptyState icon="boxes" title="Nenhum material" hint="Cadastre papéis, tintas, etiquetas e insumos com estoque mínimo." />
-        ) : (
+        ) : shown.length === 0 ? null : (
           <div className="space-y-5">
           {grupos.map((g) => {
             const criticos = g.itens.filter(
@@ -490,6 +544,20 @@ export function StockClient({ materials, suppliers, purchases, materialCats, mov
         footer={<><Button variant="ghost" onClick={() => setMatModal(null)}>Cancelar</Button><Button loading={saving} icon="check" onClick={() => saveMat(matModal?.edit ? Number(matModal.edit.id) : undefined)}>Salvar</Button></>}>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Field label="Nome" required className="sm:col-span-2"><Input value={form.name || ""} onChange={set("name")} placeholder="Papel Couché 150g A4" /></Field>
+          {/* Código de barras: o leitor age como teclado. Clique no
+              campo, bipe a embalagem e ele preenche sozinho — sem
+              digitar treze dígitos e sem errar um deles. */}
+          <Field label="Código de barras" hint="Clique aqui e bipe a embalagem com o leitor">
+            <Input
+              mono
+              value={form.barcode || ""}
+              onChange={set("barcode")}
+              placeholder="7891234567890"
+            />
+          </Field>
+          <Field label="Código interno (SKU)" hint="Opcional — se você usa numeração própria">
+            <Input mono value={form.sku || ""} onChange={set("sku")} placeholder="PAP-COU-150" />
+          </Field>
           <Field label="Categoria">
             <Select value={form.categoryId || ""} onChange={set("categoryId")}>
               <option value="">Sem categoria</option>
@@ -536,7 +604,24 @@ export function StockClient({ materials, suppliers, purchases, materialCats, mov
           <Field label="Custo unitário (R$)" hint={packUnitCost !== null ? "Calculado pela embalagem acima" : `Por ${form.unit || "unidade"}`}>
             <Input mono disabled={packUnitCost !== null} value={packUnitCost !== null ? packUnitCost.toFixed(6).replace(/0+$/, "").replace(/\.$/, "") : (form.unitCost || "")} onChange={set("unitCost")} />
           </Field>
-          <Field label="Fornecedor (texto)"><Input value={form.supplier || ""} onChange={set("supplier")} /></Field>
+          {/* Fornecedor de verdade: escolhido do cadastro, não digitado.
+              Digitar deixava "Kalunga", "kalunga" e "KALUNGA " como três
+              fornecedores diferentes — e nenhum deles com CNPJ ou prazo.
+              O campo de texto antigo continua embaixo, só de leitura,
+              enquanto houver material não vinculado. */}
+          <Field label="Fornecedor" hint={suppliers.length ? "Do cadastro de fornecedores" : "Cadastre em Estoque → Fornecedores"}>
+            <Combobox
+              value={form.supplierId || ""}
+              onChange={(v) => setForm((f) => ({ ...f, supplierId: v }))}
+              placeholder={suppliers.length ? "Selecionar…" : "Nenhum fornecedor cadastrado"}
+              options={suppliers.map((s) => ({ value: String(s.id), label: String(s.tradeName || s.name) }))}
+            />
+          </Field>
+          {form.supplier && !form.supplierId && (
+            <Field label="Fornecedor antigo (texto)" hint="Escolha acima para vincular ao cadastro">
+              <Input value={form.supplier} disabled />
+            </Field>
+          )}
           <Field label="Estoque atual"><Input mono value={form.stock || "0"} onChange={set("stock")} /></Field>
           <Field label="Estoque mínimo"><Input mono value={form.minStock || "0"} onChange={set("minStock")} /></Field>
         </div>
