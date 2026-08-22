@@ -859,8 +859,15 @@ async function main() {
   assert(pSku.status === 409, "SKU duplicado é recusado");
   assert(String(pSku.body.error || "").includes("SKU"), "erro de SKU duplicado é específico");
 
+  /* 422 (guarda no lib, que diz QUAL produto já usa) ou 409 (rede de
+     segurança na rota, a partir do índice único do banco). Os dois
+     recusam; o 422 é o que dá o nome do produto ao operador. */
   const pBar = await prodPost({ ...base, name: "SMOKE PROD Barcode Repetido", barcode: `789${stamp}`.slice(0, 13) });
-  assert(pBar.status === 409, "código de barras duplicado é recusado");
+  assert(pBar.status === 422 || pBar.status === 409, `código de barras duplicado é recusado (${pBar.status})`);
+  assert(
+    /já está em|já existe/i.test(String(pBar.body.error || "")),
+    `o erro de código repetido é legível (${pBar.body.error})`
+  );
   assert(
     !String(pBar.body.error || "").toLowerCase().includes("insert into"),
     "erro de produto duplicado não vaza SQL"
