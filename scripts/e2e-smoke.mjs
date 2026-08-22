@@ -1223,6 +1223,25 @@ async function main() {
     );
     const pzId = Number(pz.id);
 
+    /* O corte é CONFIGURÁVEL pelo painel, e os checks abaixo têm o
+       valor 17:00 embutido nas contas. Ler o que estiver no banco
+       transforma uma mudança legítima do dono em teste vermelho:
+       aconteceu de verdade quando o corte virou 15:00 e o resultado
+       (2026-08-21) coincidiu com o "hoje" da máquina, o que levou a
+       um diagnóstico errado de fuso horário.
+
+       Então: fixa 17:00 aqui, mede, e devolve o valor do dono no
+       fim. O que está sob teste é a REGRA do corte, não a preferência
+       comercial de quem usa. */
+    const [corteAntes] = await sql(
+      "select value from settings where key='prazo_horario_corte'"
+    );
+    const corteOriginal = corteAntes?.value ?? null;
+    await sql(
+      `insert into settings (key,value,category) values ('prazo_horario_corte','17:00','prazo')
+       on conflict (key) do update set value=excluded.value`
+    );
+
     /* Quarta-feira 19/08/2026. Antes das 17h a produção começa hoje e
        entrega quinta; depois das 17h escorrega para sexta. */
     const antes = await prazo("2026-08-19T16:30:00", pzId);
@@ -1252,6 +1271,24 @@ async function main() {
     assert(
       proSabado.data === "2026-08-21" && proSabado.retiradaSabado === "2026-08-22",
       `pronto na sexta oferece retirada no sábado (${proSabado.retiradaSabado})`
+    );
+
+    /* Devolve o corte do dono. Um teste que muda configuração e não
+       restaura é pior que teste nenhum: silenciosamente reescreve a
+       operação de quem usa o sistema. */
+    if (corteOriginal === null) {
+      await sql("delete from settings where key='prazo_horario_corte'");
+    } else {
+      await sql("update settings set value=$1 where key='prazo_horario_corte'", [
+        corteOriginal,
+      ]);
+    }
+    const [corteDepois] = await sql(
+      "select value from settings where key='prazo_horario_corte'"
+    );
+    assert(
+      (corteDepois?.value ?? null) === corteOriginal,
+      `horário de corte do painel foi devolvido intacto (${corteDepois?.value ?? "removido"})`
     );
 
     await sql("DELETE FROM products WHERE id=$1", [pzId]);
@@ -1611,12 +1648,31 @@ async function main() {
 
   // 11.7-septies) Teste de e-mail dá erro em português (v3.65.0)
   {
-    const [h] = await sql("select value from settings where key='smtp_host'");
-    const hostOriginal = h ? h.value : null;
-    await sql(
-      "insert into settings (key,value,category) values ('smtp_host','','email') " +
-      "on conflict (key) do update set value=''"
-    );
+    /* Este bloco mede UMA coisa: faltando o servidor de saída, o erro
+       sai em português. Para isso o resto precisa estar preenchido —
+       senão a rota reclama antes de outro campo vazio (foi o que
+       aconteceu num banco recém-criado: veio "Preencha o campo
+       Enviar teste para", que está correto, mas não é o que este
+       check mede). Monta o cenário inteiro em vez de depender do que
+       estiver no banco. */
+    const chavesMail = ["smtp_host", "smtp_test_to", "smtp_password"];
+    const mailAntes = new Map();
+    for (const k of chavesMail) {
+      const [r] = await sql("select value from settings where key=$1", [k]);
+      mailAntes.set(k, r?.value ?? null);
+    }
+    const cenario = {
+      smtp_host: "",
+      smtp_test_to: "smoke@vtdigital.local",
+      smtp_password: "SenhaDeTesteE2E#123",
+    };
+    for (const [k, v] of Object.entries(cenario)) {
+      await sql(
+        `insert into settings (key,value,category) values ($1,$2,'email')
+         on conflict (key) do update set value=excluded.value`,
+        [k, v]
+      );
+    }
     const r = await fetch(`${BASE_URL}/api/email/testar`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -1625,9 +1681,12 @@ async function main() {
     const d = await r.json();
     assert(r.status === 422, "teste sem servidor configurado responde 422");
     assert(/servidor/i.test(d.error || ""),
-      "a mensagem de erro do e-mail é legível em português");
-    if (hostOriginal !== null) {
-      await sql("update settings set value=$1 where key='smtp_host'", [hostOriginal]);
+      `a mensagem de erro do e-mail é legível em português (${d.error || "sem mensagem"})`);
+
+    for (const k of chavesMail) {
+      const v = mailAntes.get(k);
+      if (v === null) await sql("delete from settings where key=$1", [k]);
+      else await sql("update settings set value=$2 where key=$1", [k, v]);
     }
   }
 
