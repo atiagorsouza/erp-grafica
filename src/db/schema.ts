@@ -446,6 +446,34 @@ export const stockMovements = pgTable("stock_movements", {
 ]);
 
 /* ------------------------------------------------------------------ */
+/*  VENDEDORES E COMISSÃO                                              */
+/* ------------------------------------------------------------------ */
+/**
+ * Quem vende. Antes existia só `seller_name` como texto livre em
+ * orçamentos, pedidos e vendas — então "Tiago", "tiago" e "TIAGO "
+ * viravam três vendedores diferentes, e não havia como somar o que
+ * cada um vendeu nem quanto tinha a receber.
+ *
+ * O texto continua sendo gravado junto (o histórico não se perde e
+ * quem não for vinculado ainda aparece), mas o vínculo de verdade é
+ * o `sellerId`.
+ */
+export const sellers = pgTable("sellers", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  /** apelido curto que aparece no PDV e no cupom */
+  nickname: text("nickname"),
+  document: text("document"),
+  phone: text("phone"),
+  email: text("email"),
+  /** percentual de comissão deste vendedor — 3 = 3% */
+  commissionRate: numeric("commission_rate", { precision: 6, scale: 3 }).default("0"),
+  active: boolean("active").default(true).notNull(),
+  notes: text("notes"),
+  createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+});
+
+/* ------------------------------------------------------------------ */
 /*  FORNECEDORES E COMPRAS                                             */
 /* ------------------------------------------------------------------ */
 export const suppliers = pgTable("suppliers", {
@@ -823,6 +851,10 @@ export const quotes = pgTable("quotes", {
   paymentMethod: text("payment_method"),
   channel: text("channel").default("Atendimento"),
   sellerName: text("seller_name"),
+  /** vendedor do cadastro — o texto acima vira só histórico */
+  sellerId: integer("seller_id").references((): AnyPgColumn => sellers.id, {
+    onDelete: "set null",
+  }),
   notes: text("notes"),
   createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
 }, (table) => [
@@ -896,6 +928,10 @@ export const orders = pgTable("orders", {
   balanceMethod: text("balance_method"),
   channel: text("channel").default("Atendimento"),
   sellerName: text("seller_name"),
+  /** vendedor do cadastro — o texto acima vira só histórico */
+  sellerId: integer("seller_id").references((): AnyPgColumn => sellers.id, {
+    onDelete: "set null",
+  }),
   notes: text("notes"),
   createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
@@ -1005,6 +1041,10 @@ export const sales = pgTable("sales", {
   receivedAmount: numeric("received_amount", { precision: 12, scale: 2 }),
   changeAmount: numeric("change_amount", { precision: 12, scale: 2 }),
   sellerName: text("seller_name"),
+  /** vendedor do cadastro — o texto acima vira só histórico */
+  sellerId: integer("seller_id").references((): AnyPgColumn => sellers.id, {
+    onDelete: "set null",
+  }),
   deliveryMode: text("delivery_mode"),
   deliveryDate: text("delivery_date"),
   notes: text("notes"),
@@ -1165,6 +1205,7 @@ export type CrmLead = typeof crmLeads.$inferSelect;
 export type CrmActivity = typeof crmActivities.$inferSelect;
 export type Order = typeof orders.$inferSelect;
 export type ArtApproval = typeof artApprovals.$inferSelect;
+export type Seller = typeof sellers.$inferSelect;
 export type Supplier = typeof suppliers.$inferSelect;
 export type Purchase = typeof purchases.$inferSelect;
 export type ProductionSchedule = typeof productionSchedules.$inferSelect;

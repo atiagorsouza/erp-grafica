@@ -1833,6 +1833,96 @@ async function main() {
     await sql("delete from whatsapp_conversas where phone_e164=$1", [fone]);
   }
 
+  // 11.7-undecies) Vendedor e comissão sobre a margem (v3.67.0)
+  //
+  // Comissão é dinheiro saindo: erro aqui vira briga com o vendedor.
+  // Estes checks travam as três decisões do dono — só pedido FECHADO
+  // conta, a base é a MARGEM (não o total), e item sem produto usa a
+  // margem estimada e é marcado como tal.
+  {
+    const [vend] = await sql(
+      `insert into sellers (name, nickname, commission_rate, active)
+       values ($1,'ZZTeste',10,true) returning id`,
+      [`ZZ VENDEDOR ${stamp}`]
+    );
+    const vendedorId = Number(vend.id);
+
+    /* Produto de custo conhecido: 100 de custo, vendido a 200.
+       Margem 100 × 10% = 10 de comissão. Números redondos de
+       propósito — teste que exige calculadora esconde erro. */
+    const [prod] = await sql(
+      `insert into products (name, calculation_mode, cost_snapshot, final_price, margin, active)
+       values ($1,'unit',100,200,0.5,true) returning id`,
+      [`ZZ PROD COM ${stamp}`]
+    );
+    const prodId = Number(prod.id);
+
+    const criarPedido = (numero, status, itens, total) =>
+      sql(
+        `insert into orders (number, customer_id, status, seller_id, seller_name, items, subtotal, discount, total, updated_at)
+         values ($1,$2,$3,$4,'ZZTeste',$5::jsonb,$6,0,$6, now()) returning id`,
+        [numero, customerId, status, vendedorId, JSON.stringify(itens), total]
+      );
+
+    await criarPedido(`ZZ-FECHADO-${stamp}`, "concluido",
+      [{ productId: prodId, quantity: 1, unitPrice: 200, total: 200 }], 200);
+
+    /* Mesmo valor, mas ainda em produção: NÃO pode entrar. */
+    await criarPedido(`ZZ-ABERTO-${stamp}`, "confirmado",
+      [{ productId: prodId, quantity: 1, unitPrice: 200, total: 200 }], 200);
+
+    /* Cancelado nunca paga comissão. */
+    await criarPedido(`ZZ-CANCEL-${stamp}`, "cancelado",
+      [{ productId: prodId, quantity: 1, unitPrice: 200, total: 200 }], 200);
+
+    const hoje = new Date().toISOString().slice(0, 10);
+    const ext = await req(`/api/crud/sellers?extrato=${vendedorId}&de=${hoje}&ate=${hoje}`);
+
+    assert(ext.extrato.linhas.length === 1,
+      `só pedido fechado entra na comissão (${ext.extrato.linhas.length} de 3)`);
+    assert(ext.extrato.totalMargem === 100,
+      `a margem é preço menos custo, não o total (${ext.extrato.totalMargem})`);
+    assert(ext.extrato.totalComissao === 10,
+      `comissão = 10% sobre a margem de 100 (${ext.extrato.totalComissao})`);
+    assert(ext.extrato.linhas[0].estimado === false,
+      "pedido com produto cadastrado não é estimado");
+
+    /* Item digitado à mão: sem custo conhecido, usa a margem padrão
+       do painel e AVISA — o vendedor precisa saber o que é conta e o
+       que é estimativa. */
+    await criarPedido(`ZZ-AVULSO-${stamp}`, "concluido",
+      [{ productId: null, quantity: 1, unitPrice: 100, total: 100, description: "avulso" }], 100);
+
+    const ext2 = await req(`/api/crud/sellers?extrato=${vendedorId}&de=${hoje}&ate=${hoje}`);
+    const avulso = ext2.extrato.linhas.find((l) => l.numero.startsWith("ZZ-AVULSO"));
+    assert(!!avulso, "pedido com item avulso entra no extrato");
+    assert(avulso.estimado === true, "linha sem produto é marcada como estimada");
+    assert(avulso.margem > 0, `item avulso usa a margem padrão (${avulso.margem})`);
+
+    /* Comissão acima de 100% é erro de digitação, não regra. */
+    const ruim = await fetch(`${BASE_URL}/api/crud/sellers`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ op: "create", data: { name: "ZZ Absurdo", commissionRate: 300 } }),
+    });
+    assert(ruim.status === 400, `comissão acima de 100% é recusada (${ruim.status})`);
+
+    /* Desativar preserva o histórico: o extrato antigo continua. */
+    const off = await fetch(`${BASE_URL}/api/crud/sellers`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ op: "archive", id: vendedorId }),
+    });
+    assert(off.ok, "vendedor é desativado, não apagado");
+    const [aindaLa] = await sql("select active from sellers where id=$1", [vendedorId]);
+    assert(aindaLa && aindaLa.active === false, "o cadastro continua no banco, inativo");
+
+    await sql("delete from orders where number like $1", [`ZZ-%${stamp}`]);
+    await sql("delete from products where id=$1", [prodId]);
+    await sql("delete from sellers where id=$1", [vendedorId]);
+    await sql("delete from sellers where name like 'ZZ Absurdo%'");
+  }
+
   // 11.8) Versão carimbada no banco (v3.53.2)
   //
   // `settings.app_version` era NULL para sempre: check-version só

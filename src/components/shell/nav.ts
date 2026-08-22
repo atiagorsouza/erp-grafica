@@ -45,6 +45,7 @@ export const NAV: NavGroup[] = [
       { href: "/cobrancas", label: "Cobranças", icon: "wallet" },
       { href: "/envios", label: "Envios & Frete", icon: "truck" },
       { href: "/financeiro", label: "Financeiro", icon: "wallet" },
+      { href: "/vendedores", label: "Vendedores & Comissão", icon: "person" },
       { href: "/relatorios", label: "Relatórios", icon: "chart" },
       { href: "/configuracoes", label: "Painel de Controle", icon: "gear" },
     ],

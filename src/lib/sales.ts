@@ -74,6 +74,10 @@ export const saleInputSchema = z.object({
   cashSessionId: z.coerce.number().int().positive().nullable().optional(),
   allowNegativeStock: z.boolean().default(false),
   sellerName: z.string().trim().max(100).optional(),
+  /* Vendedor cadastrado: é o que liga a venda ao extrato de comissão.
+     Opcional porque venda de balcão sem vendedor definido continua
+     válida — nem toda venda tem comissão. */
+  sellerId: z.coerce.number().int().positive().nullable().optional(),
   deliveryMode: z.string().trim().max(100).optional(),
   deliveryDate: z.string().trim().max(50).optional(),
   notes: z.string().trim().max(500).optional(),
@@ -437,6 +441,7 @@ export async function createSale(raw: unknown) {
           receivedAmount: received != null ? toDecimalString(received, 2) : null,
           changeAmount: change != null ? toDecimalString(change, 2) : null,
           sellerName: (input.sellerName || defaults.pdv_seller_default || null) as string | null,
+          sellerId: input.sellerId ?? null,
           deliveryMode: (input.deliveryMode || defaults.pdv_delivery_default || null) as string | null,
           deliveryDate: input.deliveryDate ?? null,
           notes: input.notes ?? null,

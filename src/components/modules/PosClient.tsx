@@ -245,6 +245,7 @@ const uid = () =>
    ================================================================== */
 
 export function PosClient({
+  sellers,
   products: allProducts,
   productCats,
   customers: initialCustomers,
@@ -254,6 +255,8 @@ export function PosClient({
   pdvConfig,
   cashSession: initialSession,
 }: {
+  /** vendedores cadastrados — o cupom deixa de depender de texto livre */
+  sellers: { id: number; nome: string }[];
   products: PosProduct[];
   productCats: PosCategory[];
   customers: PosCustomer[];
@@ -281,6 +284,10 @@ export function PosClient({
   const [splitOn, setSplitOn] = useState(false);
   const [splitLines, setSplitLines] = useState<SplitLine[]>([]);
   const [sellerName, setSellerName] = useState(pdvConfig.sellerDefault || "OPERADOR");
+  /* Guardar o ID além do nome: o nome ainda vai no cupom (e no
+     histórico antigo), mas é o ID que liga a venda ao extrato de
+     comissão. Sem ele, "Tiago" e "TIAGO" seriam pessoas diferentes. */
+  const [sellerId, setSellerId] = useState<number | null>(null);
   const [deliveryMode, setDeliveryMode] = useState(
     pdvConfig.deliveryDefault || "Retirada no balcão"
   );
@@ -827,6 +834,7 @@ export function PosClient({
           cashSessionId: session?.id ?? null,
           allowNegativeStock: allowNegativeStock || pdvConfig.allowNegativeStock,
           sellerName,
+          sellerId,
           deliveryMode,
           deliveryDate: finalDeliveryDate,
           notes,
@@ -1575,13 +1583,36 @@ export function PosClient({
                   <div className="mt-2 space-y-2 rounded-lg bg-white/[0.02] p-2.5 border border-ink-800 text-[11px]">
                     <div>
                       <label className="text-[10px] text-ink-400 block mb-1">Vendedor / Atendente:</label>
-                      <Input
-                        value={sellerName}
-                        onChange={(e) => handleSellerChange(e.target.value)}
-                        placeholder="Ex.: TIAGO SOUZA"
-                        tone="dark"
-                        className="h-7 text-[11px]"
-                      />
+                      {/* Com vendedores cadastrados, escolher da lista —
+                          é o que liga a venda ao extrato de comissão.
+                          Sem cadastro, segue o campo livre de sempre,
+                          para não travar quem ainda não cadastrou. */}
+                      {sellers.length > 0 ? (
+                        <Select
+                          value={sellerId ? String(sellerId) : ""}
+                          onChange={(e) => {
+                            const id = Number(e.target.value) || null;
+                            setSellerId(id);
+                            const v = sellers.find((s) => s.id === id);
+                            handleSellerChange(v ? v.nome : "OPERADOR");
+                          }}
+                          tone="dark"
+                          className="h-7 text-[11px]"
+                        >
+                          <option value="">— sem vendedor —</option>
+                          {sellers.map((s) => (
+                            <option key={s.id} value={String(s.id)}>{s.nome}</option>
+                          ))}
+                        </Select>
+                      ) : (
+                        <Input
+                          value={sellerName}
+                          onChange={(e) => handleSellerChange(e.target.value)}
+                          placeholder="Ex.: TIAGO SOUZA"
+                          tone="dark"
+                          className="h-7 text-[11px]"
+                        />
+                      )}
                     </div>
                     <div>
                       <label className="text-[10px] text-ink-400 block mb-1">Situação / Entrega:</label>

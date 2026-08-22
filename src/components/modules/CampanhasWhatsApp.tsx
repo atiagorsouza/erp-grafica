@@ -191,9 +191,45 @@ export function CampanhasWhatsApp() {
 
       {/* ── Lista ── */}
       {campanhas.length === 0 ? (
-        <p className="py-6 text-center text-[13px] text-ink-400">
-          Nenhuma campanha criada.
-        </p>
+        /* Sem campanha, a tela dizia só "Nenhuma campanha criada" e os
+           modelos ficavam escondidos atrás do botão. O dono abriu esta
+           aba, não viu nada e concluiu — com razão — que os modelos não
+           existiam. Modelo que precisa ser procurado não serve: agora
+           eles SÃO o estado vazio, e clicar já abre a campanha pronta. */
+        <div className="py-2">
+          <p className="mb-1 text-[13px] font-semibold text-ink-700">
+            Comece por um modelo
+          </p>
+          <p className="mb-3.5 text-[12px] text-ink-500">
+            Escritos para a VTDIGITAL e prontos para enviar. Clique num
+            deles: o texto vem preenchido e você ajusta o que quiser.
+          </p>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            {MODELOS_CAMPANHA.map((m) => (
+              <button
+                key={m.id}
+                type="button"
+                onClick={() => {
+                  setForm({
+                    name: m.nome,
+                    body: m.corpo,
+                    ctaLabel: m.ctaLabel || "",
+                    ctaUrl: "",
+                  });
+                  setNovaAberta(true);
+                }}
+                className="focus-ring group cursor-pointer rounded-xl border border-paper-200 bg-paper-50 p-3 text-left transition-all hover:-translate-y-0.5 hover:border-cyan-400 hover:shadow-card"
+              >
+                <p className="text-[12.5px] font-bold text-ink-900 group-hover:text-cyan-800">
+                  {m.titulo}
+                </p>
+                <p className="mt-0.5 text-[11px] leading-relaxed text-ink-500">
+                  {m.quando}
+                </p>
+              </button>
+            ))}
+          </div>
+        </div>
       ) : (
         <div className="space-y-2.5">
           {campanhas.map((c) => {

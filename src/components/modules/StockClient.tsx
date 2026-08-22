@@ -252,6 +252,39 @@ export function StockClient({ materials, suppliers, purchases, materialCats, mov
   const packCost = Number(form.packCost || 0);
   const packUnitCost = packQty > 0 && packCost > 0 ? packCost / packQty : null;
 
+  /* ── Ajuda para calcular o rendimento ──────────────────────────
+     "Rende quantos" é fácil para resma (500 folhas, está na etiqueta)
+     e difícil para tudo que vem em rolo: um vinil de 1,22 m × 50 m dá
+     61 m², e essa conta era feita na calculadora do celular — com o
+     erro indo direto para o custo de todo produto que usa o material.
+
+     A calculadora aparece só quando a unidade pede, e o resultado
+     PREENCHE o campo em vez de ficar num canto: número que o operador
+     tem de copiar à mão é número que ele digita errado. */
+  const unidade = String(form.unit || "unidade");
+  const ehArea = unidade === "metro²";
+  const ehComprimento = ["metro", "metro linear", "centímetro"].includes(unidade);
+  const ehFolha = ["folha", "resma", "bloco", "cento", "milheiro"].includes(unidade);
+
+  const larguraRolo = Number(form.calcLargura || 0);
+  const compRolo = Number(form.calcComprimento || 0);
+  const folhasPorPacote = Number(form.calcFolhas || 0);
+  const pacotesPorCaixa = Number(form.calcPacotes || 0);
+
+  const rendimentoCalculado = ehArea
+    ? larguraRolo > 0 && compRolo > 0
+      ? larguraRolo * compRolo
+      : null
+    : ehFolha
+      ? folhasPorPacote > 0
+        ? folhasPorPacote * (pacotesPorCaixa > 0 ? pacotesPorCaixa : 1)
+        : null
+      : ehComprimento
+        ? compRolo > 0
+          ? compRolo
+          : null
+        : null;
+
   return (
     <div>
       <PageHeader
@@ -566,7 +599,25 @@ export function StockClient({ materials, suppliers, purchases, materialCats, mov
           </Field>
           <Field label="Unidade">
             <Select value={form.unit || "unidade"} onChange={set("unit")}>
-              {["folha", "unidade", "metro", "kg", "rolo", "pacote", "caixa"].map((u) => <option key={u}>{u}</option>)}
+              {/* A unidade é a que o insumo é CONSUMIDO, não comprada:
+                  você compra a resma e gasta a folha. Faltavam medidas
+                  que a gráfica usa todo dia — m² para vinil e lona,
+                  resma para papel, ml/litro para tinta.
+
+                  Agrupadas para não virar uma lista de 20 itens onde
+                  ninguém acha nada. */}
+              <optgroup label="Papel e impressão">
+                {["folha", "resma", "bloco", "cento", "milheiro"].map((u) => <option key={u}>{u}</option>)}
+              </optgroup>
+              <optgroup label="Comprimento e área">
+                {["metro", "metro²", "metro linear", "centímetro"].map((u) => <option key={u}>{u}</option>)}
+              </optgroup>
+              <optgroup label="Peso e volume">
+                {["kg", "grama", "litro", "ml"].map((u) => <option key={u}>{u}</option>)}
+              </optgroup>
+              <optgroup label="Embalagem e avulso">
+                {["unidade", "par", "jogo", "rolo", "bobina", "pacote", "caixa", "cartela", "tubo", "galão"].map((u) => <option key={u}>{u}</option>)}
+              </optgroup>
             </Select>
           </Field>
           {/* ── EMBALAGEM DE COMPRA ──
@@ -587,6 +638,72 @@ export function StockClient({ materials, suppliers, purchases, materialCats, mov
                 <Input mono value={form.packCost || ""} onChange={set("packCost")} placeholder="28,00" />
               </Field>
             </div>
+            {/* Calculadora do rendimento — só aparece quando a unidade
+                escolhida exige uma conta. */}
+            {(ehArea || ehComprimento || ehFolha) && (
+              <div className="mt-3 rounded-lg border border-dashed border-cyan-300 bg-white/70 px-3 py-2.5">
+                <p className="mb-2 font-mono text-[10px] tracking-wide text-cyan-800 uppercase">
+                  {ehArea
+                    ? "Não sabe quantos m²? Meça o rolo"
+                    : ehFolha
+                      ? "Não sabe o total? Conte a embalagem"
+                      : "Não sabe o total? Meça o rolo"}
+                </p>
+                <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
+                  {ehArea && (
+                    <>
+                      <Field label="Largura (m)">
+                        <Input mono value={form.calcLargura || ""} onChange={set("calcLargura")} placeholder="1,22" />
+                      </Field>
+                      <Field label="Comprimento (m)">
+                        <Input mono value={form.calcComprimento || ""} onChange={set("calcComprimento")} placeholder="50" />
+                      </Field>
+                    </>
+                  )}
+                  {ehComprimento && (
+                    <Field label="Comprimento do rolo">
+                      <Input mono value={form.calcComprimento || ""} onChange={set("calcComprimento")} placeholder="26" />
+                    </Field>
+                  )}
+                  {ehFolha && (
+                    <>
+                      <Field label="Folhas por pacote">
+                        <Input mono value={form.calcFolhas || ""} onChange={set("calcFolhas")} placeholder="500" />
+                      </Field>
+                      <Field label="Pacotes na caixa" hint="1 se comprar avulso">
+                        <Input mono value={form.calcPacotes || ""} onChange={set("calcPacotes")} placeholder="10" />
+                      </Field>
+                    </>
+                  )}
+                  <div className="flex items-end">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={rendimentoCalculado === null}
+                      onClick={() =>
+                        setForm((f) => ({
+                          ...f,
+                          packQuantity: String(Number(rendimentoCalculado?.toFixed(3))),
+                        }))
+                      }
+                    >
+                      {rendimentoCalculado !== null
+                        ? `Usar ${Number(rendimentoCalculado.toFixed(3)).toLocaleString("pt-BR")}`
+                        : "Preencha ao lado"}
+                    </Button>
+                  </div>
+                </div>
+                {ehArea && rendimentoCalculado !== null && (
+                  <p className="mt-1.5 font-mono text-[10.5px] text-ink-500">
+                    {larguraRolo.toLocaleString("pt-BR")} × {compRolo.toLocaleString("pt-BR")} ={" "}
+                    <strong className="text-cyan-700">
+                      {Number(rendimentoCalculado.toFixed(3)).toLocaleString("pt-BR")} m²
+                    </strong>
+                  </p>
+                )}
+              </div>
+            )}
+
             {packUnitCost !== null ? (
               <p className="mt-3 rounded-lg bg-white px-3 py-2 font-mono text-[12px] text-ink-700">
                 <span className="text-ink-400">{formatMoney(packCost)} ÷ {packQty.toLocaleString("pt-BR")} = </span>

@@ -466,6 +466,13 @@
               "label": "Muito escuro (cabeça gasta)"
             }
           ]
+        },
+        {
+          "key": "comissao_margem_padrao",
+          "label": "Margem estimada p/ item sem produto (%)",
+          "type": "number",
+          "hint": "Usada só quando a linha do pedido foi digitada à mão e não tem custo conhecido. O extrato marca esses casos.",
+          "defaultValue": "40"
         }
       ]
     },
