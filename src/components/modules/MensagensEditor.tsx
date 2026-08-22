@@ -21,7 +21,7 @@ export interface MensagemItem {
   slug: string;
   titulo: string;
   quando: string;
-  grupo: "bot" | "cadastro" | "orcamento";
+  grupo: "bot" | "cadastro" | "orcamento" | "rapidas" | "campanha";
   padrao: string;
   texto: string;
   ativa: boolean;
@@ -45,6 +45,11 @@ const GRUPOS: { id: MensagemItem["grupo"]; titulo: string; desc: string }[] = [
     id: "orcamento",
     titulo: "Envio de orçamento",
     desc: 'O texto que sai quando você clica em "WhatsApp" na tela de Orçamentos.',
+  },
+  {
+    id: "rapidas",
+    titulo: "Respostas rápidas do chat",
+    desc: "Atalhos de um clique enquanto você atende. Só aparecem quando você assumiu a conversa.",
   },
 ];
 

@@ -40,6 +40,46 @@ interface Mensagem {
   criadoEm: string;
 }
 
+interface PedidoResumo {
+  id: number;
+  numero: string;
+  status: string;
+  producao: string;
+  total: number;
+  entrega: string | null;
+  criadoEm: string;
+}
+
+interface Ficha {
+  id: number;
+  nome: string;
+  tipo: string | null;
+  documento: string | null;
+  email: string | null;
+  telefone: string | null;
+  cidade: string | null;
+  estado: string | null;
+  desde: string | null;
+  ltv: number;
+  pedidos: PedidoResumo[];
+  orcamentosAbertos: number;
+}
+
+interface Rapida {
+  slug: string;
+  titulo: string;
+  texto: string;
+}
+
+const brl = (v: number) =>
+  v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+
+function dataBR(iso: string | null) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? "—" : d.toLocaleDateString("pt-BR");
+}
+
 function hora(iso: string | null) {
   if (!iso) return "";
   const d = new Date(iso);
@@ -68,6 +108,19 @@ export function ChatWhatsApp() {
   const [carregando, setCarregando] = useState(true);
   const fimRef = useRef<HTMLDivElement>(null);
 
+  /* Quantas mensagens estão à mostra. Cresce só quando o operador
+     pede: carregar a conversa inteira de saída é o que transformava
+     a tela numa parede de texto sem fim. */
+  const [limite, setLimite] = useState(30);
+  const [temAnteriores, setTemAnteriores] = useState(false);
+  const [totalMensagens, setTotalMensagens] = useState(0);
+  const [carregandoAnteriores, setCarregandoAnteriores] = useState(false);
+
+  /* Ficha do cliente: sobreposta ao chat, aberta a pedido. */
+  const [ficha, setFicha] = useState<Ficha | null>(null);
+  const [fichaAberta, setFichaAberta] = useState(false);
+  const [rapidas, setRapidas] = useState<Rapida[]>([]);
+
   const carregarConversas = useCallback(async () => {
     try {
       const r = await fetch("/api/whatsapp-chat");
@@ -80,14 +133,52 @@ export function ChatWhatsApp() {
     }
   }, []);
 
-  const carregarMensagens = useCallback(async (fone: string) => {
+  const carregarMensagens = useCallback(async (fone: string, quantas: number) => {
     try {
-      const r = await fetch(`/api/whatsapp-chat?fone=${encodeURIComponent(fone)}`);
-      const d = (await r.json()) as { mensagens?: Mensagem[] };
+      const r = await fetch(
+        `/api/whatsapp-chat?fone=${encodeURIComponent(fone)}&limite=${quantas}`
+      );
+      const d = (await r.json()) as {
+        mensagens?: Mensagem[];
+        temAnteriores?: boolean;
+        total?: number;
+      };
       setMensagens(d.mensagens || []);
+      setTemAnteriores(!!d.temAnteriores);
+      setTotalMensagens(Number(d.total || 0));
     } catch {
       /* idem */
     }
+  }, []);
+
+  /* Ficha só quando o painel abre: são quatro consultas, e o chat
+     recarrega sozinho a cada 6 segundos — não faz sentido buscá-la
+     junto do polling. */
+  const carregarFicha = useCallback(async (customerId: number) => {
+    try {
+      const r = await fetch(`/api/whatsapp-chat?ficha=${customerId}`);
+      const d = (await r.json()) as { ficha?: Ficha };
+      setFicha(d.ficha || null);
+    } catch {
+      setFicha(null);
+    }
+  }, []);
+
+  /* Respostas rápidas saem do mesmo catálogo editável das outras
+     mensagens: o que o cliente lê nunca mora no código. */
+  useEffect(() => {
+    let vivo = true;
+    void (async () => {
+      try {
+        const r = await fetch("/api/whatsapp-chat?rapidas=1");
+        const d = (await r.json()) as { rapidas?: Rapida[] };
+        if (!vivo) return;
+        setRapidas(d.rapidas || []);
+      } catch {
+        /* sem atalhos é degradação aceitável: o operador digita */
+      }
+    })();
+    return () => { vivo = false; };
   }, []);
 
   /* Polling a cada 8s. SSE seria mais elegante, mas o stream de
@@ -107,14 +198,33 @@ export function ChatWhatsApp() {
   useEffect(() => {
     if (!aberta) return;
     let vivo = true;
-    const inicial = setTimeout(() => { if (vivo) void carregarMensagens(aberta); }, 0);
-    const t = setInterval(() => { if (vivo) void carregarMensagens(aberta); }, 6000);
+    const inicial = setTimeout(() => { if (vivo) void carregarMensagens(aberta, limite); }, 0);
+    const t = setInterval(() => { if (vivo) void carregarMensagens(aberta, limite); }, 6000);
     return () => { vivo = false; clearTimeout(inicial); clearInterval(t); };
-  }, [aberta, carregarMensagens]);
+  }, [aberta, limite, carregarMensagens]);
 
+  /* Trocar de conversa recomeça do lote pequeno e fecha a ficha da
+     anterior: herdar o estado da conversa passada confunde.
+
+     Feito no clique, e não num efeito sobre `aberta`: setState dentro
+     de efeito dispara renderização em cascata (o lint reclama, e com
+     razão — a regra já vale no resto deste arquivo). */
+  const abrirConversa = useCallback((fone: string) => {
+    setAberta(fone);
+    setLimite(30);
+    setFichaAberta(false);
+    setFicha(null);
+    setTexto("");
+  }, []);
+
+  /* Só desce sozinho quando chega mensagem nova. Ao carregar as
+     anteriores o operador está LENDO o passado — puxar a tela para o
+     fim ali desfaria justamente o que ele pediu. */
+  const ultimaId = mensagens.length ? mensagens[mensagens.length - 1].id : 0;
   useEffect(() => {
+    if (carregandoAnteriores) return;
     fimRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [mensagens.length]);
+  }, [ultimaId, carregandoAnteriores]);
 
   const atual = conversas.find((c) => c.phoneE164 === aberta) || null;
 
@@ -155,7 +265,7 @@ export function ChatWhatsApp() {
         return;
       }
       setTexto("");
-      await carregarMensagens(aberta);
+      await carregarMensagens(aberta, limite);
       await carregarConversas();
     } catch {
       toast.error("O serviço do WhatsApp não respondeu.");
@@ -195,12 +305,12 @@ export function ChatWhatsApp() {
       ) : (
         <div className="grid lg:grid-cols-[290px_1fr]">
           {/* ── Lista ── */}
-          <div className="max-h-[540px] overflow-y-auto border-b border-paper-200 lg:border-r lg:border-b-0">
+          <div className="max-h-[300px] overflow-y-auto border-b border-paper-200 lg:max-h-[calc(100vh-330px)] lg:min-h-[460px] lg:border-r lg:border-b-0">
             {conversas.map((c) => (
               <button
                 key={c.phoneE164}
                 type="button"
-                onClick={() => setAberta(c.phoneE164)}
+                onClick={() => abrirConversa(c.phoneE164)}
                 className={cn(
                   "block w-full border-b border-paper-100 px-4 py-3 text-left transition-colors",
                   aberta === c.phoneE164 ? "bg-proc-c/8" : "hover:bg-paper-50"
@@ -236,11 +346,11 @@ export function ChatWhatsApp() {
 
           {/* ── Conversa ── */}
           {!atual ? (
-            <div className="flex min-h-[380px] items-center justify-center p-6">
+            <div className="flex h-[calc(100vh-330px)] min-h-[460px] items-center justify-center p-6">
               <p className="text-[13px] text-ink-400">Escolha uma conversa ao lado.</p>
             </div>
           ) : (
-            <div className="flex min-h-[540px] flex-col">
+            <div className="relative flex h-[calc(100vh-330px)] min-h-[460px] flex-col">
               <div className="flex flex-wrap items-center gap-2 border-b border-paper-200 px-4 py-2.5">
                 <div className="grow">
                   <p className="text-[13.5px] font-semibold text-ink-900">{atual.nome}</p>
@@ -251,11 +361,15 @@ export function ChatWhatsApp() {
                 {atual.customerId && (
                   <Button
                     size="sm"
-                    variant="ghost"
+                    variant={fichaAberta ? "outline" : "ghost"}
                     icon="eye"
-                    onClick={() => window.open(`/clientes?id=${atual.customerId}`, "_blank")}
+                    onClick={() => {
+                      const abrindo = !fichaAberta;
+                      setFichaAberta(abrindo);
+                      if (abrindo && atual.customerId) void carregarFicha(atual.customerId);
+                    }}
                   >
-                    Ficha
+                    {fichaAberta ? "Voltar à conversa" : "Ficha e pedidos"}
                   </Button>
                 )}
                 {atual.assumidaPor ? (
@@ -278,7 +392,105 @@ export function ChatWhatsApp() {
                 )}
               </div>
 
-              <div className="grow space-y-2 overflow-y-auto bg-[#0b141a] px-4 py-3">
+                {/* Ficha por cima do chat: o chat fica largo por padrão
+                    e o detalhe aparece só quando o operador pede.
+
+                    Fica FORA da área rolável das mensagens de propósito:
+                    dentro dela, `absolute inset-0` se ancora no conteúdo
+                    já rolado e a ficha nasce fora da vista. Aqui cobre a
+                    conversa inteira, menos o cabeçalho. */}
+                {fichaAberta && (
+                  <div className="absolute inset-x-0 top-[57px] bottom-0 z-20 overflow-y-auto bg-paper-50 px-4 py-3.5">
+                    {!ficha ? (
+                      <p className="py-6 text-center text-[12.5px] text-ink-400">
+                        Carregando ficha…
+                      </p>
+                    ) : (
+                      <div className="space-y-3.5">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="text-[14px] font-bold text-ink-900">{ficha.nome}</p>
+                            <p className="font-mono text-[11px] text-ink-500">
+                              {ficha.documento || "sem documento"}
+                              {ficha.cidade ? ` · ${ficha.cidade}/${ficha.estado || ""}` : ""}
+                            </p>
+                          </div>
+                          <Button size="sm" variant="ghost" icon="close" onClick={() => setFichaAberta(false)}>
+                            Fechar
+                          </Button>
+                        </div>
+
+                        <div className="grid grid-cols-3 gap-2">
+                          {[
+                            { k: "Já comprou", v: brl(ficha.ltv) },
+                            { k: "Pedidos", v: String(ficha.pedidos.length) },
+                            { k: "Orç. abertos", v: String(ficha.orcamentosAbertos) },
+                          ].map((x) => (
+                            <div key={x.k} className="rounded-lg border border-paper-200 bg-white px-2.5 py-2 text-center">
+                              <p className="font-mono text-[9.5px] tracking-wide text-ink-400 uppercase">{x.k}</p>
+                              <p className="mt-0.5 text-[13px] font-bold text-ink-900">{x.v}</p>
+                            </div>
+                          ))}
+                        </div>
+
+                        <div>
+                          <p className="mb-1.5 font-mono text-[10px] tracking-wide text-ink-400 uppercase">
+                            Últimos pedidos
+                          </p>
+                          {ficha.pedidos.length === 0 ? (
+                            <p className="rounded-lg border border-dashed border-paper-300 px-3 py-4 text-center text-[12px] text-ink-400">
+                              Nenhum pedido ainda.
+                            </p>
+                          ) : (
+                            <div className="space-y-1.5">
+                              {ficha.pedidos.map((p) => (
+                                <button
+                                  key={p.id}
+                                  onClick={() => window.open(`/pedidos?id=${p.id}`, "_blank")}
+                                  className="focus-ring flex w-full cursor-pointer items-center gap-2 rounded-lg border border-paper-200 bg-white px-3 py-2 text-left transition-colors hover:border-cyan-400"
+                                >
+                                  <div className="min-w-0 grow">
+                                    <p className="font-mono text-[11.5px] font-bold text-ink-900">{p.numero}</p>
+                                    <p className="text-[11px] text-ink-500">
+                                      {p.producao.replace(/_/g, " ")} · entrega {dataBR(p.entrega)}
+                                    </p>
+                                  </div>
+                                  <span className="font-mono text-[12px] font-bold text-proc-c-strong">
+                                    {brl(p.total)}
+                                  </span>
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="border-t border-dashed border-paper-300 pt-2.5 text-[11.5px] text-ink-500">
+                          {ficha.email && <p className="truncate">{ficha.email}</p>}
+                          <p>Cliente desde {dataBR(ficha.desde)}</p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+              <div className="relative grow space-y-2 overflow-y-auto bg-[#0b141a] px-4 py-3">
+                {/* Histórico antigo entra a pedido. Trazer tudo de uma
+                    vez é o que fazia a conversa não ter fim. */}
+                {temAnteriores && (
+                  <div className="pb-1 text-center">
+                    <button
+                      onClick={() => {
+                        setCarregandoAnteriores(true);
+                        setLimite((n) => n + 50);
+                        window.setTimeout(() => setCarregandoAnteriores(false), 900);
+                      }}
+                      className="focus-ring cursor-pointer rounded-full border border-[#2a3942] bg-[#182229] px-3.5 py-1.5 font-mono text-[10.5px] text-[#8696a0] transition-colors hover:text-[#e9edef]"
+                    >
+                      ↑ Ver mensagens anteriores ({totalMensagens - mensagens.length} atrás)
+                    </button>
+                  </div>
+                )}
+
                 {mensagens.length === 0 && (
                   <p className="py-8 text-center text-[12.5px] text-ink-400">
                     Sem mensagens nesta conversa.
@@ -310,6 +522,33 @@ export function ChatWhatsApp() {
                     possível, mas só faça se ele escreveu agora.
                   </p>
                 ) : null}
+
+                {/* Respostas rápidas: as perguntas que mais chegam,
+                    respondidas em um clique. O texto vai para o campo
+                    em vez de sair direto — o operador ainda decide, e
+                    quase sempre quer completar com algo. */}
+                {rapidas.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {rapidas.map((r) => (
+                      <button
+                        key={r.slug}
+                        title={r.texto.slice(0, 120)}
+                        onClick={() => {
+                          const primeiro = String(atual.nome || "").trim().split(/\s+/)[0] || "";
+                          setTexto(
+                            r.texto
+                              .replace(/\{nome\}/g, primeiro)
+                              .replace(/\{empresa\}/g, "VTDIGITAL")
+                          );
+                        }}
+                        className="focus-ring cursor-pointer rounded-full border border-paper-300 bg-paper-50 px-2.5 py-1 text-[11px] font-semibold text-ink-600 transition-colors hover:border-cyan-400 hover:bg-cyan-50 hover:text-cyan-800"
+                      >
+                        {r.titulo}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
                 <div className="mt-2 flex gap-2">
                   <Input
                     value={texto}

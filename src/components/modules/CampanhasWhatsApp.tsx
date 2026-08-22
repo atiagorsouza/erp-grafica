@@ -14,6 +14,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Badge, Button, Card, Input, Modal, Textarea, toast } from "@/components/ui";
+import { MODELOS_CAMPANHA } from "@/lib/campanha-modelos";
 import { Icon } from "@/components/icons";
 import { cn } from "@/lib/format";
 
@@ -302,6 +303,38 @@ export function CampanhasWhatsApp() {
         }
       >
         <div className="space-y-4">
+          {/* Modelos prontos: o campo em branco é onde nasce a mensagem
+              com cara de spam, escrita com pressa. Clicar preenche tudo
+              e o operador ajusta — o texto continua sendo dele. */}
+          <div>
+            <span className="mb-1.5 block text-[11.5px] font-semibold tracking-wide text-ink-600 uppercase">
+              Começar de um modelo
+            </span>
+            <div className="flex flex-wrap gap-1.5">
+              {MODELOS_CAMPANHA.map((m) => (
+                <button
+                  key={m.id}
+                  type="button"
+                  title={m.quando}
+                  onClick={() =>
+                    setForm({
+                      name: m.nome,
+                      body: m.corpo,
+                      ctaLabel: m.ctaLabel || "",
+                      ctaUrl: "",
+                    })
+                  }
+                  className="focus-ring cursor-pointer rounded-lg border border-paper-300 bg-paper-50 px-2.5 py-1.5 text-[11.5px] font-semibold text-ink-600 transition-colors hover:border-cyan-400 hover:bg-cyan-50 hover:text-cyan-800"
+                >
+                  {m.titulo}
+                </button>
+              ))}
+            </div>
+            <p className="mt-1.5 text-[11px] text-ink-400">
+              Passe o mouse para ver quando usar cada um. Depois é só editar.
+            </p>
+          </div>
+
           <label className="block">
             <span className="mb-1.5 block text-[11.5px] font-semibold tracking-wide text-ink-600 uppercase">
               Nome (só você vê)

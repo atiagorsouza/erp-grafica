@@ -1773,6 +1773,59 @@ async function main() {
     await sql("delete from registration_links where customer_id=$1", [customerId]);
   }
 
+  // 11.7-decies) Chat: lote de mensagens, ficha e respostas rápidas (v3.66.0)
+  //
+  // O chat trazia 200 mensagens de uma vez numa caixa de altura fixa:
+  // conversa de meses virava parede de texto sem fim. Agora vem um lote
+  // e a tela oferece "ver anteriores".
+  {
+    const fone = `5521${String(Date.now()).slice(-9)}`;
+    await sql(
+      `insert into whatsapp_conversas (phone_e164, customer_id, etapa)
+       values ($1,$2,'humano') on conflict (phone_e164) do nothing`,
+      [fone, customerId]
+    );
+    await sql(
+      `insert into whatsapp_mensagens (phone_e164, direcao, texto, criado_em)
+       select $1, case when i%2=0 then 'recebida' else 'enviada' end,
+              'smoke '||i, now() - ((80 - i)||' minutes')::interval
+         from generate_series(1,80) i`,
+      [fone]
+    );
+
+    const lote = await req(`/api/whatsapp-chat?fone=${fone}`);
+    assert(lote.mensagens.length === 30, `chat traz 30 mensagens por vez (${lote.mensagens.length})`);
+    assert(lote.total === 80, `o chat sabe quantas existem ao todo (${lote.total})`);
+    assert(lote.temAnteriores === true, "o chat avisa que há mensagens anteriores");
+
+    /* A última mensagem tem que estar no lote: quem abre a conversa
+       quer ver o fim dela, não o começo. */
+    const ultima = lote.mensagens[lote.mensagens.length - 1];
+    assert(ultima.texto === "smoke 80", `o lote termina na mensagem mais nova (${ultima.texto})`);
+
+    const maior = await req(`/api/whatsapp-chat?fone=${fone}&limite=80`);
+    assert(maior.mensagens.length === 80, `"ver anteriores" alcança o histórico todo (${maior.mensagens.length})`);
+    assert(maior.temAnteriores === false, "no fim do histórico o aviso some");
+
+    /* Ficha: é o que evita abrir outra aba no meio do atendimento. */
+    const f = await req(`/api/whatsapp-chat?ficha=${customerId}`);
+    assert(!!f.ficha?.nome, "a ficha do chat traz o nome do cliente");
+    assert(Array.isArray(f.ficha?.pedidos), "a ficha do chat traz os pedidos");
+    assert(typeof f.ficha?.ltv === "number", `a ficha do chat traz o LTV (${f.ficha?.ltv})`);
+
+    /* Respostas rápidas vêm do catálogo editável — se o dono mudar o
+       texto no Painel, o atalho muda junto. */
+    const rap = await req("/api/whatsapp-chat?rapidas=1");
+    assert(rap.rapidas.length >= 5, `há respostas rápidas para o chat (${rap.rapidas.length})`);
+    assert(
+      rap.rapidas.every((r) => r.texto && r.titulo),
+      "toda resposta rápida tem título e texto"
+    );
+
+    await sql("delete from whatsapp_mensagens where phone_e164=$1", [fone]);
+    await sql("delete from whatsapp_conversas where phone_e164=$1", [fone]);
+  }
+
   // 11.8) Versão carimbada no banco (v3.53.2)
   //
   // `settings.app_version` era NULL para sempre: check-version só

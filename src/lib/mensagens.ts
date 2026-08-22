@@ -35,7 +35,7 @@ export interface DefinicaoMensagem {
   /** Variáveis aceitas, com explicação para a tela. */
   variaveis: { nome: string; descricao: string }[];
   /** Agrupamento na tela. */
-  grupo: "bot" | "cadastro" | "orcamento";
+  grupo: "bot" | "cadastro" | "orcamento" | "rapidas" | "campanha";
   /** false = mensagem essencial, não pode ser desligada. */
   desligavel?: boolean;
 }
@@ -181,6 +181,98 @@ export const CATALOGO: DefinicaoMensagem[] = [
       "_Válido até {validade}_\n\n" +
       "Qualquer dúvida é só chamar. Se aprovar, me avisa que já coloco na produção!\n\n" +
       "— {empresa}",
+  },
+
+  /* ── Respostas rápidas ──────────────────────────────────────────
+     Atalhos de um clique no chat, para quando o operador assumiu a
+     conversa e o robô está calado. São as perguntas que mais chegam:
+     digitar a mesma resposta dez vezes por dia é trabalho que o
+     sistema devia poupar.
+
+     Todas editáveis pelo Painel → Mensagens, como tudo que o cliente
+     lê. O texto sai exatamente como estiver ali. */
+  {
+    slug: "rapida.saudacao",
+    titulo: "Bom dia / boa tarde",
+    quando: "Atalho no chat — abrir o atendimento.",
+    grupo: "rapidas",
+    desligavel: true,
+    variaveis: [VAR_NOME, VAR_EMPRESA],
+    padrao:
+      "Oi, {nome}! Aqui é da {empresa} 🙂\n\n" +
+      "Em que posso te ajudar hoje?",
+  },
+  {
+    slug: "rapida.prazo",
+    titulo: "Prazo de produção",
+    quando: 'Atalho no chat — responder "quanto tempo demora?".',
+    grupo: "rapidas",
+    desligavel: true,
+    variaveis: [VAR_NOME],
+    padrao:
+      "O prazo depende do que você precisa, {nome}.\n\n" +
+      "Impressão rápida costuma sair no mesmo dia ou no dia seguinte. " +
+      "Trabalhos com arte, acabamento especial ou quantidade maior levam de 2 a 5 dias úteis.\n\n" +
+      "Me diz o que você precisa que eu te falo o prazo certinho.",
+  },
+  {
+    slug: "rapida.pagamento",
+    titulo: "Formas de pagamento",
+    quando: 'Atalho no chat — responder "como posso pagar?".',
+    grupo: "rapidas",
+    desligavel: true,
+    variaveis: [],
+    padrao:
+      "Aceitamos PIX, dinheiro, débito e crédito 💳\n\n" +
+      "No PIX ou dinheiro trabalhamos com 50% na aprovação e 50% na entrega. " +
+      "No cartão o valor é integral, e dá para parcelar.\n\n" +
+      "Qual fica melhor para você?",
+  },
+  {
+    slug: "rapida.endereco",
+    titulo: "Endereço e horário",
+    quando: 'Atalho no chat — responder "onde vocês ficam?".',
+    grupo: "rapidas",
+    desligavel: true,
+    variaveis: [VAR_EMPRESA],
+    padrao:
+      "Estamos na Rua Araquém, 910 — Bangu, Rio de Janeiro 📍\n\n" +
+      "Atendemos de segunda a sexta, das 9h às 18h, e sábado até as 13h.\n\n" +
+      "Te espero por aqui!",
+  },
+  {
+    slug: "rapida.arte",
+    titulo: "Pedir a arte",
+    quando: "Atalho no chat — pedir o arquivo para produzir.",
+    grupo: "rapidas",
+    desligavel: true,
+    variaveis: [VAR_NOME],
+    padrao:
+      "{nome}, me manda a arte por aqui mesmo 📎\n\n" +
+      "Se puder, em PDF ou PNG em boa qualidade. Se você ainda não tem, a gente cria para você — é só avisar.",
+  },
+  {
+    slug: "rapida.pronto",
+    titulo: "Pedido pronto para retirada",
+    quando: "Atalho no chat — avisar que o trabalho ficou pronto.",
+    grupo: "rapidas",
+    desligavel: true,
+    variaveis: [VAR_NOME, VAR_EMPRESA],
+    padrao:
+      "Boa notícia, {nome}! Seu pedido está pronto ✅\n\n" +
+      "Pode retirar de segunda a sexta das 9h às 18h, ou sábado até as 13h, " +
+      "na Rua Araquém, 910 — Bangu.\n\n" +
+      "— {empresa}",
+  },
+  {
+    slug: "rapida.aguarde",
+    titulo: "Já te respondo",
+    quando: "Atalho no chat — avisar que vai demorar um pouco.",
+    grupo: "rapidas",
+    desligavel: true,
+    variaveis: [],
+    padrao:
+      "Recebi sua mensagem! Só um minutinho que já te respondo direitinho 🙂",
   },
 ];
 
