@@ -137,6 +137,97 @@ export function QuotesClient({
     cliente: { nome: string; phone: string | null; whatsapp: string | null; whatsappOptOut: boolean | null } | null;
   }>(null);
   const [zapCarregando, setZapCarregando] = useState(false);
+  /* Enviando pelo serviço; e o aviso de "não deu, quer abrir o Web?".
+     Guardar o motivo separado do envio permite mostrar a saída
+     alternativa sem esconder o que houve. */
+  const [zapEnviando, setZapEnviando] = useState(false);
+  const [zapFalhou, setZapFalhou] = useState<string | null>(null);
+
+  /* Abre o WhatsApp Web com o texto — o caminho antigo, agora só como
+     saída quando o envio direto não é possível. */
+  function abrirNoWhatsAppWeb() {
+    if (!zap) return;
+    const c = zap.cliente;
+    const numero = c && !isWhatsAppBlocked(c as Row) ? whatsappNumber(c as Row) : "";
+    const url = numero
+      ? `https://wa.me/55${numero}?text=${encodeURIComponent(zap.texto)}`
+      : `https://wa.me/?text=${encodeURIComponent(zap.texto)}`;
+    window.open(url, "_blank");
+    setZap(null);
+    setZapFalhou(null);
+  }
+
+  /* Envio direto pelo serviço do WhatsApp (Baileys).
+     Antes o botão só abria o wa.me: o operador ainda precisava esperar
+     o WhatsApp Web, conferir o contato e clicar em enviar. Três passos
+     manuais para uma mensagem que o sistema já sabia escrever.
+
+     O serviço grava a mensagem em `whatsapp_mensagens`, então o envio
+     aparece sozinho no histórico do cliente — quem atender depois vê
+     o que já foi mandado. */
+  async function enviarPeloServico() {
+    if (!zap) return;
+    const c = zap.cliente;
+
+    if (c && isWhatsAppBlocked(c as Row)) {
+      toast.error(
+        "Cliente não aceita WhatsApp",
+        "Escolha outro canal. O envio direto respeita o opt-out."
+      );
+      return;
+    }
+
+    const numero = c ? whatsappNumber(c as Row) : "";
+    if (!numero) {
+      setZapFalhou("Este orçamento não tem número de WhatsApp no cadastro.");
+      return;
+    }
+
+    setZapEnviando(true);
+    setZapFalhou(null);
+    try {
+      const r = await fetch("/api/whatsapp/enviar", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ para: `55${numero}`, texto: zap.texto }),
+      });
+      const d = await r.json().catch(() => ({}));
+
+      if (r.ok) {
+        toast.success(
+          "Orçamento enviado",
+          `Foi para ${formatPhone(String(c?.whatsapp || c?.phone || ""))}.`
+        );
+        setZap(null);
+        return;
+      }
+
+      /* Cada motivo tem uma frase própria: "falhou" sozinho obriga o
+         operador a adivinhar se o problema é dele ou do sistema. */
+      if (r.status === 409) {
+        setZapFalhou(
+          "O WhatsApp do sistema está desconectado. Reconecte em Atendimento → WhatsApp → Conexão."
+        );
+      } else if (r.status === 403) {
+        setZapFalhou("Este contato pediu para não receber mensagens.");
+      } else if (r.status === 422) {
+        setZapFalhou(String(d?.erro || "O número do cadastro não é válido para WhatsApp."));
+      } else if (r.status === 502 || r.status === 503) {
+        /* O proxy devolve "não está rodando" quando não alcança o
+           serviço. Sozinha, a frase manda o operador chamar suporte;
+           com o caminho da tela, ele mesmo resolve. */
+        setZapFalhou(
+          "O serviço do WhatsApp não está no ar. Veja em Atendimento → WhatsApp → Conexão."
+        );
+      } else {
+        setZapFalhou(String(d?.erro || d?.error || "Não consegui enviar agora."));
+      }
+    } catch {
+      setZapFalhou("Não consegui falar com o serviço do WhatsApp.");
+    } finally {
+      setZapEnviando(false);
+    }
+  }
 
   async function abrirWhatsApp(quote: Row) {
     setZapCarregando(true);
@@ -151,6 +242,9 @@ export function QuotesClient({
         toast.error("Não foi possível montar a mensagem", d?.error || "Tente de novo.");
         return;
       }
+      /* Limpa o aviso da tentativa anterior: reabrir a prévia já
+         mostrando "não deu para enviar" seria mentira. */
+      setZapFalhou(null);
       setZap({ quote, texto: d.texto, cliente: d.cliente });
     } catch {
       toast.error("Não foi possível montar a mensagem", "Verifique a conexão.");
@@ -1131,35 +1225,28 @@ export function QuotesClient({
         width="max-w-lg"
         footer={
           <div className="flex w-full items-center justify-between gap-2">
-            <Button variant="ghost" onClick={() => setZap(null)}>
-              Cancelar
-            </Button>
             <Button
-              icon="whatsapp"
+              variant="ghost"
               onClick={() => {
-                if (!zap) return;
-                const c = zap.cliente;
-
-                /* Opt-out: não preenchemos o destinatário. A mensagem
-                   abre em branco e o operador decide — mesma conduta já
-                   adotada em Pedidos. */
-                if (c && isWhatsAppBlocked(c as Row)) {
-                  toast.info(
-                    "Cliente não aceita WhatsApp",
-                    "O texto abrirá sem destinatário — escolha outro canal se possível."
-                  );
-                }
-
-                const numero = c && !isWhatsAppBlocked(c as Row) ? whatsappNumber(c as Row) : "";
-                const url = numero
-                  ? `https://wa.me/55${numero}?text=${encodeURIComponent(zap.texto)}`
-                  : `https://wa.me/?text=${encodeURIComponent(zap.texto)}`;
-                window.open(url, "_blank");
                 setZap(null);
+                setZapFalhou(null);
               }}
             >
-              Abrir WhatsApp
+              Cancelar
             </Button>
+            {/* Enquanto o envio direto for possível, é UM clique. A
+                saída pelo WhatsApp Web só aparece quando o direto
+                falha — assim o caminho bom não fica competindo com o
+                caminho de emergência. */}
+            {zapFalhou ? (
+              <Button icon="whatsapp" variant="outline" onClick={abrirNoWhatsAppWeb}>
+                Abrir no WhatsApp Web
+              </Button>
+            ) : (
+              <Button icon="whatsapp" onClick={enviarPeloServico} disabled={zapEnviando}>
+                {zapEnviando ? "Enviando…" : "Enviar pelo WhatsApp"}
+              </Button>
+            )}
           </div>
         }
       >
@@ -1189,6 +1276,21 @@ export function QuotesClient({
               rows={12}
               className="font-mono text-[12px] leading-relaxed"
             />
+
+            {zapFalhou && (
+              <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2.5">
+                <p className="text-[12px] font-semibold text-amber-900">
+                  Não deu para enviar pelo sistema
+                </p>
+                <p className="mt-0.5 text-[11.5px] leading-relaxed text-amber-800">
+                  {zapFalhou}
+                </p>
+                <p className="mt-1.5 text-[11px] text-amber-700">
+                  O texto está pronto: use o botão ao lado para abrir o
+                  WhatsApp Web e enviar por lá.
+                </p>
+              </div>
+            )}
 
             <p className="text-[11px] text-ink-400">
               O WhatsApp mostra *texto entre asteriscos* em negrito e
