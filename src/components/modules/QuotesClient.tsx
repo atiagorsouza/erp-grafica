@@ -638,6 +638,18 @@ export function QuotesClient({
                       >
                         Imprimir
                       </Button>
+                      {/* Mandar orçamento é a ação mais frequente desta
+                          tela. Antes só existia dentro da prévia de
+                          impressão (Imprimir → WhatsApp), o que obrigava
+                          a abrir um documento A4 para enviar uma
+                          mensagem. Aqui é um clique direto da lista. */}
+                      <IconButton
+                        size="sm"
+                        name="whatsapp"
+                        label="Enviar por WhatsApp"
+                        loading={zapCarregando}
+                        onClick={() => abrirWhatsApp(q)}
+                      />
                       {q.status === "rascunho" && (
                         <IconButton
                           size="sm"
