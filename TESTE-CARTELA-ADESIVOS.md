@@ -133,45 +133,64 @@ preço atual de compra.
 
 ---
 
-# Tabela de preços por faixa — implantada
+# Venda POR ADESIVO — modelo final
 
-Cadastrada em `product_price_tiers` para o produto #355.
+Mudança de modelo pedida pelo dono: **a unidade de venda é o adesivo**,
+não a cartela. A cartela vira o *degrau* — a forma de o cliente comprar
+em quantidade e baratear a unidade.
 
-**A régua adotada: manter o seu preço de R$ 12,90 na avulsa e dar
-desconto por volume.** Não faz sentido derrubar um preço que já está
-saudável — o objetivo é ter resposta para quem pede quantidade.
+Produto **#355**, agora `ADES-4015` — *Adesivo Personalizado 40×15mm*.
 
-| A partir de | Preço unitário | Total | Custo | Margem | Desconto |
+| | |
+|---|---|
+| Unidade de venda | **1 adesivo** |
+| Rendimento | **60 adesivos por folha A4** (`piecesPerSheet`) |
+| Pedido mínimo | 60 adesivos (1 cartela) |
+| Padrão no orçamento | 60 |
+
+## A tabela
+
+Ancorada nos dois pontos que o dono deu: **R$ 12,90** na primeira
+cartela e **R$ 11,75** por cartela na segunda.
+
+| Adesivos | Cartelas | R$/adesivo | Total | Custo | Margem |
 |---:|---:|---:|---:|---:|---:|
-| 1 | R$ 12,90 | R$ 12,90 | R$ 5,48 | 58% | — |
-| 5 | R$ 11,60 | R$ 58,00 | R$ 15,86 | 73% | 10% |
-| 10 | R$ 10,30 | R$ 103,00 | R$ 28,84 | 72% | 20% |
-| 25 | R$ 9,00 | R$ 225,00 | R$ 70,37 | 69% | 30% |
-| 50 | R$ 7,70 | R$ 385,00 | R$ 137,86 | 64% | 40% |
+| 60 | 1 | R$ 0,2150 | R$ 12,90 | R$ 5,48 | 58% |
+| 120 | 2 | R$ 0,1958 | R$ 23,50 | R$ 8,08 | 66% |
+| 300 | 5 | R$ 0,1767 | R$ 53,00 | R$ 15,86 | 70% |
+| 600 | 10 | R$ 0,1583 | R$ 95,00 | R$ 28,84 | 70% |
+| 1.500 | 25 | R$ 0,1400 | R$ 210,00 | R$ 70,37 | 66% |
+| 3.000 | 50 | R$ 0,1217 | R$ 365,00 | R$ 137,86 | 62% |
 
-**A margem nunca cai abaixo de 64%** mesmo no maior desconto — porque o
-custo por cartela também cai com o volume (o recorte é custo fixo do
-lote e o refugo se dilui).
+A margem **nunca cai abaixo de 58%**, e o rótulo de cada faixa mostra
+ao cliente a equivalência em cartelas.
 
-## Funcionamento verificado
+## Comportamento verificado
 
-A faixa aplicada é sempre a **maior cujo mínimo a quantidade alcança**:
+| Pediu | Paga por un. | Total | Faixa |
+|---:|---:|---:|---|
+| 30 | — | — | **abaixo do mínimo** (avisa) |
+| 60 | R$ 0,2150 | R$ 12,90 | 60+ |
+| 90 | R$ 0,2150 | R$ 19,35 | 60+ |
+| 240 | R$ 0,1958 | R$ 46,99 | 120+ |
+| 1.000 | R$ 0,1583 | R$ 158,30 | 600+ |
+| 6.000 | R$ 0,1217 | R$ 730,20 | 3.000+ |
 
-| Pediu | Paga | Faixa |
-|---:|---:|---|
-| 3 | R$ 12,90 | 1+ |
-| 9 | R$ 11,60 | 5+ |
-| 24 | R$ 10,30 | 10+ |
-| 49 | R$ 9,00 | 25+ |
-| 120 | R$ 7,70 | 50+ |
+## Quantidade que não fecha cartela
 
-O orçamento e o PDV já leem essas faixas sozinhos — não é preciso o
-vendedor lembrar do desconto. E quando alguém digita um preço fora da
-tabela, o orçamento **avisa** informando qual faixa deveria valer, sem
-bloquear (o vendedor continua podendo decidir).
+Quem pede **90 adesivos** consome 2 cartelas — o sistema nunca fraciona
+a folha (`Math.ceil`). O cliente paga 90 e leva 90; sobram 30 já pagos.
 
-## Como mexer nas faixas
+Conferido que isso **não gera prejuízo**: 90 adesivos custam R$ 8,08 e
+são vendidos por R$ 19,35 — margem de 58%, a menor de toda a régua, e
+ainda saudável.
 
-Produtos → abrir o produto → seção de faixas de preço. Dá para mudar
-quantidade, preço e o rótulo que aparece no orçamento. Nada disso está
-no código.
+> **Sugestão comercial:** vale oferecer a cartela cheia a quem pede
+> quantidade quebrada. Quem pede 90 pode levar 120 por R$ 23,50 em vez
+> de R$ 19,35 — R$ 4,15 a mais por 30 adesivos que já estavam pagos.
+
+## Como mudar
+
+Produtos → abrir o produto → faixas de preço. Quantidade, preço e
+rótulo são editáveis pela tela. Para mudar o rendimento da folha
+(hoje 60), o campo é *peças por folha*.
