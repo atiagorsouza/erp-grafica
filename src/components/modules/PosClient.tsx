@@ -427,6 +427,17 @@ export function PosClient({
 
   /* ---------------- catálogo ---------------- */
   const products = useMemo(() => allProducts.filter((p) => p.active !== false), [allProducts]);
+  /* Só as categorias que TÊM produto. O cadastro acumulou 60
+     categorias de várias tentativas de taxonomia; mostrar todas
+     enche a tela de abas vazias e esconde as três que importam.
+     Categoria sem produto não ajuda ninguém no balcão. */
+  const catsComProduto = useMemo(() => {
+    const usadas = new Set(products.map((p) => p.productCategoryId));
+    return productCats
+      .filter((c) => usadas.has(c.id))
+      .sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+  }, [productCats, products]);
+
 
   const filtered = useMemo(() => {
     const term = q.trim().toLowerCase();
@@ -1045,7 +1056,7 @@ export function PosClient({
             >
               Tudo
             </button>
-            {productCats.map((c) => (
+            {catsComProduto.map((c) => (
               <button
                 key={c.id}
                 onClick={() => setCatFilter(String(c.id))}
@@ -1072,7 +1083,18 @@ export function PosClient({
               {filtered.map((p) => {
                 const cat = productCats.find((c) => c.id === p.productCategoryId);
                 const inCart = cart.find((l) => l.productId === p.id);
-                const price = toNumber(p.finalPrice, 0);
+
+                /* Produto com faixa de preço é vendido por UNIDADE, e o
+                   `finalPrice` guarda o custo do LOTE — mostrar esse
+                   número no card faz todo adesivo aparecer por R$ 16,67,
+                   independente do tamanho. O que vale para o operador é
+                   o preço unitário da primeira faixa. */
+                const faixas = (p.priceTiers || [])
+                  .map((t) => ({ min: toNumber(t.minQuantity, 0), unit: toNumber(t.unitPrice, 0) }))
+                  .filter((t) => t.min > 0)
+                  .sort((a, b) => a.min - b.min);
+                const price = faixas.length ? faixas[0].unit : toNumber(p.finalPrice, 0);
+                const minFaixa = faixas.length ? faixas[0].min : 0;
                 const low = p.trackStock && toNumber(p.stock, 0) <= toNumber(p.minStock, 0);
                 return (
                   <button
@@ -1101,6 +1123,11 @@ export function PosClient({
                         )}
                       >
                         {price > 0 ? formatBRL(price) : "sem preço"}
+                        {minFaixa > 1 && (
+                          <span className="ml-1 text-[10px] font-normal text-ink-400">
+                            /un · mín {minFaixa}
+                          </span>
+                        )}
                       </span>
                       {inCart && (
                         <span className="animate-pop-in flex h-6 min-w-6 items-center justify-center rounded-full bg-ink-900 px-1.5 font-mono text-[11px] font-semibold text-white tnum">
