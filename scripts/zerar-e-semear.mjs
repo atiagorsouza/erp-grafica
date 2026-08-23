@@ -119,7 +119,7 @@ const [{ n: matReal }] = await q(
 );
 console.log(`    ${String(matReal).padStart(5)}  materiais reais (contagem)`);
 
-console.log("\n  A CRIAR: 4 clientes · 4 orçamentos · 4 pedidos\n");
+console.log("\n  A CRIAR: 4 de cada — clientes, orçamentos, pedidos, vendas no PDV,\n           lançamentos, movimentos de estoque, compras, leads,\n           cartões do kanban, entregas, artes e agendamentos.\n");
 
 if (!APLICAR) {
   console.log("→ Nada foi alterado.");
@@ -131,6 +131,17 @@ if (!APLICAR) {
 await q("begin");
 try {
   for (const t of ALVOS) await q(`delete from ${t}`);
+
+  /* `settings` NÃO é limpa aqui, mas o carimbo de versão precisa
+     acompanhar o código: se o bump aconteceu antes desta rodada, o
+     banco fica com a versão antiga e o smoke acusa divergência. */
+  const { readFileSync } = await import("node:fs");
+  const versao = readFileSync(new URL("../VERSION", import.meta.url), "utf8").trim();
+  await q(
+    `insert into settings (key, value, category) values ('app_version', $1, 'sistema')
+     on conflict (key) do update set value = excluded.value`,
+    [versao]
+  );
 
   /* Material de demonstração sai junto: os produtos reais não o usam
      (todos apontam para o vinil Adespan da contagem). */
@@ -239,6 +250,191 @@ try {
     console.log(`  + ${numero}  ${o.prod_st.padEnd(12)} ${String(qtd).padStart(5)} un  R$ ${total.toFixed(2)}`);
     void row;
   }
+
+  /* ── VENDAS NO PDV ── */
+  /* Duas de hoje: o painel do PDV mostra "últimas vendas (24h)" e
+     ficaria vazio se todas fossem antigas. As outras duas ficam para
+     trás, para o relatório de período ter o que comparar. */
+  const PDV = [
+    { cli: 0, prod: 0, mult: 1, pg: "pix", dias: 0 },
+    { cli: null, prod: 1, mult: 1, pg: "dinheiro", dias: 0 },
+    { cli: 3, prod: 2, mult: 2, pg: "credito", dias: 11 },
+    { cli: null, prod: 3, mult: 1, pg: "debito", dias: 18 },
+  ];
+  let seqV = 0;
+  const saleIds = [];
+  for (const v of PDV) {
+    const p = prods[v.prod];
+    const qtd = p.pcs * v.mult;
+    const unit = await precoDaFaixa(p.id, qtd);
+    const total = Math.round(qtd * unit * 100) / 100;
+    seqV++;
+    const numero = `PDV-2026-${String(seqV).padStart(4, "0")}`;
+    const itens = JSON.stringify([
+      { total, quantity: qtd, productId: p.id, unitPrice: unit, description: p.name },
+    ]);
+    const [row] = await q(
+      `insert into sales (number, customer_id, type, items, subtotal, total,
+                          payment_method, status, received_amount, created_at)
+       values ($1,$2,'produto',$3::jsonb,$4,$4,$5,'concluida',$4,
+               coalesce($6::timestamp, now() - interval '3 hours')) returning id`,
+      /* Hora fixa ("11:30") pode cair no FUTURO se o script rodar de
+         madrugada — e aí a venda some do painel de 24h. Ancorar em
+         now() menos algumas horas resolve em qualquer horário. */
+      [numero, v.cli === null ? null : ids[v.cli], itens, total, v.pg,
+       v.dias === 0 ? null : dia(v.dias) + " 11:30:00"]
+    );
+    saleIds.push(row.id);
+    console.log(`  + ${numero}  ${v.pg.padEnd(9)} R$ ${total.toFixed(2)}`);
+  }
+
+  /* ── FINANCEIRO ── duas receitas e duas despesas, uma de cada em aberto */
+  const FIN = [
+    { t: "receita", cat: "Vendas", desc: "Venda no balcão PDV-2026-0001", val: 12.9, st: "pago", dias: 2, m: "pix" },
+    { t: "receita", cat: "Pedidos", desc: "Entrada 50% — PED-2026-0002", val: 11.75, st: "pago", dias: 4, m: "pix" },
+    { t: "despesa", cat: "Material", desc: "Compra de vinil Adespan A4", val: 187.56, st: "pago", dias: 12, m: "boleto" },
+    { t: "despesa", cat: "Operação", desc: "Energia elétrica — agosto", val: 340.0, st: "pendente", dias: -5, m: "boleto" },
+  ];
+  for (const f of FIN) {
+    await q(
+      `insert into transactions (type, category, description, amount, due_date, paid_date,
+                                 status, method, automatic, created_at)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,false,$9)`,
+      [f.t, f.cat, f.desc, f.val, dia(f.dias),
+       f.st === "pago" ? dia(f.dias) : null, f.st, f.m, dia(Math.max(f.dias, 0)) + " 09:00:00"]
+    );
+    console.log(`  + ${f.t.padEnd(8)} ${f.st.padEnd(8)} R$ ${f.val.toFixed(2)}  ${f.desc.slice(0, 34)}`);
+  }
+
+  /* ── MOVIMENTOS DE ESTOQUE ── entrada, saídas e um ajuste de contagem */
+  const mats = await q(
+    `select id, name, unit_cost::numeric custo from materials
+      where notes like 'Contagem do dono%' order by id limit 4`
+  );
+  const MOV = [
+    { i: 0, kind: "entrada", qtd: 100, motivo: "compra", ref: "NF 12345", dias: 12 },
+    { i: 0, kind: "saida", qtd: 8, motivo: "producao", ref: "PED-2026-0002", dias: 4 },
+    { i: 1, kind: "saida", qtd: 12, motivo: "producao", ref: "PED-2026-0003", dias: 9 },
+    { i: 2, kind: "ajuste", qtd: 40, motivo: "contagem", ref: "Conferência de agosto", dias: 1 },
+  ];
+  for (const m of MOV) {
+    const mat = mats[m.i];
+    await q(
+      `insert into stock_movements (kind, target_type, material_id, quantity, unit_cost,
+                                    reason, reference, automatic, created_at)
+       values ($1,'material',$2,$3,$4,$5,$6,false,$7)`,
+      [m.kind, mat.id, m.qtd, mat.custo, m.motivo, m.ref, dia(m.dias) + " 08:20:00"]
+    );
+    console.log(`  + estoque ${m.kind.padEnd(8)} ${String(m.qtd).padStart(4)} ${mat.name.slice(0, 34)}`);
+  }
+
+  /* ── COMPRAS ── */
+  const [forn] = await q(`select id, name from suppliers order by id limit 1`);
+  if (forn) {
+    const COMPRAS = [
+      { st: "recebida", tot: 187.56, dias: 12, it: "Vinil Adespan branco A4 — 1 caixa (100 fls)" },
+      { st: "recebida", tot: 278.99, dias: 20, it: "Papel Chamex A4 75g — 1 caixa (10 resmas)" },
+      { st: "pedida", tot: 344.0, dias: 3, it: "Vinil Adespan Super A3 — 1 caixa (100 fls)" },
+      { st: "rascunho", tot: 123.5, dias: 0, it: "Caneca cerâmica sublimação — 1 caixa (12 un)" },
+    ];
+    let seqC = 0;
+    for (const c of COMPRAS) {
+      seqC++;
+      const numero = `CMP-2026-${String(seqC).padStart(4, "0")}`;
+      const itens = JSON.stringify([{ description: c.it, quantity: 1, unitCost: c.tot, total: c.tot }]);
+      await q(
+        `insert into purchases (number, supplier_id, status, items, subtotal, total,
+                                expected_date, received_at, notes, created_at)
+         values ($1,$2,$3,$4::jsonb,$5,$5,$6,$7,$8,$9)`,
+        [numero, forn.id, c.st, itens, c.tot, dia(c.dias - 7),
+         c.st === "recebida" ? dia(c.dias) + " 15:00:00" : null,
+         "Compra de exemplo.", dia(c.dias) + " 09:40:00"]
+      );
+      console.log(`  + ${numero}  ${c.st.padEnd(9)} R$ ${c.tot.toFixed(2)}`);
+    }
+  }
+
+  /* ── FUNIL COMERCIAL ── um lead em cada etapa */
+  const LEADS = [
+    { cli: 0, t: "Cartela de adesivos para confeitaria", col: "novo", val: 120, pr: 20, dias: 1 },
+    { cli: 1, t: "Adesivos redondos para lembrancinha", col: "contato", val: 260, pr: 40, dias: 3 },
+    { cli: 2, t: "Rótulos para linha de pães", col: "proposta", val: 890, pr: 65, dias: 6 },
+    { cli: 3, t: "Adesivos de identificação do studio", col: "ganho", val: 430, pr: 100, dias: 14 },
+  ];
+  for (const l of LEADS) {
+    const [row] = await q(
+      `insert into crm_leads (customer_id, title, "column", source, expected_value,
+                              probability, next_action_at, last_contact_at, created_at, updated_at)
+       values ($1,$2,$3,'whatsapp',$4,$5,$6,$7,$8,$8) returning id`,
+      [ids[l.cli], l.t, l.col, l.val, l.pr, dia(-3) + " 10:00:00",
+       dia(l.dias) + " 16:00:00", dia(l.dias) + " 10:00:00"]
+    );
+    await q(
+      `insert into crm_activities (customer_id, lead_id, type, title, description, created_at)
+       values ($1,$2,'nota',$3,$4,$5)`,
+      [ids[l.cli], row.id, "Primeiro contato",
+       "Cliente pediu orçamento pelo WhatsApp.", dia(l.dias) + " 10:05:00"]
+    );
+    console.log(`  + lead ${l.col.padEnd(9)} R$ ${String(l.val).padStart(4)}  ${l.t.slice(0, 36)}`);
+  }
+
+  /* ── KANBAN DE PRODUÇÃO ── espelha os 4 pedidos */
+  const peds = await q(`select id, number, customer_id, total::numeric tot from orders order by id`);
+  const COLS = ["backlog", "producao", "acabamento", "concluido"];
+  let ordem = 0;
+  for (const [i, pd] of peds.entries()) {
+    const cli = CLIENTES[ids.indexOf(pd.customer_id)];
+    await q(
+      `insert into kanban_cards (title, description, "column", customer_name, customer_id,
+                                 order_id, "order", priority, due_date, estimated_value)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+      [`${pd.number} — adesivos`, "Cartão de exemplo, criado junto com o pedido.",
+       COLS[i], cli ? cli.name : null, pd.customer_id, pd.id, ordem++,
+       i === 1 ? "alta" : "normal", dia(-4), pd.tot]
+    );
+    console.log(`  + kanban ${COLS[i].padEnd(11)} ${pd.number}`);
+  }
+
+  /* ── ENTREGA, ARTE E AGENDA ── amarrados aos pedidos existentes */
+  const ENTREGAS = [
+    { i: 0, m: "retirada", st: "aguardando", fee: 0 },
+    { i: 1, m: "entrega", st: "aguardando", fee: 15 },
+    { i: 2, m: "retirada", st: "pronto", fee: 0 },
+    { i: 3, m: "correios", st: "entregue", fee: 28.9 },
+  ];
+  for (const e of ENTREGAS) {
+    const pd = peds[e.i];
+    const cli = CLIENTES[ids.indexOf(pd.customer_id)];
+    await q(
+      `insert into deliveries (order_id, customer_id, method, status, delivery_fee,
+                               recipient_name, address_snapshot, delivered_at)
+       values ($1,$2,$3,$4,$5,$6,$7,$8)`,
+      [pd.id, pd.customer_id, e.m, e.st, e.fee, cli ? cli.name : null,
+       cli ? `${cli.street}, ${cli.number} — ${cli.district}, ${cli.city}/${cli.state}` : null,
+       e.st === "entregue" ? dia(2) + " 14:00:00" : null]
+    );
+    await q(
+      `insert into art_approvals (order_id, file_name, version, status, client_comment, created_at)
+       values ($1,$2,1,$3,$4,$5)`,
+      [pd.id, `arte-${pd.number.toLowerCase()}.pdf`,
+       ["pendente", "pendente", "aprovada", "aprovada"][e.i],
+       e.i === 2 ? "Aprovado, pode imprimir." : null, dia(3) + " 17:00:00"]
+    );
+    console.log(`  + entrega ${e.m.padEnd(9)} ${pd.number}`);
+  }
+
+  const [imp] = await q(`select id from printers order by id limit 1`);
+  for (const [i, pd] of peds.entries()) {
+    await q(
+      `insert into production_schedules (order_id, printer_id, title, scheduled_date,
+                                         start_time, estimated_minutes, status)
+       values ($1,$2,$3,$4,$5,$6,$7)`,
+      [pd.id, imp?.id ?? null, `${pd.number} — impressão`, dia(-(i + 1)),
+       ["08:00", "10:00", "13:30", "15:00"][i], 45,
+       i < 2 ? "planejado" : "concluido"]
+    );
+  }
+  console.log("  + 4 agendamentos de produção");
 
   await q("commit");
   console.log("\n  ✔ Base zerada e semeada.\n");
