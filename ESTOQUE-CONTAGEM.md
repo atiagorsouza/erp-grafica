@@ -55,3 +55,30 @@ O vinil passou de R$ 1,8800 para **R$ 1,8756** — diferença de menos de
 2. Definir **fornecedor** de cada item.
 3. Os rolos de **vinil de recorte** (5 m e 10 m) continuam com custo
    zerado — enquanto isso, entram como grátis no orçamento.
+
+
+---
+
+# Limpeza do catálogo — produtos de demonstração removidos
+
+Os 16 produtos do seed inicial (IDs 24–39) foram removidos a pedido do
+dono, já que o catálogo real está sendo construído do zero.
+
+**Removidos:** ADE-VIN, ADE-SIM, BAN-LON, CAR-100, CAR-200, PAN-A5,
+DTF-CAM, 3D-PEC, 3D-MOD, PAP-KIT, AGE-PER, COP-ECO, TAC-GIN, CAN-LON,
+IMP-A4C, IMP-A3C.
+
+**Restaram os 9 reais:** ADES-4015 · ADES-R30/R40/R50/R60 ·
+ADES-Q30/Q40/Q50/Q60.
+
+## O cuidado com os orçamentos
+
+Nove desses produtos apareciam em orçamentos de demonstração. Em vez de
+apagar os itens — o que **mudaria o total dos orçamentos** — o vínculo
+foi solto (`product_id = null`). O orçamento continua com a descrição e
+o valor originais; só perde o atalho para o produto.
+
+Conferido depois: **297 orçamentos preservados, R$ 282.457,97 no total.**
+
+Também foram limpos 2 registros em `product_materials` que apontavam
+para os produtos removidos.
