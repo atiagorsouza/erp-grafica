@@ -5,7 +5,7 @@ import { db } from "@/db";
 import { materials, products, purchases, stockMovements, suppliers } from "@/db/schema";
 import { eq, sql } from "drizzle-orm";
 import { nextDocumentNumber } from "@/lib/documents";
-import { formatCEP, formatPhone, isValidEmail } from "@/lib/validators";
+import { formatCEP, formatPhone, isValidCNPJ, isValidEmail, onlyDigits } from "@/lib/validators";
 import { round2, toDecimalString, toNumber } from "@/lib/money";
 import { upsertAutoTransaction } from "@/lib/finance";
 import { todayISO } from "@/lib/period";
@@ -64,6 +64,7 @@ const supplierSchema = z.object({
   name: z.string().trim().min(2, "Nome obrigatório").max(180),
   tradeName: z.string().trim().max(180).nullable().optional(),
   document: z.string().trim().max(32).nullable().optional(),
+  stateRegistration: z.string().trim().max(32).nullable().optional(),
   contactName: z.string().trim().max(120).nullable().optional(),
   email: z.string().trim().max(180).nullable().optional(),
   phone: z.string().trim().max(40).nullable().optional(),
@@ -209,8 +210,15 @@ export async function saveSupplier(raw: unknown, id?: number) {
   if ("error" in parsed) return parsed;
   const d = parsed.data;
   if (d.email && !isValidEmail(d.email)) return { error: "E-mail inválido", status: 422 } satisfies StockError;
+  /* A tela já valida, mas a API é porta de entrada própria: importação
+     e chamada direta não passam pelo formulário. */
+  if (d.document) {
+    const doc = onlyDigits(d.document);
+    if (doc && !isValidCNPJ(doc)) return { error: "CNPJ inválido", status: 422 } satisfies StockError;
+  }
   const data = {
-    name: d.name, tradeName: nullable(d.tradeName), document: nullable(d.document), contactName: nullable(d.contactName),
+    name: d.name, tradeName: nullable(d.tradeName), document: nullable(d.document),
+    stateRegistration: nullable(d.stateRegistration), contactName: nullable(d.contactName),
     email: d.email ? d.email.trim().toLowerCase() : null, phone: d.phone ? formatPhone(d.phone) : null, whatsapp: d.whatsapp ? formatPhone(d.whatsapp) : null,
     website: nullable(d.website), cep: d.cep ? formatCEP(d.cep) : null, street: nullable(d.street), number: nullable(d.number), complement: nullable(d.complement), district: nullable(d.district), city: nullable(d.city), state: d.state ? d.state.toUpperCase().slice(0,2) : null,
     paymentTerms: nullable(d.paymentTerms), leadTimeDays: d.leadTimeDays, notes: nullable(d.notes), active: d.active,

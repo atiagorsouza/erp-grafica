@@ -25,7 +25,8 @@ import {
   toNumber,
   toPositive,
 } from "@/lib/money";
-import { formatDocumentAuto, isWhatsAppBlocked, whatsappNumber } from "@/lib/validators";
+import { formatCEP, formatDocumentAuto, formatPhone, isWhatsAppBlocked, whatsappNumber } from "@/lib/validators";
+import { focarPrimeiroErro, semErros, validaClienteRapido, type ErrosCadastro } from "@/lib/cadastro-validacao";
 
 import type { CompanyIdentity } from "@/lib/company";
 export type PosCompany = CompanyIdentity;
@@ -2450,6 +2451,7 @@ function QuickCustomerModal({
   const [street, setStreet] = useState("");
   const [number, setNumber] = useState("");
   const [complement, setComplement] = useState("");
+  const [erros, setErros] = useState<ErrosCadastro>({});
   const [district, setDistrict] = useState("");
   const [city, setCity] = useState("");
   const [state, setState] = useState("");
@@ -2481,7 +2483,15 @@ function QuickCustomerModal({
   };
 
   const handleSave = async () => {
-    if (name.trim().length < 2) return toast.error("Informe o nome do cliente");
+    /* No balcão o operador digita rápido e com o cliente esperando.
+       Vale conferir aqui: CPF errado só reaparece na hora de emitir
+       documento, quando a venda já foi. */
+    const e = validaClienteRapido({ name, document, phone, cep, state });
+    setErros(e);
+    if (!semErros(e)) {
+      setTimeout(focarPrimeiroErro, 0);
+      return toast.error(Object.values(e)[0] || "Confira os campos");
+    }
     setLoading(true);
     try {
       const payload = {
@@ -2555,30 +2565,32 @@ function QuickCustomerModal({
       }
     >
       <div className="space-y-3 text-[12.5px]">
-        <Field label="Nome Completo / Razão Social *">
+        <Field label="Nome Completo / Razão Social *" erro={erros.name}>
           <Input
             value={name}
-            onChange={(e) => setName(e.target.value)}
+            onChange={(e) => { setName(e.target.value); setErros((x) => (x.name ? { ...x, name: "" } : x)); }}
             placeholder="Ex.: RAPHAELA PINHEIRO"
             autoFocus
           />
         </Field>
 
         <div className="grid grid-cols-2 gap-2.5">
-          <Field label="CPF / CNPJ">
+          <Field label="CPF / CNPJ" erro={erros.document}>
             <Input
               mono
               value={document}
-              onChange={(e) => setDocument(e.target.value)}
+              onChange={(e) => { setDocument(formatDocumentAuto(e.target.value)); setErros((x) => (x.document ? { ...x, document: "" } : x)); }}
               placeholder="000.000.000-00"
+              inputMode="numeric"
             />
           </Field>
-          <Field label="Telefone / WhatsApp">
+          <Field label="Telefone / WhatsApp" erro={erros.phone}>
             <Input
               mono
               value={phone}
-              onChange={(e) => setPhone(e.target.value)}
+              onChange={(e) => { setPhone(formatPhone(e.target.value)); setErros((x) => (x.phone ? { ...x, phone: "" } : x)); }}
               placeholder="(21) 99690-2449"
+              inputMode="tel"
             />
           </Field>
         </div>
@@ -2586,13 +2598,14 @@ function QuickCustomerModal({
         <div className="border-t border-paper-200 pt-2 space-y-2">
           <p className="font-semibold text-ink-800 text-[11.5px]">Endereço (impresso no cupom)</p>
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-            <Field label="CEP" hint={fetchingCep ? "buscando..." : undefined}>
+            <Field label="CEP" hint={fetchingCep ? "buscando..." : undefined} erro={erros.cep}>
               <Input
                 mono
                 value={cep}
-                onChange={(e) => setCep(e.target.value)}
+                onChange={(e) => { setCep(formatCEP(e.target.value)); setErros((x) => (x.cep ? { ...x, cep: "" } : x)); }}
                 onBlur={handleCepBlur}
                 placeholder="21863-090"
+                inputMode="numeric"
               />
             </Field>
             <div className="col-span-2">
@@ -2639,11 +2652,13 @@ function QuickCustomerModal({
                 placeholder="RIO DE JANEIRO"
               />
             </Field>
-            <Field label="UF">
+            <Field label="UF" erro={erros.state}>
               <Input
+                mono
                 value={state}
-                onChange={(e) => setState(e.target.value)}
+                onChange={(e) => { setState(e.target.value.toUpperCase().slice(0, 2)); setErros((x) => (x.state ? { ...x, state: "" } : x)); }}
                 placeholder="RJ"
+                maxLength={2}
               />
             </Field>
           </div>

@@ -29,6 +29,7 @@ import {
 import { Icon } from "@/components/icons";
 import { cn, initials } from "@/lib/format";
 import { formatCEP, formatCNPJ, formatCPF, formatPhone, formatStateRegistration } from "@/lib/validators";
+import { focarPrimeiroErro, semErros, validaCEP, validaDocumento, validaEmail, validaSite, validaTelefone, validaUF, type ErrosCadastro } from "@/lib/cadastro-validacao";
 import { todayISO } from "@/lib/period";
 import { PedirCadastroModal } from "@/components/modules/PedirCadastroModal";
 
@@ -179,6 +180,7 @@ export function ClientsClient({ customers, leads, activities, quotes, orders, sa
   const [drawerId, setDrawerId] = useState<number | null>(params.get("id") ? Number(params.get("id")) : null);
   const [form, setForm] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
+  const [errosForm, setErrosForm] = useState<ErrosCadastro>({});
   const [deleting, setDeleting] = useState(false);
   const [fetchingCep, setFetchingCep] = useState(false);
   const [actForm, setActForm] = useState({ type: "nota", title: "", description: "" });
@@ -194,8 +196,11 @@ export function ClientsClient({ customers, leads, activities, quotes, orders, sa
      diferentes e o retrabalho de conferir pontuação. */
   const setMasked =
     (k: string, mask: (v: string) => string) =>
-    (e: { target: { value: string } }) =>
+    (e: { target: { value: string } }) => {
       setForm((f) => ({ ...f, [k]: mask(e.target.value) }));
+      setErrosForm((x) => (x[k] ? { ...x, [k]: "" } : x));
+    };
+  const limpaErro = (k: string) => setErrosForm((x) => (x[k] ? { ...x, [k]: "" } : x));
 
   /* O documento muda de máscara conforme PF/PJ escolhido no seletor. */
   const setDocument = (e: { target: { value: string } }) =>
@@ -203,6 +208,7 @@ export function ClientsClient({ customers, leads, activities, quotes, orders, sa
       ...f,
       document: f.type === "pj" ? formatCNPJ(e.target.value) : formatCPF(e.target.value),
     }));
+
   const drawer = customers.find((c) => Number(c.id) === drawerId) || null;
 
   /* Último link de cadastro por cliente. A lista já vem ordenada do
@@ -267,7 +273,28 @@ export function ClientsClient({ customers, leads, activities, quotes, orders, sa
 
   /* Salvar cliente */
   async function saveCustomer(id?: number) {
-    if (!form.name?.trim()) return toast.error("Informe o nome / razão social");
+    /* A ficha já mascarava, mas aceitava CPF impossível e e-mail sem
+       arroba. O cadastro do cliente é a origem de documento fiscal e
+       de mensagem — errado aqui, errado em tudo depois. */
+    const tipo = (form.type === "pj" ? "pj" : "pf") as "pf" | "pj";
+    const e: ErrosCadastro = {};
+    if (!form.name?.trim()) e.name = tipo === "pj" ? "Informe a razão social" : "Informe o nome";
+    const checagens: [string, string | null][] = [
+      ["document", validaDocumento(form.document, tipo)],
+      ["email", validaEmail(form.email)],
+      ["phone", validaTelefone(form.phone)],
+      ["whatsapp", validaTelefone(form.whatsapp)],
+      ["secondaryPhone", validaTelefone(form.secondaryPhone)],
+      ["cep", validaCEP(form.cep)],
+      ["state", validaUF(form.state)],
+      ["website", validaSite(form.website)],
+    ];
+    for (const [campo, erro] of checagens) if (erro) e[campo] = erro;
+    setErrosForm(e);
+    if (!semErros(e)) {
+      setTimeout(focarPrimeiroErro, 0);
+      return toast.error(Object.values(e)[0] || "Confira os campos destacados");
+    }
     setSaving(true);
     try {
       const data = {
@@ -817,11 +844,11 @@ export function ClientsClient({ customers, leads, activities, quotes, orders, sa
               </Field>
             )}
 
-            <Field label={form.type === "pj" ? "CNPJ" : "CPF"} required>
+            <Field label={form.type === "pj" ? "CNPJ" : "CPF"} required erro={errosForm.document}>
               <Input
                 mono
                 value={form.document || ""}
-                onChange={setDocument}
+                onChange={(e) => { setDocument(e); limpaErro("document"); }}
                 inputMode="numeric"
                 placeholder={form.type === "pj" ? "00.000.000/0001-00" : "000.000.000-00"}
               />
@@ -914,6 +941,7 @@ export function ClientsClient({ customers, leads, activities, quotes, orders, sa
               label="CEP"
               className="sm:col-span-2"
               hint={fetchingCep ? "buscando endereço…" : "preenche o resto sozinho"}
+              erro={errosForm.cep}
             >
               <Input
                 mono
@@ -939,7 +967,7 @@ export function ClientsClient({ customers, leads, activities, quotes, orders, sa
             <Field label="Cidade">
               <Input value={form.city || ""} onChange={set("city")} />
             </Field>
-            <Field label="UF">
+            <Field label="UF" erro={errosForm.state}>
               <Input
                 value={form.state || ""}
                 onChange={(e) => setForm((f) => ({ ...f, state: e.target.value.toUpperCase().slice(0, 2) }))}
@@ -952,7 +980,7 @@ export function ClientsClient({ customers, leads, activities, quotes, orders, sa
         {/* ── CONTATO ── */}
         <FormSection title="Contato">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <Field label="Telefone">
+            <Field label="Telefone" erro={errosForm.phone}>
               <Input
                 mono
                 value={form.phone || ""}
@@ -961,7 +989,7 @@ export function ClientsClient({ customers, leads, activities, quotes, orders, sa
                 placeholder="(21) 3000-0000"
               />
             </Field>
-            <Field label="WhatsApp">
+            <Field label="WhatsApp" erro={errosForm.whatsapp}>
               <Input
                 mono
                 value={form.whatsapp || ""}
@@ -970,8 +998,8 @@ export function ClientsClient({ customers, leads, activities, quotes, orders, sa
                 placeholder="(21) 99999-0000"
               />
             </Field>
-            <Field label="E-mail" className="sm:col-span-2">
-              <Input value={form.email || ""} onChange={set("email")} type="email" placeholder="email@empresa.com.br" />
+            <Field label="E-mail" className="sm:col-span-2" erro={errosForm.email}>
+              <Input value={form.email || ""} onChange={(e) => { set("email")(e); limpaErro("email"); }} type="email" placeholder="email@empresa.com.br" />
             </Field>
 
             {form.type === "pj" && (

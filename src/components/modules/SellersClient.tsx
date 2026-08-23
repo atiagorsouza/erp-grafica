@@ -33,6 +33,8 @@ import {
   toast,
 } from "@/components/ui";
 import { Icon } from "@/components/icons";
+import { formatCPF, formatPhone } from "@/lib/validators";
+import { focarPrimeiroErro, semErros, validaVendedor, type ErrosCadastro } from "@/lib/cadastro-validacao";
 
 interface Vendedor {
   id: number;
@@ -102,6 +104,7 @@ export function SellersClient({
   const [modal, setModal] = useState<null | { edit?: Vendedor }>(null);
   const [form, setForm] = useState<Record<string, string>>({});
   const [salvando, setSalvando] = useState(false);
+  const [erros, setErros] = useState<ErrosCadastro>({});
 
   const [periodo, setPeriodo] = useState({ de, ate });
   const [extratoDe, setExtratoDe] = useState<number | null>(null);
@@ -110,6 +113,14 @@ export function SellersClient({
 
   const set = (k: string) => (e: { target: { value: string } }) =>
     setForm((f) => ({ ...f, [k]: e.target.value }));
+  /* Campo com máscara: formata ao digitar e apaga o erro do campo
+     assim que o operador começa a corrigir. */
+  const setMasked = (k: string, fmt: (v: string) => string) => (e: { target: { value: string } }) => {
+    const v = fmt(e.target.value);
+    setForm((f) => ({ ...f, [k]: v }));
+    setErros((x) => (x[k] ? { ...x, [k]: "" } : x));
+  };
+  const limpaErro = (k: string) => setErros((x) => (x[k] ? { ...x, [k]: "" } : x));
 
   const abrirExtrato = useCallback(
     async (sellerId: number) => {
@@ -142,6 +153,14 @@ export function SellersClient({
   }, [periodo, de, ate, router]);
 
   async function salvar() {
+    /* Valida antes de bater na API: CPF torto e telefone incompleto
+       viravam registro salvo, e o erro só aparecia no extrato. */
+    const e = validaVendedor(form);
+    setErros(e);
+    if (!semErros(e)) {
+      setTimeout(focarPrimeiroErro, 0);
+      return;
+    }
     setSalvando(true);
     try {
       const r = await fetch("/api/crud/sellers", {
@@ -498,28 +517,29 @@ export function SellersClient({
         }
       >
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <Field label="Nome completo" required className="sm:col-span-2">
-            <Input value={form.name || ""} onChange={set("name")} placeholder="Tiago Souza" />
+          <Field label="Nome completo" required className="sm:col-span-2" erro={erros.name}>
+            <Input value={form.name || ""} onChange={(e) => { set("name")(e); limpaErro("name"); }} placeholder="Tiago Souza" />
           </Field>
           <Field label="Como aparece no PDV" hint="Em branco usa o primeiro nome">
             <Input value={form.nickname || ""} onChange={set("nickname")} placeholder="Tiago" />
           </Field>
-          <Field label="Comissão (%)" hint="Sobre a margem, não sobre o total">
+          <Field label="Comissão (%)" hint="Sobre a margem, não sobre o total" erro={erros.commissionRate}>
             <Input
               mono
               value={form.commissionRate || ""}
-              onChange={set("commissionRate")}
+              onChange={(e) => { set("commissionRate")(e); limpaErro("commissionRate"); }}
               placeholder="3"
+              inputMode="decimal"
             />
           </Field>
-          <Field label="Telefone">
-            <Input value={form.phone || ""} onChange={set("phone")} placeholder="(21) 9…" />
+          <Field label="Telefone" erro={erros.phone}>
+            <Input mono value={form.phone || ""} onChange={setMasked("phone", formatPhone)} placeholder="(21) 97886-9414" inputMode="tel" />
           </Field>
-          <Field label="CPF">
-            <Input mono value={form.document || ""} onChange={set("document")} />
+          <Field label="CPF" erro={erros.document}>
+            <Input mono value={form.document || ""} onChange={setMasked("document", formatCPF)} placeholder="000.000.000-00" inputMode="numeric" />
           </Field>
-          <Field label="E-mail" className="sm:col-span-2">
-            <Input value={form.email || ""} onChange={set("email")} />
+          <Field label="E-mail" className="sm:col-span-2" erro={erros.email}>
+            <Input value={form.email || ""} onChange={(e) => { set("email")(e); limpaErro("email"); }} placeholder="vendedor@vtdigital.site" inputMode="email" />
           </Field>
           <Field label="Situação">
             <Select value={form.active || "sim"} onChange={set("active")}>

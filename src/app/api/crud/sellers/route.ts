@@ -3,6 +3,7 @@ import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { sellers } from "@/db/schema";
+import { formatCPF, formatPhone, isValidCPF, isValidEmail, onlyDigits } from "@/lib/validators";
 import {
   extratoDoVendedor,
   listarVendedores,
@@ -90,11 +91,19 @@ export async function POST(req: Request) {
         );
       }
       const d = parsed.data;
+      /* A API valida por conta própria: o formulário não é a única
+         porta de entrada. Dado sujo aqui contamina o extrato depois. */
+      if (d.email && !isValidEmail(d.email)) {
+        return Response.json({ error: "E-mail inválido", campo: "email" }, { status: 422 });
+      }
+      if (d.document && !isValidCPF(onlyDigits(d.document))) {
+        return Response.json({ error: "CPF inválido", campo: "document" }, { status: 422 });
+      }
       const linha = {
         name: d.name,
         nickname: vazio(d.nickname),
-        document: vazio(d.document),
-        phone: vazio(d.phone),
+        document: d.document ? formatCPF(d.document) : null,
+        phone: d.phone ? formatPhone(d.phone) : null,
         email: d.email ? d.email.trim().toLowerCase() : null,
         commissionRate: toDecimalString(d.commissionRate, 3),
         active: d.active,

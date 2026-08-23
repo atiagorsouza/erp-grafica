@@ -28,6 +28,8 @@ import {
 import { Icon } from "@/components/icons";
 import { CategoriasManager } from "@/components/modules/CategoriasManager";
 import { cn } from "@/lib/format";
+import { formatCEP, formatCNPJ, formatPhone } from "@/lib/validators";
+import { focarPrimeiroErro, semErros, validaFornecedor, type ErrosCadastro } from "@/lib/cadastro-validacao";
 
  
 type Row = Record<string, any>;
@@ -47,12 +49,22 @@ export function StockClient({ materials, suppliers, purchases, materialCats, mov
   const [matModal, setMatModal] = useState<null | { edit?: Row }>(null);
   const [movModal, setMovModal] = useState<null | { material?: Row }>(null);
   const [supModal, setSupModal] = useState<null | { edit?: Row }>(null);
+  const [errosSup, setErrosSup] = useState<ErrosCadastro>({});
+  const [buscandoCep, setBuscandoCep] = useState(false);
   const [buyModal, setBuyModal] = useState(false);
   const [buyItems, setBuyItems] = useState<{ materialId: string; quantity: string; unitCost: string }[]>([]);
   const [onlyLow, setOnlyLow] = useState(false);
   const [busca, setBusca] = useState("");
 
   const set = (k: string) => (e: { target: { value: string } }) => setForm((f) => ({ ...f, [k]: e.target.value }));
+  /* Campo com máscara: formata enquanto digita e limpa o erro do
+     campo assim que o operador mexe nele. Deixar o vermelho aceso
+     enquanto ele corrige é ruído. */
+  const setMasked = (k: string, fmt: (v: string) => string) => (e: { target: { value: string } }) => {
+    const v = fmt(e.target.value);
+    setForm((f) => ({ ...f, [k]: v }));
+    setErrosSup((x) => (x[k] ? { ...x, [k]: "" } : x));
+  };
   const catName = (id: unknown) => materialCats.find((c) => Number(c.id) === Number(id));
 
   const lowCount = materials.filter((m) => Number(m.stock) <= Number(m.minStock || 0)).length;
@@ -186,8 +198,40 @@ export function StockClient({ materials, suppliers, purchases, materialCats, mov
     }, kind === "entrada" ? "Entrada registrada" : kind === "saida" ? "Saída registrada" : `Saldo ajustado para ${qty}`);
   }
 
-  const saveSup = (id?: number) =>
-    run(async () => {
+  /* Preenche o endereço pelo CEP, igual ao cadastro de cliente.
+     Nunca sobrescreve número e complemento: o ViaCEP não os conhece. */
+  async function buscarCepFornecedor(valor: string) {
+    const limpo = String(valor || "").replace(/\D/g, "");
+    if (limpo.length !== 8) return;
+    setBuscandoCep(true);
+    try {
+      const r = await fetch(`/api/cep/${limpo}`);
+      if (!r.ok) return;
+      const d = (await r.json()) as { street?: string; district?: string; city?: string; state?: string };
+      setForm((f) => ({
+        ...f,
+        street: d.street || f.street || "",
+        district: d.district || f.district || "",
+        city: d.city || f.city || "",
+        state: d.state || f.state || "",
+      }));
+    } catch {
+      /* sem internet ou CEP inexistente: digita à mão */
+    } finally {
+      setBuscandoCep(false);
+    }
+  }
+
+  const saveSup = (id?: number) => {
+    /* Valida ANTES de chamar a API: erro de digitação vira aviso no
+       campo, não erro 422 genérico depois do round-trip. */
+    const e = validaFornecedor(form);
+    setErrosSup(e);
+    if (!semErros(e)) {
+      setTimeout(focarPrimeiroErro, 0);
+      return;
+    }
+    return run(async () => {
       const data = {
         name: form.name,
         tradeName: form.tradeName || null,
@@ -196,6 +240,12 @@ export function StockClient({ materials, suppliers, purchases, materialCats, mov
         email: form.email || null,
         phone: form.phone || null,
         whatsapp: form.whatsapp || null,
+        website: form.website || null,
+        cep: form.cep || null,
+        street: form.street || null,
+        number: form.number || null,
+        complement: form.complement || null,
+        district: form.district || null,
         city: form.city || null,
         state: form.state || null,
         paymentTerms: form.paymentTerms || null,
@@ -206,7 +256,9 @@ export function StockClient({ materials, suppliers, purchases, materialCats, mov
       if (id) await mutate("suppliers", "update", data, id);
       else await mutate("suppliers", "create", data);
       setSupModal(null);
+      setErrosSup({});
     }, "Fornecedor salvo");
+  };
 
   async function saveBuy() {
     const items = buyItems.filter((i) => i.materialId && Number(i.quantity) > 0);
@@ -777,24 +829,112 @@ export function StockClient({ materials, suppliers, purchases, materialCats, mov
       {/* ── MODAL FORNECEDOR ── */}
       <Modal open={!!supModal} onClose={() => setSupModal(null)} title={supModal?.edit ? "Editar fornecedor" : "Novo fornecedor"}
         footer={<><Button variant="ghost" onClick={() => setSupModal(null)}>Cancelar</Button><Button loading={saving} icon="check" onClick={() => saveSup(supModal?.edit ? Number(supModal.edit.id) : undefined)}>Salvar</Button></>}>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <Field label="Razão social" required><Input value={form.name || ""} onChange={set("name")} /></Field>
-          <Field label="Nome fantasia"><Input value={form.tradeName || ""} onChange={set("tradeName")} /></Field>
-          <Field label="CNPJ"><Input mono value={form.document || ""} onChange={set("document")} /></Field>
-          <Field label="Contato"><Input value={form.contactName || ""} onChange={set("contactName")} /></Field>
-          <Field label="E-mail"><Input value={form.email || ""} onChange={set("email")} /></Field>
-          <Field label="Telefone"><Input mono value={form.phone || ""} onChange={set("phone")} /></Field>
-          <Field label="Cidade / UF">
-            <div className="flex gap-2">
-              <Input value={form.city || ""} onChange={set("city")} />
-              <Input value={form.state || ""} onChange={set("state")} className="w-16" />
+        <div className="space-y-4">
+          {/* IDENTIFICAÇÃO */}
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <Field label="Razão social" required erro={errosSup.name}>
+              <Input value={form.name || ""} onChange={(e) => { set("name")(e); setErrosSup((x) => (x.name ? { ...x, name: "" } : x)); }} placeholder="Papelaria Central LTDA" />
+            </Field>
+            <Field label="Nome fantasia" hint="Como você chama no dia a dia">
+              <Input value={form.tradeName || ""} onChange={set("tradeName")} placeholder="Papelaria Central" />
+            </Field>
+            <Field label="CNPJ" erro={errosSup.document}>
+              <Input mono value={form.document || ""} onChange={setMasked("document", formatCNPJ)} placeholder="00.000.000/0000-00" inputMode="numeric" />
+            </Field>
+            <Field label="Inscrição estadual" hint="Opcional">
+              <Input mono value={form.stateRegistration || ""} onChange={set("stateRegistration")} />
+            </Field>
+          </div>
+
+          {/* CONTATO */}
+          <div className="border-t border-paper-200 pt-3.5">
+            <p className="mb-2.5 text-[11.5px] font-bold text-ink-700">Contato</p>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <Field label="Pessoa de contato" hint="Com quem você fala">
+                <Input value={form.contactName || ""} onChange={set("contactName")} placeholder="Marcos — vendas" />
+              </Field>
+              <Field label="E-mail" erro={errosSup.email}>
+                <Input value={form.email || ""} onChange={(e) => { set("email")(e); setErrosSup((x) => (x.email ? { ...x, email: "" } : x)); }} placeholder="vendas@fornecedor.com.br" inputMode="email" />
+              </Field>
+              <Field label="Telefone" erro={errosSup.phone}>
+                <Input mono value={form.phone || ""} onChange={setMasked("phone", formatPhone)} placeholder="(21) 2038-3504" inputMode="tel" />
+              </Field>
+              <Field label="WhatsApp" erro={errosSup.whatsapp}>
+                <Input mono value={form.whatsapp || ""} onChange={setMasked("whatsapp", formatPhone)} placeholder="(21) 97886-9414" inputMode="tel" />
+              </Field>
+              <Field label="Site" className="sm:col-span-2" erro={errosSup.website}>
+                <Input value={form.website || ""} onChange={(e) => { set("website")(e); setErrosSup((x) => (x.website ? { ...x, website: "" } : x)); }} placeholder="fornecedor.com.br" />
+              </Field>
             </div>
-          </Field>
-          <Field label="Condição de pagamento"><Input value={form.paymentTerms || ""} onChange={set("paymentTerms")} placeholder="28 dias" /></Field>
-          <Field label="Lead time (dias)"><Input mono value={form.leadTimeDays || "0"} onChange={set("leadTimeDays")} /></Field>
-          <Field label="Ativo?">
-            <Select value={form.active ?? "true"} onChange={set("active")}><option value="true">Sim</option><option value="false">Não</option></Select>
-          </Field>
+          </div>
+
+          {/* ENDEREÇO — não existia; sem ele não dá para conferir frete
+              nem saber de onde vem a mercadoria. */}
+          <div className="border-t border-paper-200 pt-3.5">
+            <p className="mb-2.5 text-[11.5px] font-bold text-ink-700">Endereço</p>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-6">
+              <Field label="CEP" className="sm:col-span-2" hint={buscandoCep ? "buscando…" : "Preenche sozinho"} erro={errosSup.cep}>
+                <Input
+                  mono
+                  value={form.cep || ""}
+                  onChange={(e) => {
+                    const v = formatCEP(e.target.value);
+                    setForm((f) => ({ ...f, cep: v }));
+                    setErrosSup((x) => (x.cep ? { ...x, cep: "" } : x));
+                    if (v.replace(/\D/g, "").length === 8) void buscarCepFornecedor(v);
+                  }}
+                  placeholder="21810-000"
+                  inputMode="numeric"
+                />
+              </Field>
+              <Field label="Rua / Logradouro" className="sm:col-span-4">
+                <Input value={form.street || ""} onChange={set("street")} />
+              </Field>
+              <Field label="Número" className="sm:col-span-1">
+                <Input mono value={form.number || ""} onChange={set("number")} placeholder="910" />
+              </Field>
+              <Field label="Complemento" className="sm:col-span-2" hint="Sala, galpão, fundos">
+                <Input value={form.complement || ""} onChange={set("complement")} placeholder="Galpão 2" />
+              </Field>
+              <Field label="Bairro" className="sm:col-span-3">
+                <Input value={form.district || ""} onChange={set("district")} />
+              </Field>
+              <Field label="Cidade" className="sm:col-span-4">
+                <Input value={form.city || ""} onChange={set("city")} />
+              </Field>
+              <Field label="UF" className="sm:col-span-2" erro={errosSup.state}>
+                <Input
+                  mono
+                  value={form.state || ""}
+                  onChange={(e) => {
+                    setForm((f) => ({ ...f, state: e.target.value.toUpperCase().slice(0, 2) }));
+                    setErrosSup((x) => (x.state ? { ...x, state: "" } : x));
+                  }}
+                  placeholder="RJ"
+                  maxLength={2}
+                />
+              </Field>
+            </div>
+          </div>
+
+          {/* COMERCIAL */}
+          <div className="border-t border-paper-200 pt-3.5">
+            <p className="mb-2.5 text-[11.5px] font-bold text-ink-700">Condições comerciais</p>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+              <Field label="Condição de pagamento">
+                <Input value={form.paymentTerms || ""} onChange={set("paymentTerms")} placeholder="28 dias" />
+              </Field>
+              <Field label="Prazo de entrega" hint="Em dias" erro={errosSup.leadTimeDays}>
+                <Input mono value={form.leadTimeDays || "0"} onChange={(e) => { set("leadTimeDays")(e); setErrosSup((x) => (x.leadTimeDays ? { ...x, leadTimeDays: "" } : x)); }} inputMode="numeric" />
+              </Field>
+              <Field label="Ativo?">
+                <Select value={form.active ?? "true"} onChange={set("active")}><option value="true">Sim</option><option value="false">Não</option></Select>
+              </Field>
+              <Field label="Observações" className="sm:col-span-3" hint="O que você precisa lembrar deste fornecedor">
+                <Textarea value={form.notes || ""} onChange={set("notes")} placeholder="Pedido mínimo R$ 300. Entrega só às terças." />
+              </Field>
+            </div>
+          </div>
         </div>
       </Modal>
 

@@ -481,6 +481,8 @@ export const suppliers = pgTable("suppliers", {
   name: text("name").notNull(),
   tradeName: text("trade_name"),
   document: text("document"),
+  /** inscrição estadual — nota de compra com IE errada volta */
+  stateRegistration: text("state_registration"),
   contactName: text("contact_name"),
   email: text("email"),
   phone: text("phone"),
