@@ -8,34 +8,45 @@ dos insumos.
 
 ---
 
-## 1. Custo por folha cortada — R$ 0,42
+## 1. Custo por folha cortada — R$ 0,26
 
 Cadastrado em **Impressoras & Tintas → Recorte / Plotter → consumíveis**.
-Os dois itens ficam **separados**, não somados num número só, porque um
-deles pode desaparecer (ver adiante).
 
 | Item | Preço | Rende | Por folha |
 |---|---|---|---|
 | Lâmina de corte Tipo B | R$ 180,00 | 1.000 folhas | **R$ 0,18** |
-| Base de corte padrão | R$ 120,00 | 500 ciclos | **R$ 0,24** |
-| | | **Total** | **R$ 0,42** |
+| Base de corte A3 (genérica) | R$ 42,00 | 500 ciclos | **R$ 0,084** |
+| | | **Total** | **R$ 0,26** |
+
+**Vale o mesmo para A4 e A3** — ver a seção 5, que explica por quê.
 
 Os dois entram como `mechanical` (desgaste mecânico), **não** como
 `colorant`. Isso importa: o custo de tinta é multiplicado pela cobertura
 do desenho, o de desgaste não. Plotter não tem tinta — a lâmina se gasta
 igual, o desenho sendo cheio ou vazado.
 
+### Por que a base é a genérica de A3, e não a original
+
+O levantamento inicial usava a base original **12x12" (30,5 × 30,5 cm)
+por R$ 120**, o que dava R$ 0,24/folha. Só que **o A3 não cabe nela**:
+420 mm de comprimento contra 305 mm de base — sobram 115 mm para fora.
+
+Na prática o dono compra a **base A3 genérica (~R$ 42)** e corta nela
+**tudo**, A3 e A4. Uma base só, mais barata, para os dois formatos. A
+base original simplesmente não entra na conta porque não é comprada.
+
+Efeito no custo: a base caiu de R$ 0,24 para **R$ 0,084** por folha —
+quase um terço.
+
 ### Se trocar pela base eletrostática
 
-A base eletrostática não usa cola. Os **R$ 0,24 saem da conta** e o custo
-por folha cai para R$ 0,18 — mas entra a amortização do acessório, que é
-mais caro.
+A eletrostática não usa cola, então o custo de base sairia da conta.
+Mas atenção: ela custa cerca de **R$ 1.320** e é de **30 × 30 cm** — ou
+seja, **não resolve o A3**. Para o uso atual, a base genérica de R$ 42
+é mais barata e mais adequada.
 
-Para fazer a troca, **sem programação**: Impressoras & Tintas → Recorte /
-Plotter → editar "Base de corte padrão (rateio)". Trocar o preço e o
-rendimento pelos da eletrostática, ou zerar para tirá-la da conta.
-
----
+Para alterar, **sem programação**: Impressoras & Tintas → Recorte /
+Plotter → editar o consumível da base.
 
 ## 2. Energia — praticamente zero
 
@@ -82,7 +93,7 @@ terceirizado continua em m², como já era.
 
 Um serviço de recorte soma três coisas:
 
-1. **Custo de máquina** — R$ 0,42 por folha (motor de impressão)
+1. **Custo de máquina** — R$ 0,26 por folha (motor de impressão)
 2. **Material** — metros de vinil × custo por metro (motor de material)
 3. **Mão de obra e margem** — pelas regras que já existem
 
@@ -91,22 +102,42 @@ recorte perdido e teste de lâmina.
 
 ---
 
-## 5. Ponto de atenção que continua aberto
+## 5. Por que A4 e A3 custam o mesmo
 
-A cobertura de referência da categoria é **1,0** e os formatos de recorte
-também estão em 1,0 — a divisão dá 1 e não altera nada. Como não há
-consumível `colorant` no plotter, hoje isso é inofensivo.
+Esta é a parte contraintuitiva, e vale entender.
 
-**Mas:** se algum dia for cadastrado um formato de recorte com cobertura
-menor que 100%, e existir algum consumível marcado como `colorant`, o
-custo cairia sem motivo. A trava correta é manter todo consumível de
-plotter como `mechanical` — que é como está.
+O sistema tinha o A3 com **fator de área 2,00** — assumindo que o A3
+gasta o dobro do A4. Isso está **errado para recorte**, por dois motivos:
 
-Já o `area_factor` do A3 = 2,00 assume que o A3 gasta o dobro do A4.
-Para **desgaste de base** isso é verdade (a folha inteira encosta na
-cola). Para **lâmina**, não: o que gasta é o comprimento de corte, não o
-tamanho da folha. Um A3 com um círculo no meio gasta menos lâmina que um
-A4 cheio de letras pequenas.
+1. **A base é a mesma.** Não existe "meia base" para A4: a folha entra
+   na mesma base A3 e gasta um ciclo de aderência, seja qual for o
+   tamanho.
 
-Na prática o erro é pequeno e para mais (superestima), o que é seguro
-para preço. Fica registrado caso o volume de recorte cresça.
+2. **A lâmina se gasta pelo COMPRIMENTO DE CORTE, não pelo tamanho da
+   folha.** Um A4 cheio de letras miúdas percorre muito mais caminho
+   com a lâmina do que um A3 com um círculo grande no meio. O tamanho
+   da folha não diz quanto a lâmina andou.
+
+Por isso **os dois formatos têm fator de área 1,00**: o custo por folha
+é o mesmo, R$ 0,26.
+
+### O que isso corrigiu
+
+Com o fator 2,00, o A3 saía a **R$ 0,92** por folha. O custo real é
+**R$ 0,29**. O sistema cobrava **mais de três vezes** o custo do recorte
+em A3 — e o A3 é metade do volume.
+
+> Isso não significa que o preço de venda do A3 deva ser igual ao do A4:
+> o **papel** A3 custa mais que o A4, e ele entra pelo motor de material,
+> separado. O que é igual é o custo de **máquina**.
+
+### O que continua em aberto
+
+A cobertura de referência da categoria é 1,0 e os formatos também — a
+divisão dá 1 e não altera nada. Como não há consumível `colorant` no
+plotter, hoje é inofensivo. A regra a manter: **todo consumível de
+plotter é `mechanical`**.
+
+Se um dia o volume de recorte crescer a ponto de justificar, o caminho
+mais fiel seria cobrar por **metro de corte** do desenho — mas isso
+exige o operador informar o comprimento, e hoje não compensa.

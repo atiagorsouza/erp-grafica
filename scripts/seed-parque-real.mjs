@@ -122,7 +122,10 @@ const cons = [
      cola) esse custo tende a sumir — por isso os dois estão separados
      e editáveis na tela, não somados num número só. */
   ["recorte-plotter", "Lâmina de corte Tipo B (rateio)", "180", 1000, "both", "mechanical", "R$ 180 ÷ 1.000 folhas = R$ 0,18/folha. Vida útil média em papel até 180g."],
-  ["recorte-plotter", "Base de corte padrão (rateio)", "120", 500, "both", "mechanical", "R$ 120 ÷ 500 ciclos = R$ 0,24/folha. Some se trocar pela base eletrostática."],
+  /* Uma base só para tudo: o dono compra a A3 genérica e corta nela
+     tanto A3 quanto A4. A base original 12x12" (R$ 120) não entra na
+     conta porque não é usada — o A3 (420 mm) não cabe nos 305 mm dela. */
+  ["recorte-plotter", "Base de corte A3 (genérica, rateio)", "42", 500, "both", "mechanical", "R$ 42 ÷ 500 ciclos = R$ 0,084/folha. Cabe A3 e sobra espaço para A4."],
 
   ["impressao-3d", "Filamento PLA (1kg)", "110", 1000, "both", "colorant", null],
   ["impressao-3d", "Bico + manutenção (rateio por grama)", "150", 20000, "both", "mechanical", null],
@@ -169,7 +172,11 @@ const fmts = [
   ["termica", "Pulseira 250x25mm", "250", "25", "5", "1.00", "252", 1],
 
   ["recorte-plotter", "Folha de recorte A4", "210", "297", "1", "1.00", "0", 1],
-  ["recorte-plotter", "Folha de recorte A3", "297", "420", "2", "1.00", "0", 1],
+  /* areaFactor 1 (não 2) de propósito: no recorte o custo por folha é o
+     mesmo em A4 e A3. A lâmina se gasta pelo COMPRIMENTO DE CORTE, não
+     pelo tamanho da folha, e as duas usam a mesma base A3. Um A4 cheio
+     de letras miúdas gasta mais lâmina que um A3 com um círculo. */
+  ["recorte-plotter", "Folha de recorte A3", "297", "420", "1", "1.00", "0", 1],
 
   ["impressao-3d", "Peça 3D (por grama)", "0", "0", "1", "1.00", "0", 1],
 ];
