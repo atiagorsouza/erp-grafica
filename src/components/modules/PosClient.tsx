@@ -2452,6 +2452,9 @@ function QuickCustomerModal({
   const [number, setNumber] = useState("");
   const [complement, setComplement] = useState("");
   const [erros, setErros] = useState<ErrosCadastro>({});
+  /* Motivo da dispensa de CPF — o escape da regra de documento
+     obrigatório. Só aparece quando o campo está vazio. */
+  const [docWaiver, setDocWaiver] = useState("");
   const [district, setDistrict] = useState("");
   const [city, setCity] = useState("");
   const [state, setState] = useState("");
@@ -2487,6 +2490,12 @@ function QuickCustomerModal({
        Vale conferir aqui: CPF errado só reaparece na hora de emitir
        documento, quando a venda já foi. */
     const e = validaClienteRapido({ name, document, phone, cep, state });
+    /* CPF é obrigatório também no balcão (regra do dono). O escape de
+       boa-fé mantém a venda andando quando o cliente não tem o
+       documento na mão — mas exige o motivo por escrito. */
+    if (!document.replace(/\D/g, "") && docWaiver.trim().length < 3) {
+      e.document = "CPF é obrigatório — ou diga o motivo abaixo";
+    }
     setErros(e);
     if (!semErros(e)) {
       setTimeout(focarPrimeiroErro, 0);
@@ -2511,6 +2520,7 @@ function QuickCustomerModal({
         /* Cadastro rápido no meio do atendimento: documento fica
            opcional aqui (a tela de Clientes & CRM exige). */
         quickEntry: true,
+        documentWaiverReason: docWaiver.trim() || null,
       };
 
       const res = await fetch("/api/crud/customers", {
@@ -2594,6 +2604,16 @@ function QuickCustomerModal({
             />
           </Field>
         </div>
+
+        {!document.replace(/\D/g, "") && (
+          <Field label="Cliente está sem o CPF agora?" hint="Escreva o motivo para concluir mesmo assim">
+            <Input
+              value={docWaiver}
+              onChange={(e) => { setDocWaiver(e.target.value); setErros((x) => (x.document ? { ...x, document: "" } : x)); }}
+              placeholder="Ex.: vai trazer depois — cliente conhecido"
+            />
+          </Field>
+        )}
 
         <div className="border-t border-paper-200 pt-2 space-y-2">
           <p className="font-semibold text-ink-800 text-[11.5px]">Endereço (impresso no cupom)</p>

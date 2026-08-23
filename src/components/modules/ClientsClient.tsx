@@ -29,7 +29,7 @@ import {
 import { Icon } from "@/components/icons";
 import { cn, initials } from "@/lib/format";
 import { formatCEP, formatCNPJ, formatCPF, formatPhone, formatStateRegistration } from "@/lib/validators";
-import { focarPrimeiroErro, semErros, validaCEP, validaDocumento, validaEmail, validaSite, validaTelefone, validaUF, type ErrosCadastro } from "@/lib/cadastro-validacao";
+import { focarPrimeiroErro, semErros, validaCEP, validaDocumentoObrigatorio, validaEmail, validaSite, validaTelefone, validaUF, type ErrosCadastro } from "@/lib/cadastro-validacao";
 import { todayISO } from "@/lib/period";
 import { PedirCadastroModal } from "@/components/modules/PedirCadastroModal";
 
@@ -280,7 +280,7 @@ export function ClientsClient({ customers, leads, activities, quotes, orders, sa
     const e: ErrosCadastro = {};
     if (!form.name?.trim()) e.name = tipo === "pj" ? "Informe a razão social" : "Informe o nome";
     const checagens: [string, string | null][] = [
-      ["document", validaDocumento(form.document, tipo)],
+      ["document", validaDocumentoObrigatorio(form.document, tipo, form.documentWaiverReason)],
       ["email", validaEmail(form.email)],
       ["phone", validaTelefone(form.phone)],
       ["whatsapp", validaTelefone(form.whatsapp)],
@@ -302,6 +302,7 @@ export function ClientsClient({ customers, leads, activities, quotes, orders, sa
         name: form.name.trim(),
         tradeName: form.tradeName?.trim() || null,
         document: form.document?.trim() || null,
+        documentWaiverReason: form.documentWaiverReason?.trim() || null,
         email: form.email?.trim() || null,
         phone: form.phone?.trim() || null,
         whatsapp: form.whatsapp?.trim() || null,
@@ -853,6 +854,23 @@ export function ClientsClient({ customers, leads, activities, quotes, orders, sa
                 placeholder={form.type === "pj" ? "00.000.000/0001-00" : "000.000.000-00"}
               />
             </Field>
+
+            {/* Escape de boa-fé: só aparece quando o documento está em
+                branco. Sem ele o operador inventa "000.000.000-00" e o
+                cadastro fica pior do que vazio. */}
+            {!String(form.document || "").trim() && (
+              <Field
+                label="Sem o documento agora?"
+                className="sm:col-span-2"
+                hint="Registre o motivo para salvar mesmo assim"
+              >
+                <Input
+                  value={form.documentWaiverReason || ""}
+                  onChange={(e) => { set("documentWaiverReason")(e); limpaErro("document"); }}
+                  placeholder="Ex.: cliente vai trazer depois — venda de balcão"
+                />
+              </Field>
+            )}
 
             <Field label="Origem do cliente">
               <Select value={form.origin || ""} onChange={set("origin")}>

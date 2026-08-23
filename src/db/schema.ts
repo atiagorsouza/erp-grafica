@@ -116,6 +116,11 @@ export const customers = pgTable("customers", {
   name: text("name").notNull(), // nome (PF) ou razão social (PJ)
   tradeName: text("trade_name"), // nome fantasia
   document: text("document"), // CPF ou CNPJ
+  /* Escape de boa-fé: CPF é obrigatório, mas o balcão não pode parar
+     quando o cliente não tem o documento na mão. Preenchido, dispensa
+     a trava e deixa registrado QUEM decidiu e POR QUÊ. */
+  documentWaiverReason: text("document_waiver_reason"),
+  documentWaiverAt: timestamp("document_waiver_at", { mode: "date" }),
   // contato
   email: text("email"),
   phone: text("phone"),

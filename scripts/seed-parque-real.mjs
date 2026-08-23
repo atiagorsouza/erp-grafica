@@ -45,7 +45,7 @@ const cats = [
   ["Jato de Tinta", "jato-de-tinta", "pagina", "folha", "0.01", "0.03", "0.40", "0.10", "💧", "#3b82f6"],
   ["Sublimação", "sublimacao", "pagina", "folha", "0.01", "0.05", "0.50", "1.00", "🔥", "#f97316"],
   ["Térmica", "termica", "etiqueta", "etiqueta", "0.005", "0.03", "0.50", "1.00", "🏷️", "#8b5cf6"],
-  ["Recorte / Plotter", "recorte-plotter", "pagina", "folha", "0.01", "0.08", "0.50", "1.00", "✂️", "#ec4899"],
+  ["Recorte / Plotter", "recorte-plotter", "pagina", "folha", "0.004", "0.08", "0.50", "1.00", "✂️", "#ec4899"],
   ["Impressão 3D", "impressao-3d", "grama", "grama", "0", "0.05", "0.60", "1.00", "🧊", "#10b981"],
 ];
 const catId = {};
@@ -113,8 +113,16 @@ const cons = [
      categoria, o motor somaria os três em toda etiqueta. */
   ["termica", "Cabeça térmica (rateio)", "900", 300000, "both", "mechanical", null],
 
-  ["recorte-plotter", "Lâmina de corte (rateio)", "120", 3000, "both", "mechanical", null],
-  ["recorte-plotter", "Base de corte (rateio)", "90", 500, "both", "mechanical", "500 folhas confirmado pelo usuário."],
+  /* Cameo 5 — valores levantados pelo dono em 2026-08 com base no preço
+     oficial dos insumos. Lâmina Tipo B R$ 180 / 1.000 folhas = R$ 0,18;
+     base de corte padrão R$ 120 / 500 ciclos = R$ 0,24. Total R$ 0,42
+     por folha, que é o custo real de recorte hoje.
+
+     A base é o item que mais pesa. Trocando para a eletrostática (sem
+     cola) esse custo tende a sumir — por isso os dois estão separados
+     e editáveis na tela, não somados num número só. */
+  ["recorte-plotter", "Lâmina de corte Tipo B (rateio)", "180", 1000, "both", "mechanical", "R$ 180 ÷ 1.000 folhas = R$ 0,18/folha. Vida útil média em papel até 180g."],
+  ["recorte-plotter", "Base de corte padrão (rateio)", "120", 500, "both", "mechanical", "R$ 120 ÷ 500 ciclos = R$ 0,24/folha. Some se trocar pela base eletrostática."],
 
   ["impressao-3d", "Filamento PLA (1kg)", "110", 1000, "both", "colorant", null],
   ["impressao-3d", "Bico + manutenção (rateio por grama)", "150", 20000, "both", "mechanical", null],

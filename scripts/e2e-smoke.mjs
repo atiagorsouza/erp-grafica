@@ -601,12 +601,30 @@ async function main() {
       body: JSON.stringify({ op: "create", data }),
     }).then(async (r) => ({ status: r.status, body: await r.json() }));
 
-  /* documento é obrigatório no cadastro completo, mas o balcão (F8) segue livre */
+  /* CPF é obrigatório em TODO cadastro — inclusive no balcão (v3.67.0).
+     A trava tem escape de boa-fé: quem não tem o documento na mão
+     escreve o motivo e a venda segue, com o motivo gravado na ficha. */
   const semDoc = await post({ name: "SMOKE CRM Sem Documento" });
   assert(semDoc.status === 422, "cadastro completo exige CPF/CNPJ");
 
   const rapido = await post({ name: "SMOKE CRM Balcao", quickEntry: true });
-  assert(rapido.status === 200, "cadastro rápido do PDV dispensa documento");
+  assert(rapido.status === 422, "cadastro rápido do PDV também exige CPF");
+
+  const dispensa = await post({
+    name: "SMOKE CRM Dispensa",
+    quickEntry: true,
+    documentWaiverReason: "cliente vai trazer o CPF depois",
+  });
+  assert(dispensa.status === 200, "motivo de dispensa libera o cadastro sem CPF");
+  assert(
+    dispensa.body?.row?.documentWaiverReason === "cliente vai trazer o CPF depois",
+    "motivo da dispensa fica gravado na ficha"
+  );
+  assert(!!dispensa.body?.row?.documentWaiverAt, "dispensa registra a data da decisão");
+
+  /* Motivo curto demais não vale como justificativa. */
+  const dispensaVazia = await post({ name: "SMOKE CRM Dispensa Ruim", quickEntry: true, documentWaiverReason: "x" });
+  assert(dispensaVazia.status === 422, "motivo vazio não dispensa o CPF");
 
   const docRuim = await post({ name: "SMOKE CRM Doc Ruim", document: "111.111.111-11" });
   assert(docRuim.status === 422, "CPF com dígito verificador inválido é recusado");

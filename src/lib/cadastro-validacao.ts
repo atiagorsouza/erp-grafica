@@ -155,6 +155,29 @@ export function validaClienteRapido(f: Record<string, unknown>): ErrosCadastro {
   return e;
 }
 
+/**
+ * CPF/CNPJ é obrigatório para todo cliente — sem ele não sai documento.
+ *
+ * A exceção de boa-fé: o cliente que aparece no balcão sem o documento
+ * na mão não pode travar a venda. Quem dispensa escreve o motivo, e o
+ * motivo fica gravado na ficha. Trava sem escape vira operador
+ * inventando "000.000.000-00", que é pior que o campo vazio.
+ */
+export function validaDocumentoObrigatorio(
+  raw: string | null | undefined,
+  tipo: "pf" | "pj",
+  dispensa?: string | null
+): string | null {
+  const d = onlyDigits(String(raw || ""));
+  if (!d) {
+    if (String(dispensa || "").trim().length >= 3) return null;
+    return tipo === "pj"
+      ? "CNPJ é obrigatório — ou registre o motivo da dispensa"
+      : "CPF é obrigatório — ou registre o motivo da dispensa";
+  }
+  return validaDocumento(d, tipo);
+}
+
 /** true quando não há nenhum erro. Açúcar para deixar a tela legível. */
 export function semErros(e: ErrosCadastro): boolean {
   return Object.keys(e).length === 0;

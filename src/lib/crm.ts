@@ -17,13 +17,15 @@ import {
 import { phoneKey } from "@/lib/phone";
 import { todayISO } from "@/lib/period";
 
-export type CrmError = { error: string; status: number; details?: unknown };
+export type CrmError = { error: string; status: number; details?: unknown; campo?: string };
 
 const customerSchema = z.object({
   type: z.enum(["pf", "pj"]).default("pf"),
   name: z.string().trim().min(2, "Nome obrigatório").max(180),
   tradeName: z.string().trim().max(180).nullable().optional(),
   document: z.string().trim().max(32).nullable().optional(),
+  /* Motivo da dispensa de CPF/CNPJ — o escape de boa-fé da regra. */
+  documentWaiverReason: z.string().trim().max(180).nullable().optional(),
   email: z.string().trim().max(180).nullable().optional(),
   phone: z.string().trim().max(40).nullable().optional(),
   whatsapp: z.string().trim().max(40).nullable().optional(),
@@ -119,6 +121,10 @@ function normalizeCustomer(data: z.infer<typeof customerSchema>) {
     name: data.name.trim(),
     tradeName: nullable(data.tradeName),
     document: docDigits ? (data.type === "pj" ? formatCNPJ(docDigits) : formatCPF(docDigits)) : null,
+    /* Documento preenchido apaga a dispensa: ela existia justamente
+       porque faltava o número. Manter as duas coisas confunde. */
+    documentWaiverReason: docDigits ? null : (data.documentWaiverReason?.trim() || null),
+    documentWaiverAt: !docDigits && data.documentWaiverReason?.trim() ? new Date() : null,
     email: data.email ? data.email.trim().toLowerCase() : null,
     phone,
     whatsapp,
@@ -175,14 +181,23 @@ async function validateCustomer(data: z.infer<typeof customerSchema>, ignoreId?:
     else if (len === 11 && data.type !== "pf") data.type = "pf";
   }
 
-  /* Documento obrigatório no cadastro completo. O cadastro rápido do
-     PDV (quickEntry) segue liberado: exigir CPF no balcão travaria a
-     venda. Clientes antigos sem documento continuam válidos — a regra
-     só vale para o que passa por aqui. */
-  if (!data.quickEntry && !onlyDigits(data.document || "")) {
+  /* Documento obrigatório — inclusive no cadastro rápido do PDV, que
+     antes passava livre. Sem CPF não se emite documento, e o balcão é
+     justamente onde o cadastro nasce.
+
+     A trava tem escape de boa-fé: quem não tem o documento na mão
+     escreve o motivo e a venda segue. Fica registrado na ficha, e o
+     alerta de "cadastros pela metade" cobra depois. Trava sem saída
+     vira operador digitando "000.000.000-00". */
+  const temDispensa = String(data.documentWaiverReason || "").trim().length >= 3;
+  if (!onlyDigits(data.document || "") && !temDispensa) {
     return {
-      error: data.type === "pj" ? "CNPJ é obrigatório" : "CPF é obrigatório",
+      error:
+        data.type === "pj"
+          ? "CNPJ é obrigatório — ou registre o motivo da dispensa"
+          : "CPF é obrigatório — ou registre o motivo da dispensa",
       status: 422,
+      campo: "document",
     } satisfies CrmError;
   }
 
