@@ -42,29 +42,46 @@ O custo por folha é **sempre o mesmo** (R$ 1,88 de vinil + R$ 0,72 de
 impressão + R$ 0,29 de recorte por lote). O que muda é por quantas
 peças ele é dividido.
 
-Mantive a margem de 58% na primeira cartela, igual à do 40×15 — por isso
-**toda cartela cheia dá ~R$ 13,20**, próximo dos R$ 12,90 que o dono já
-pratica.
+**A cartela cheia custa R$ 12,90 em todos os diâmetros** — o mesmo
+preço que o dono já pratica. O que muda é quantos adesivos vêm nela.
 
 ### Preço por unidade
 
 | Qtd (cartelas) | 30 mm | 40 mm | 50 mm | 60 mm |
 |---|---:|---:|---:|---:|
-| 1 | R$ 0,3300 | R$ 0,5500 | R$ 0,8800 | R$ 1,6400 |
-| 2 | R$ 0,3006 | R$ 0,5011 | R$ 0,8017 | R$ 1,4940 |
-| 5 | R$ 0,2713 | R$ 0,4521 | R$ 0,7234 | R$ 1,3481 |
-| 10 | R$ 0,2429 | R$ 0,4048 | R$ 0,6477 | R$ 1,2070 |
-| 25 | R$ 0,2148 | R$ 0,3581 | R$ 0,5729 | R$ 1,0676 |
-| 50 | R$ 0,1868 | R$ 0,3113 | R$ 0,4981 | R$ 0,9282 |
+| 1 | R$ 0,3225 | R$ 0,5375 | R$ 0,8600 | R$ 1,6125 |
+| 2 | R$ 0,2938 | R$ 0,4896 | R$ 0,7834 | R$ 1,4689 |
+| 5 | R$ 0,2651 | R$ 0,4418 | R$ 0,7069 | R$ 1,3255 |
+| 10 | R$ 0,2374 | R$ 0,3956 | R$ 0,6330 | R$ 1,1868 |
+| 25 | R$ 0,2099 | R$ 0,3498 | R$ 0,5597 | R$ 1,0494 |
+| 50 | R$ 0,1825 | R$ 0,3042 | R$ 0,4867 | R$ 0,9126 |
+
+### Total por cartela — igual em todos
+
+| Cartelas | Total |
+|---:|---:|
+| 1 | R$ 12,90 |
+| 2 | R$ 23,50 |
+| 5 | R$ 53,00 |
+| 10 | R$ 95,00 |
+| 25 | R$ 210,00 |
+| 50 | R$ 365,00 |
 
 ### Quantidade mínima (1 cartela)
 
-| Diâmetro | Mínimo | Preço da cartela |
+| Diâmetro | Mínimo | Preço |
 |---|---:|---:|
-| 30 mm | 40 un | R$ 13,20 |
-| 40 mm | 24 un | R$ 13,20 |
-| 50 mm | 15 un | R$ 13,20 |
-| 60 mm | 8 un | R$ 13,12 |
+| 30 mm | 40 un | R$ 12,90 |
+| 40 mm | 24 un | R$ 12,90 |
+| 50 mm | 15 un | R$ 12,90 |
+| 60 mm | 8 un | R$ 12,90 |
+
+> **Correção aplicada.** A primeira versão saiu a R$ 13,20 por cartela.
+> Foram dois arredondamentos para cima somados: eu arredondei a margem
+> real de 57,52% para 58% (+R$ 0,15) e ainda arredondei o preço unitário
+> de R$ 0,3262 para R$ 0,33, o que multiplicado por 40 adesivos deu mais
+> R$ 0,15. Corrigido ancorando na cartela: o preço unitário agora é
+> R$ 12,90 ÷ peças por folha, sem arredondar para cima.
 
 ## Margem conferida
 
