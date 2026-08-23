@@ -57,6 +57,13 @@ const TABELAS = [
   { nome: "product_materials", desc: "receita dos produtos", opcional: true },
   { nome: "product_finishings", desc: "acabamentos dos produtos", opcional: true },
   { nome: "product_price_tiers", desc: "faixas de preço por quantidade" },
+  /* A base de exemplo (4 clientes, 4 orçamentos, 4 pedidos) vai junto:
+     é pequena, mostra o sistema funcionando e o dono apaga em quatro
+     cliques quando começar a usar de verdade. */
+  { nome: "customers", desc: "clientes de exemplo" },
+  { nome: "quotes", desc: "orçamentos de exemplo" },
+  { nome: "quote_items", desc: "itens dos orçamentos" },
+  { nome: "orders", desc: "pedidos de exemplo" },
   { nome: "message_templates", desc: "modelos de mensagem", opcional: true },
   { nome: "commemorative_dates", desc: "calendário comercial", opcional: true },
 ];
@@ -71,6 +78,7 @@ const LIMPAR = [
   "stock_movements", "purchase_items", "purchases",
   "crm_activities", "crm_leads",
   "registration_links",
+  "customers",
   "product_price_tiers", "product_finishings", "product_materials", "products",
   "printer_consumables", "print_formats", "printers", "printer_categories",
   "pricing_tables", "finishings", "services",
@@ -114,8 +122,8 @@ partes.push(`-- ================================================================
 -- Carrega a CONFIGURAÇÃO do sistema: painel, categorias, parque
 -- gráfico, materiais conferidos e produtos com preço.
 --
--- APAGA todo o movimento existente no destino (orçamentos, pedidos,
--- vendas, financeiro, estoque). Não apaga CLIENTES.
+-- APAGA TUDO no destino: movimento e clientes. Deixa a base de
+-- exemplo (4 clientes, 4 orçamentos, 4 pedidos).
 --
 -- Rode sempre pelo instalar-base-curada.sh, que faz backup antes.
 -- ==================================================================
