@@ -19,6 +19,37 @@ descontando 10 mm de margem para as marcas de registro da Cameo e 2 mm
 de respiro entre peças, cabem 6 colunas × 11 linhas. O layout usa 10
 linhas — sobra folga, o que é correto para leitura das marcas.
 
+## De onde vem o custo de R$ 5,48
+
+Esta é a parte que não ficou clara. Vamos por partes.
+
+**O sistema usa 2 folhas para entregar 1 cartela:**
+
+- 1 folha — a cartela em si
+- 1 folha — refugo de 5%, arredondado para cima (não existe meia folha
+  de refugo)
+
+**O que cada folha carrega:**
+
+| Item | Por folha | × 2 folhas |
+|---|---:|---:|
+| Vinil Adespan A4 | R$ 1,88 | R$ 3,76 |
+| Impressão na Konica | R$ 0,72 | R$ 1,43 |
+| Recorte na Cameo (fixo do lote, não por folha) | — | R$ 0,29 |
+| | | **R$ 5,48** |
+
+**Do custo ao preço**, com margem de 40%:
+
+    R$ 5,48 ÷ (1 − 0,40) = R$ 5,48 ÷ 0,60 = R$ 9,14
+    arredondado para R$ 0,10 → R$ 9,20
+
+Note que **não é** "custo + 40%" (isso daria R$ 7,67). É **divisão**,
+porque a margem é sobre o preço de venda, não sobre o custo — é assim
+que o motor calcula em todo o sistema.
+
+> O peso está no material: **o vinil sozinho é 69% do custo**. Em uma
+> cartela, R$ 3,76 dos R$ 5,48.
+
 ## Comparação com o preço praticado
 
 Preço do dono hoje: **R$ 12,90 por cartela**, qualquer quantidade.
@@ -98,3 +129,49 @@ mecânico, que é o comportamento certo.
 O preço do vinil A4 (R$ 1,88) veio da contagem de estoque e é o item
 mais pesado do custo: **69% do custo direto**. Vale conferir se é o
 preço atual de compra.
+
+
+---
+
+# Tabela de preços por faixa — implantada
+
+Cadastrada em `product_price_tiers` para o produto #355.
+
+**A régua adotada: manter o seu preço de R$ 12,90 na avulsa e dar
+desconto por volume.** Não faz sentido derrubar um preço que já está
+saudável — o objetivo é ter resposta para quem pede quantidade.
+
+| A partir de | Preço unitário | Total | Custo | Margem | Desconto |
+|---:|---:|---:|---:|---:|---:|
+| 1 | R$ 12,90 | R$ 12,90 | R$ 5,48 | 58% | — |
+| 5 | R$ 11,60 | R$ 58,00 | R$ 15,86 | 73% | 10% |
+| 10 | R$ 10,30 | R$ 103,00 | R$ 28,84 | 72% | 20% |
+| 25 | R$ 9,00 | R$ 225,00 | R$ 70,37 | 69% | 30% |
+| 50 | R$ 7,70 | R$ 385,00 | R$ 137,86 | 64% | 40% |
+
+**A margem nunca cai abaixo de 64%** mesmo no maior desconto — porque o
+custo por cartela também cai com o volume (o recorte é custo fixo do
+lote e o refugo se dilui).
+
+## Funcionamento verificado
+
+A faixa aplicada é sempre a **maior cujo mínimo a quantidade alcança**:
+
+| Pediu | Paga | Faixa |
+|---:|---:|---|
+| 3 | R$ 12,90 | 1+ |
+| 9 | R$ 11,60 | 5+ |
+| 24 | R$ 10,30 | 10+ |
+| 49 | R$ 9,00 | 25+ |
+| 120 | R$ 7,70 | 50+ |
+
+O orçamento e o PDV já leem essas faixas sozinhos — não é preciso o
+vendedor lembrar do desconto. E quando alguém digita um preço fora da
+tabela, o orçamento **avisa** informando qual faixa deveria valer, sem
+bloquear (o vendedor continua podendo decidir).
+
+## Como mexer nas faixas
+
+Produtos → abrir o produto → seção de faixas de preço. Dá para mudar
+quantidade, preço e o rótulo que aparece no orçamento. Nada disso está
+no código.
