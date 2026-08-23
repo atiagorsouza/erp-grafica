@@ -1875,8 +1875,16 @@ async function main() {
     await criarPedido(`ZZ-CANCEL-${stamp}`, "cancelado",
       [{ productId: prodId, quantity: 1, unitPrice: 200, total: 200 }], 200);
 
-    const hoje = new Date().toISOString().slice(0, 10);
-    const ext = await req(`/api/crud/sellers?extrato=${vendedorId}&de=${hoje}&ate=${hoje}`);
+    /* O extrato filtra pelo dia em São Paulo, mas o container roda em
+       UTC: entre 21h e meia-noite os dois calendários discordam, e o
+       pedido criado agora cairia "ontem" para o extrato. Pedir a data
+       ao BANCO — a mesma fonte que o extrato usa — em vez de calcular
+       aqui. Uma janela de um dia para trás cobre a virada. */
+    const [{ hoje_sp: hoje, ontem_sp: ontem }] = await sql(
+      `SELECT (now() AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo')::date::text AS hoje_sp,
+              ((now() AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo')::date - 1)::text AS ontem_sp`
+    );
+    const ext = await req(`/api/crud/sellers?extrato=${vendedorId}&de=${ontem}&ate=${hoje}`);
 
     assert(ext.extrato.linhas.length === 1,
       `só pedido fechado entra na comissão (${ext.extrato.linhas.length} de 3)`);
@@ -1893,7 +1901,7 @@ async function main() {
     await criarPedido(`ZZ-AVULSO-${stamp}`, "concluido",
       [{ productId: null, quantity: 1, unitPrice: 100, total: 100, description: "avulso" }], 100);
 
-    const ext2 = await req(`/api/crud/sellers?extrato=${vendedorId}&de=${hoje}&ate=${hoje}`);
+    const ext2 = await req(`/api/crud/sellers?extrato=${vendedorId}&de=${ontem}&ate=${hoje}`);
     const avulso = ext2.extrato.linhas.find((l) => l.numero.startsWith("ZZ-AVULSO"));
     assert(!!avulso, "pedido com item avulso entra no extrato");
     assert(avulso.estimado === true, "linha sem produto é marcada como estimada");

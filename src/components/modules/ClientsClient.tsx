@@ -115,7 +115,7 @@ type PaginacaoClientes = {
   origem: string;
 };
 
-export function ClientsClient({ customers, leads, activities, quotes, orders, sales, registrationLinks = [], paginacao }: {
+export function ClientsClient({ customers, leads, activities, quotes, orders, sales, registrationLinks = [], paginacao, aniversariantes = [], cadastrosIncompletos = [] }: {
   customers: Row[];
   paginacao: PaginacaoClientes;
   leads: Row[];
@@ -126,6 +126,10 @@ export function ClientsClient({ customers, leads, activities, quotes, orders, sa
   /** Links de cadastro público vivos (v3.50.0). Opcional para não
       quebrar quem monta este componente em teste. */
   registrationLinks?: Row[];
+  /** Aniversariantes dos próximos 15 dias — só de quem já comprou. */
+  aniversariantes?: { id: number; nome: string; telefone: string | null; dia: number; mes: number; faltam: number; ltv: number; optOut: boolean }[];
+  /** Clientes que compraram mas têm cadastro pela metade. */
+  cadastrosIncompletos?: { id: number; nome: string; telefone: string | null; faltando: string[]; pedidos: number; ltv: number }[];
 }) {
   const router = useRouter();
   const refresh = () => router.refresh();
@@ -464,6 +468,116 @@ export function ClientsClient({ customers, leads, activities, quotes, orders, sa
           </>
         )}
       </div>
+
+      {/* ── ALERTAS DO CRM ──
+          A tela listava e filtrava, mas não sugeria nada. Saber que
+          existem 200 clientes não diz o que fazer com eles; estas duas
+          faixas viram trabalho concreto do dia.
+
+          Só aparecem quando há o que mostrar: bloco vazio permanente
+          vira ruído e o olho aprende a ignorar. */}
+      {tab === "carteira" && (aniversariantes.length > 0 || cadastrosIncompletos.length > 0) && (
+        <div className="mb-4 grid grid-cols-1 gap-3 lg:grid-cols-2">
+          {aniversariantes.length > 0 && (
+            <div className="rounded-xl border border-paper-200 bg-paper-50 p-3.5">
+              <p className="mb-0.5 flex items-center gap-1.5 text-[12.5px] font-bold text-ink-900">
+                🎂 Aniversários
+              </p>
+              <p className="mb-2.5 text-[11px] text-ink-500">
+                Clientes que já compraram. Um “parabéns” não é venda — é o
+                contato que faz lembrarem de você.
+              </p>
+              <div className="space-y-1.5">
+                {aniversariantes.slice(0, 5).map((a) => (
+                  <div
+                    key={a.id}
+                    className="flex items-center gap-2 rounded-lg border border-paper-200 bg-white px-2.5 py-1.5"
+                  >
+                    <div className="min-w-0 grow">
+                      <p className="truncate text-[12px] font-semibold text-ink-900">{a.nome}</p>
+                      <p className="font-mono text-[10px] text-ink-400">
+                        {String(a.dia).padStart(2, "0")}/{String(a.mes).padStart(2, "0")}
+                        {" · "}já comprou {formatMoney(a.ltv)}
+                      </p>
+                    </div>
+                    <Badge tone={a.faltam === 0 ? "green" : "cyan"}>
+                      {a.faltam === 0 ? "hoje" : a.faltam === 1 ? "amanhã" : `em ${a.faltam}d`}
+                    </Badge>
+                    {a.optOut ? (
+                      <Badge tone="magenta">não aceita</Badge>
+                    ) : (
+                      <IconButton
+                        size="sm"
+                        name="whatsapp"
+                        label="Parabenizar no WhatsApp"
+                        onClick={() => {
+                          const primeiro = a.nome.trim().split(/\s+/)[0];
+                          const texto = `Oi, ${primeiro}! 🎉\n\nPassando para desejar um feliz aniversário! Muita saúde e sucesso.\n\nUm abraço da equipe VTDIGITAL.`;
+                          const fone = String(a.telefone || "").replace(/\D/g, "");
+                          window.open(
+                            fone
+                              ? `https://wa.me/55${fone}?text=${encodeURIComponent(texto)}`
+                              : `https://wa.me/?text=${encodeURIComponent(texto)}`,
+                            "_blank"
+                          );
+                        }}
+                      />
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {cadastrosIncompletos.length > 0 && (
+            <div className="rounded-xl border border-paper-200 bg-paper-50 p-3.5">
+              <p className="mb-0.5 flex items-center gap-1.5 text-[12.5px] font-bold text-ink-900">
+                📋 Cadastros pela metade
+              </p>
+              <p className="mb-2.5 text-[11px] text-ink-500">
+                Já compraram, mas falta dado. Sem e-mail não recebem orçamento;
+                sem CPF não saem documentos. Os que mais gastaram primeiro.
+              </p>
+              <div className="space-y-1.5">
+                {cadastrosIncompletos.slice(0, 5).map((c) => (
+                  <div
+                    key={c.id}
+                    className="flex items-center gap-2 rounded-lg border border-paper-200 bg-white px-2.5 py-1.5"
+                  >
+                    <div className="min-w-0 grow">
+                      <p className="truncate text-[12px] font-semibold text-ink-900">{c.nome}</p>
+                      <p className="truncate font-mono text-[10px] text-amber-700">
+                        falta {c.faltando.join(", ")}
+                      </p>
+                    </div>
+                    <span className="font-mono text-[11px] font-bold text-proc-c-strong tnum">
+                      {formatMoney(c.ltv)}
+                    </span>
+                    <IconButton
+                      size="sm"
+                      name="send"
+                      label="Pedir cadastro por WhatsApp"
+                      onClick={() => {
+                        /* O cliente pode não estar na página atual: a
+                           carteira é paginada. Se não achar, leva a
+                           busca até ele em vez de não fazer nada. */
+                        const alvo = customers.find((x) => Number(x.id) === c.id);
+                        if (alvo) setCadastroModal(alvo);
+                        else router.push(`/clientes?q=${encodeURIComponent(c.nome)}`);
+                      }}
+                    />
+                  </div>
+                ))}
+              </div>
+              {cadastrosIncompletos.length > 5 && (
+                <p className="mt-2 text-[11px] text-ink-400">
+                  e mais {cadastrosIncompletos.length - 5} com cadastro incompleto.
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ── CARTEIRA ── */}
       {tab === "carteira" && (

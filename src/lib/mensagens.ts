@@ -35,7 +35,7 @@ export interface DefinicaoMensagem {
   /** Variáveis aceitas, com explicação para a tela. */
   variaveis: { nome: string; descricao: string }[];
   /** Agrupamento na tela. */
-  grupo: "bot" | "cadastro" | "orcamento" | "rapidas" | "campanha";
+  grupo: "bot" | "cadastro" | "orcamento" | "pedido" | "rapidas" | "campanha";
   /** false = mensagem essencial, não pode ser desligada. */
   desligavel?: boolean;
 }
@@ -180,6 +180,52 @@ export const CATALOGO: DefinicaoMensagem[] = [
       "*Total: {total}*\n" +
       "_Válido até {validade}_\n\n" +
       "Qualquer dúvida é só chamar. Se aprovar, me avisa que já coloco na produção!\n\n" +
+      "— {empresa}",
+  },
+
+  /* ── Pedido ──────────────────────────────────────────────────────
+     O texto que vai ao cliente quando o pedido já existe. Não é a
+     ordem de produção: aquilo é papel interno, cheio de status que
+     não dizem nada para quem comprou. Aqui vale o que ele quer saber
+     — o que pediu, quanto é, quando fica pronto. */
+  {
+    slug: "pedido.andamento",
+    titulo: "Andamento do pedido por WhatsApp",
+    quando: 'Você clica em "WhatsApp" na tela de Pedidos & OS.',
+    grupo: "pedido",
+    variaveis: [
+      VAR_NOME,
+      VAR_EMPRESA,
+      { nome: "numero", descricao: "Número do pedido (ex.: PED-2026-0042)" },
+      { nome: "situacao", descricao: "Em que pé está a produção, em português" },
+      { nome: "total", descricao: "Valor total (ex.: R$ 300,00)" },
+      { nome: "prazo", descricao: "Data prevista de entrega" },
+    ],
+    padrao:
+      "Oi, {nome}! 🙂\n\n" +
+      "Passando o andamento do seu pedido *{numero}*:\n\n" +
+      "*Situação:* {situacao}\n" +
+      "*Previsão de entrega:* {prazo}\n" +
+      "*Total:* {total}\n\n" +
+      "Qualquer dúvida é só chamar!\n\n" +
+      "— {empresa}",
+  },
+  {
+    slug: "pedido.pronto",
+    titulo: "Pedido pronto para retirada",
+    quando: 'Atalho na tela de Pedidos, quando o trabalho fica pronto.',
+    grupo: "pedido",
+    variaveis: [
+      VAR_NOME,
+      VAR_EMPRESA,
+      { nome: "numero", descricao: "Número do pedido" },
+      { nome: "total", descricao: "Valor total" },
+    ],
+    padrao:
+      "Boa notícia, {nome}! ✅\n\n" +
+      "Seu pedido *{numero}* está pronto.\n\n" +
+      "Pode retirar de segunda a sexta das 9h às 18h, ou sábado até as 13h, " +
+      "na Rua Araquém, 910 — Bangu.\n\n" +
       "— {empresa}",
   },
 
