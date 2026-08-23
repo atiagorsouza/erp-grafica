@@ -38,6 +38,17 @@ base original simplesmente não entra na conta porque não é comprada.
 Efeito no custo: a base caiu de R$ 0,24 para **R$ 0,084** por folha —
 quase um terço.
 
+### A base A4 fica cadastrada, mas desligada
+
+A base original 12x12" está no sistema como
+**"Base de corte A4/12x12 (reserva)"**, com **rendimento 0** — e
+rendimento 0 significa **fora do cálculo**. Ela não altera o custo hoje,
+mas está pronta caso o dono volte a usá-la.
+
+Para ligar, **sem programação**: Impressoras & Tintas → Recorte /
+Plotter → editar o consumível → preencher o rendimento (ex.: 500
+ciclos) e zerar o da base A3.
+
 ### Se trocar pela base eletrostática
 
 A eletrostática não usa cola, então o custo de base sairia da conta.
