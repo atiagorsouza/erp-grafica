@@ -1,4 +1,6 @@
-# Adesivos redondos — aproveitamento e preço
+# Adesivos recortados — aproveitamento e preço
+
+Redondos e quadrados, 30/40/50/60 mm.
 
 Derivado da arte que o dono enviou (cartela 40×15 mm). As medidas de
 espaçamento **não foram estimadas**: foram medidas na imagem.
@@ -20,17 +22,22 @@ régua (3,325 px/mm):
 reproduz exatamente 6 × 10 = 60 — o mesmo da sua cartela. Com margem
 teórica de 10 mm daria 66, que é o erro que se comete no chute.
 
-## Aproveitamento dos redondos
+## Aproveitamento
 
 Mesmo respiro (2,5 mm) e mesmas margens. Um círculo ocupa o quadrado do
 seu diâmetro, então o cálculo é o do quadrado.
 
-| Diâmetro | Retrato | Paisagem | **Por folha** | Orientação |
+| Tamanho | Retrato | Paisagem | **Por folha** | Orientação |
 |---|---|---|---:|---|
 | 30 mm | 5 × 8 = 40 | 7 × 5 = 35 | **40** | retrato |
 | 40 mm | 3 × 6 = 18 | 6 × 4 = 24 | **24** | paisagem |
 | 50 mm | 3 × 5 = 15 | 4 × 3 = 12 | **15** | retrato |
 | 60 mm | 2 × 4 = 8 | 4 × 2 = 8 | **8** | qualquer |
+
+**Redondo e quadrado rendem igual.** Um círculo de 30 mm ocupa a mesma
+caixa de 30 × 30 mm que o quadrado — o que muda é o caminho da lâmina,
+não o espaço na folha. Por isso os oito produtos compartilham a mesma
+tabela.
 
 > Repare que a orientação muda conforme o diâmetro. Vale conferir no
 > software da Cameo antes de rodar — girar a folha rende 33% a mais no
@@ -85,13 +92,16 @@ preço que o dono já pratica. O que muda é quantos adesivos vêm nela.
 
 ## Margem conferida
 
-**As 24 faixas ficaram entre 58% e 71%.** Nenhuma abaixo dos 40%
+**As 54 faixas dos 9 produtos ficaram entre 57,5% e 70,1%.** Nenhuma abaixo dos 40%
 configurados. A margem sobe no meio da tabela porque o custo fixo do
 recorte se dilui, e volta a cair no atacado por causa do desconto.
 
 ## Produtos criados
 
-`ADES-R30` · `ADES-R40` · `ADES-R50` · `ADES-R60`
+**Redondos:** `ADES-R30` · `ADES-R40` · `ADES-R50` · `ADES-R60`
+**Quadrados:** `ADES-Q30` · `ADES-Q40` · `ADES-Q50` · `ADES-Q60`
+
+Mais o retangular original `ADES-4015` (40 × 15 mm, 60 por folha).
 
 Todos: vinil Adespan laser branco brilho, Konica + Cameo 5, venda por
 unidade, refugo 5%, prazo 2 dias.
