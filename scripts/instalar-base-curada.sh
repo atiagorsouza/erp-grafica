@@ -38,6 +38,16 @@ export PGHOST PGPORT PGUSER PGDATABASE
 
 BACKUP="$HOME/backup-antes-base-curada-$(date +%Y%m%d-%H%M%S).sql"
 
+# O pg_dump do sistema pode ser mais antigo que o servidor e recusar
+# o dump ("server version mismatch"). No aPanel o binário certo mora
+# junto do Postgres. Procurar ali primeiro.
+PGDUMP="pg_dump"
+for CAND in /www/server/pgsql/bin/pg_dump \
+            /usr/lib/postgresql/18/bin/pg_dump \
+            /usr/lib/postgresql/17/bin/pg_dump; do
+  [ -x "$CAND" ] && { PGDUMP="$CAND"; break; }
+done
+
 echo
 echo "  ┌──────────────────────────────────────────────────────┐"
 echo "  │  INSTALAR BASE CURADA                                │"
@@ -80,11 +90,10 @@ if [ -n "$FALTANDO" ]; then
   echo "    A carga não pode continuar: ela falharia no meio e deixaria"
   echo "    o sistema sem materiais e sem produtos."
   echo
-  echo "    Rode a migração primeiro, DENTRO da pasta do sistema:"
+  echo "    Aplique o schema primeiro (é um arquivo só, sem terminal"
+  echo "    interativo):"
   echo
-  echo "      cd /www/wwwroot/erp-grafica"
-  echo "      npx drizzle-kit push --force"
-  echo "      node scripts/migrar-banco.mjs --aplicar"
+  echo "      psql -U postgres -d app_db -f schema-update.sql"
   echo
   echo "    Depois rode este instalador de novo."
   echo
@@ -111,9 +120,9 @@ if [ "$RESP" != "CONFIRMO" ]; then
 fi
 
 echo
-echo "  → Backup completo em:"
+echo "  → Backup completo (usando $PGDUMP) em:"
 echo "    $BACKUP"
-pg_dump --no-owner --no-privileges > "$BACKUP"
+"$PGDUMP" --no-owner --no-privileges > "$BACKUP"
 echo "    $(du -h "$BACKUP" | cut -f1) gravados."
 
 echo
