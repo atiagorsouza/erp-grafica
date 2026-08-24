@@ -5,6 +5,30 @@ Versionamento: [SemVer](https://semver.org/lang/pt-BR/).
 
 ---
 
+## [3.68.2] — 2026-08-24
+
+Cartela na Consulta Rápida, incidente do update (backup obrigatório), pagamento com comprovante e URL pública automática.
+
+- **PEÇA 0 · Unidade de venda**: `products` ganha `sale_unit_label` e
+  `sale_unit_pieces` (aditivas); família `ADES-%` semeada como
+  "cartela"; bloco "Unidade de venda" no cadastro; a Consulta Rápida
+  mostra `por cartela · 60 un` e o texto copiado traz as unidades por
+  faixa — formato desenhado com o dono
+- **Incidente 2026-08-24** (`docs/INCIDENTE-2026-08-24.md`): update sem
+  backup restaurável agora **ABORTA** (`update.sh`); o instalador da
+  base curada **não apaga banco com backup não conferido**
+- **Pagamento**: `/pagamento/retorno` vira comprovante completo (valor
+  pago, PIX/cartão, parcelas, protocolo, comprovante); migração
+  preenche `app_base_url` com o túnel do dono (`app.vtdigital.site`)
+  quando vazio — InfiniteTag intocada. Guias novos:
+  `SETUP-INFINITEPAY.md`, `SETUP-CLOUDFLARE-TUNNEL.md`
+- **release.sh**: changelog mora em `docs/` — o caminho errado fazia o
+  commit do bump falhar calado e a tag nascer no commit anterior
+- **Smoke**: 303 → **308 checks** (5 novos de unidade de venda)
+- **Docs**: `ONDE-ESTAMOS.md` em dia (entradas 3.68.0/3.68.1/3.68.2);
+  LEIA-ME do pacote reescrito (o antigo instruía instalar base curada —
+  cenário exato do incidente)
+
 ## [3.68.0] — 2026-08-24
 
 Catálogo completo e ferramentas de atendimento.
