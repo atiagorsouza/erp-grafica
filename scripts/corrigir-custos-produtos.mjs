@@ -125,7 +125,8 @@ for (const p of prods) {
     calc += porPagina * pgs * fatorImp;
     for (const m of mats) calc += Number(m.unit_cost) * Number(m.quantity);
     for (const f of fins) calc += Number(f.unit_cost) * Number(f.quantity);
-    if (svc) calc += Number(svc.base_cost);
+    /* Serviço por FOLHA dividido entre as peças que ela rende. */
+    if (svc) calc += Number(svc.base_cost) / (Number(p.pieces_per_sheet) || 1);
   }
 
   const gravado = Number(p.cost_snapshot || 0);

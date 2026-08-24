@@ -114,7 +114,16 @@ for (const p of prods) {
     if (ti) { calc += ti; partes.push(`impressão ${ti.toFixed(4)}`); }
     for (const m of mats) { const v = Number(m.unit_cost) * Number(m.quantity); calc += v; partes.push(`${m.name.slice(0, 18)} ${v.toFixed(2)}`); }
     for (const f of fins) { const v = Number(f.unit_cost) * Number(f.quantity); calc += v; partes.push(`${f.name.slice(0, 18)} ${v.toFixed(2)}`); }
-    if (svc) { const v = Number(svc.base_cost); calc += v; partes.push(`${svc.name.slice(0, 18)} ${v.toFixed(2)}`); }
+    if (svc) {
+      /* Serviço cobrado por FOLHA, não por peça. Quando a folha rende
+         várias peças (10 cartões numa A4), o recorte se divide entre
+         elas — senão cada cartão carregaria o recorte da folha
+         inteira e o custo sairia dez vezes maior. */
+      const pecas = Number(p.pieces_per_sheet) || 1;
+      const v = Number(svc.base_cost) / pecas;
+      calc += v;
+      partes.push(`${svc.name.slice(0, 18)} ${v.toFixed(4)}${pecas > 1 ? `/${pecas}` : ""}`);
+    }
   }
 
   const gravado = Number(p.cost_snapshot || 0);
