@@ -122,7 +122,25 @@ fi
 echo
 echo "  → Backup completo (usando $PGDUMP) em:"
 echo "    $BACKUP"
-"$PGDUMP" --no-owner --no-privileges > "$BACKUP"
+# ── REGRA DO INCIDENTE 2026-08-24 ──────────────────────────────────
+# NÃO se apaga banco com backup não conferido. O pg_dump pode falhar
+# com binário mais antigo que o servidor (visto no aPanel) e entregar
+# arquivo vazio ou de erro — que não restaura nada. O arquivo tem que
+# NASCER BEM antes do primeiro DELETE rodar.
+if ! "$PGDUMP" --no-owner --no-privileges > "$BACKUP" 2>"$HOME/.base-curada-pgdump.err"; then
+  echo
+  echo "  ✖ pg_dump FALHOU — NADA foi apagado, NADA foi carregado."
+  echo "    O erro está em: $HOME/.base-curada-pgdump.err"
+  echo "    (costuma ser versão do pg_dump mais antiga que o servidor)"
+  exit 1
+fi
+if ! grep -qiE "^(copy public\.(customers|products)|insert into (public\.)?(customers|products))" "$BACKUP" 2>/dev/null; then
+  echo
+  echo "  ✖ Backup não parece um dump completo (falta a tabela customers)."
+  echo "    NADA foi apagado. Confira o arquivo antes de tentar de novo:"
+  echo "      less $BACKUP"
+  exit 1
+fi
 echo "    $(du -h "$BACKUP" | cut -f1) gravados."
 
 echo
