@@ -1,6 +1,6 @@
 -- ==================================================================
 -- ATUALIZAÇÃO DE SCHEMA — VTDIGITAL
--- Gerado em 2026-08-23T09:23:38.685Z
+-- Gerado em 2026-08-24T00:49:18.223Z
 --
 -- Cria o que falta. Não apaga nada, não altera tipo de coluna.
 -- Pode rodar mais de uma vez sem problema.

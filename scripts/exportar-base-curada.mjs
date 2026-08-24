@@ -50,8 +50,23 @@ const TABELAS = [
   },
   {
     nome: "materials",
-    desc: "materiais (só a contagem real)",
-    filtro: `notes like 'Contagem do dono%' or name like '%recorte 30cm%'`,
+    desc: "materiais (só os reais)",
+    /* Vale tudo que o dono cadastrou de verdade: a contagem da
+       planilha, a lâmina de recorte e os espirais da Espirario. O que
+       precisa ficar de fora é o lixo do teste automático, que sempre
+       começa com E2E/ZZ/SMOKE/TESTE. Filtrar por "Contagem do dono"
+       era estreito demais: deixou os 18 espirais fora do pacote. */
+    filtro: `name !~ '^(ZZ|E2E|SMOKE|TESTE)'`,
+  },
+  /* Acabamentos: laminação, corte, plastificação e as 11 linhas de
+     encadernação. Estavam FORA da exportação — o servidor do dono
+     nunca recebeu nenhum acabamento, e o orçamento lá não tinha o que
+     oferecer. Filtro tira o lixo de teste; arquivados também ficam de
+     fora. */
+  {
+    nome: "finishing_items",
+    desc: "acabamentos",
+    filtro: `name !~ '^(ZZ|E2E|SMOKE|TESTE)' and archived_at is null`,
   },
   { nome: "products", desc: "produtos" },
   { nome: "product_materials", desc: "receita dos produtos", opcional: true },

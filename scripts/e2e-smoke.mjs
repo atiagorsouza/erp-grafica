@@ -2185,7 +2185,43 @@ async function main() {
          AND NOT EXISTS (SELECT 1 FROM materials mm WHERE mm.supplier_id = suppliers.id)`
     );
 
-    const total = (p.rowCount || 0) + (m.rowCount || 0) + (co.rowCount || 0) + (f.rowCount || 0);
+    /* CLIENTES: o teste cria "E2E Cliente" e "E2E Publico" (este pelo
+       cadastro público do portal) e nunca apagava nenhum dos dois.
+       Quatro execuções deixavam quatro clientes falsos no cadastro —
+       e eles entravam na base curada que vai para o servidor.
+
+       Tudo que pendura no cliente sai antes, senão a chave
+       estrangeira barra. */
+    const clientesLixo = `SELECT id FROM customers WHERE name LIKE 'E2E %'`;
+    for (const [tabela, coluna] of [
+      ["crm_activities", "lead_id"],
+      ["crm_leads", "customer_id"],
+      ["transactions", "customer_id"],
+      ["deliveries", "order_id"],
+      ["quote_items", "quote_id"],
+    ]) {
+      const alvo =
+        coluna === "order_id"
+          ? `SELECT id FROM orders WHERE customer_id IN (${clientesLixo})`
+          : coluna === "quote_id"
+            ? `SELECT id FROM quotes WHERE customer_id IN (${clientesLixo})`
+            : coluna === "lead_id"
+              ? `SELECT id FROM crm_leads WHERE customer_id IN (${clientesLixo})`
+              : clientesLixo;
+      await pool
+        .query(`DELETE FROM ${tabela} WHERE ${coluna} IN (${alvo})`)
+        .catch(() => {});
+    }
+    for (const t of ["sales", "orders", "quotes"]) {
+      await pool
+        .query(`DELETE FROM ${t} WHERE customer_id IN (${clientesLixo})`)
+        .catch(() => {});
+    }
+    const cl = await pool.query(`DELETE FROM customers WHERE name LIKE 'E2E %'`);
+
+    const total =
+      (p.rowCount || 0) + (m.rowCount || 0) + (co.rowCount || 0) +
+      (f.rowCount || 0) + (cl.rowCount || 0);
     if (total) console.log(`🧹 limpeza: ${total} registro(s) e ${r.rowCount || 0} movimento(s) de teste removidos`);
   } catch (e) {
     console.warn("⚠ não consegui limpar os dados de teste:", e.message);
