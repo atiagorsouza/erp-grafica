@@ -688,6 +688,16 @@ export function ProductsClient({
                     <Field label="Vias / cópias">
                       <Input mono value={form.copies || ""} onChange={set("copies")} />
                     </Field>
+                    {/* Produto fracionado: 4 panfletos numa A4, 10 cartões,
+                        9 polaroids. O clique da folha se divide por este
+                        número — sem ele, cada peça carrega a impressão da
+                        folha inteira. */}
+                    <Field
+                      label="Peças por folha"
+                      hint="quantas saem de uma folha — 1 se o produto ocupa a folha toda"
+                    >
+                      <Input mono value={form.piecesPerSheet || ""} onChange={set("piecesPerSheet")} />
+                    </Field>
                     {num(printer?.hourlyRate, 0) > 0 && (
                       <Field
                         label="Minutos de máquina"
