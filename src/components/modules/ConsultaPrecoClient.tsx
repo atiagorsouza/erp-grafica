@@ -55,19 +55,30 @@ function textoWhatsApp(p: ProdutoConsulta) {
   const sufixo = sufixoUnidade(p);
   const linhas: string[] = [`*${p.nome}*`];
 
+  /* Formato pedido pelo dono (PEÇA 0, ajuste 2): cada faixa mostra
+     quantas UNIDADES o cliente leva — o cliente pensa em adesivos,
+     não em cartelas. "2 — R$ 11,75 cada (R$ 23,50) (120 unidades)". */
+  const unidadesDaFaixa = (qtdFaixa: number) => {
+    const total = qtdFaixa * (p.unidadeQtd || 0);
+    return ` (${qtd(total)} ${total === 1 ? "unidade" : "unidades"})`;
+  };
+
   if (p.faixas.length > 1) {
-    /* Com unidade de venda, o cabeçalho já diz "por cartela" — repetir
-       "un" em cada linha devolveria a ambiguidade que a PEÇA 0 tirou. */
-    if (sufixo) linhas.push(`${sufixo.charAt(0).toUpperCase()}${sufixo.slice(1)}:`);
+    const porLinha = !!sufixo && !!p.unidadeQtd;
+    /* Sem quantidade interna (ex.: só "cento"), o cabeçalho diz a
+       unidade; com quantidade, a própria linha já informa. */
+    if (sufixo && !porLinha) linhas.push(`${sufixo.charAt(0).toUpperCase()}${sufixo.slice(1)}:`);
     for (const f of p.faixas) {
       const total = f.preco * f.qtd;
       // Em faixa de quantidade, o cliente quer saber o total do pacote.
       if (f.qtd === 1) {
-        linhas.push(sufixo ? `1 — ${brl(f.preco)}` : `1 un — ${brl(f.preco)}`);
+        linhas.push(
+          porLinha ? `1 — ${brl(f.preco)}  ${unidadesDaFaixa(1).trim()}` : `1 un — ${brl(f.preco)}`
+        );
       } else {
         linhas.push(
-          sufixo
-            ? `${qtd(f.qtd)} — ${brl(f.preco)} cada  (${brl(total)})`
+          porLinha
+            ? `${qtd(f.qtd)} — ${brl(f.preco)} cada  (${brl(total)})${unidadesDaFaixa(f.qtd)}`
             : `${qtd(f.qtd)} un — ${brl(f.preco)} cada  (${brl(total)})`
         );
       }
