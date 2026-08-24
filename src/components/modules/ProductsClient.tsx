@@ -162,6 +162,9 @@ export function ProductsClient({
       format,
       colorMode,
       pagesPerUnit: num(form.pagesPerUnit, 1),
+      /* Produto fracionado: o clique da folha se divide entre as
+         peças que ela rende (4 panfletos numa A4, 10 cartões...). */
+      piecesPerSheet: num(form.piecesPerSheet, 1),
       copies: num(form.copies, 1),
       machineMinutes: num(form.machineMinutes, 0),
       baseMaterial,

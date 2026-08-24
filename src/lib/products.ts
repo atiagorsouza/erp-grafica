@@ -218,6 +218,8 @@ async function buildCalculation(data: ProductPayload) {
     format,
     colorMode: data.colorMode as ColorMode,
     pagesPerUnit: data.pagesPerUnit,
+    /* Produto fracionado: o clique se divide entre as peças da folha. */
+    piecesPerSheet: data.piecesPerSheet,
     copies: data.copies,
     machineMinutes: data.machineMinutes,
     baseMaterial,
