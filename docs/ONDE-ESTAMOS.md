@@ -24,9 +24,9 @@ instalar. Acabei de gerar, está em `release/`.
 
 | | |
 |---|---|
-| **Versão no ar** | **3.68.2** — cartela, incidente do update e comprovante de pagamento |
+| **Versão no ar** | **3.68.3** — 3D: filamento é material, não insumo de impressora |
 | Rodando em | servidor da gráfica (túnel `app.vtdigital.site`) · banco recuperado do incidente |
-| Testes | `e2e:smoke` **308 ✔** (303 + 5 da unidade de venda) · build ✔ · typecheck ✔ |
+| Testes | `e2e:smoke` **308 ✔** (303 + 5 da unidade de venda) · typecheck ✔ · migração 3D testada ao vivo (grama, kg e idempotente) |
 | Lint | 11 problemas (baseline de sempre, nada novo) |
 | Pacote | `update-3.68.2/` · `printflow-erp-v3.68.2.tar.gz` — `bash scripts/deploy-auto.sh <caminho-do-pacote>` (SEMPRE com caminho) |
 
