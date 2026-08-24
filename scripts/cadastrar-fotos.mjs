@@ -86,12 +86,13 @@ const PRODUTOS = [
       "Impressão jato de tinta Epson L18050, alta resolução.",
   },
   {
-    sku: "FOTO-POLA-8",
-    name: "Fotos Polaroid — kit com 8",
+    sku: "FOTO-POLA-9",
+    name: "Fotos Polaroid 5x8,5cm — kit com 9",
     papel: "BA-1049",
     formato: FMT_A4_FOTO,
-    porFolha: 4, // 4 polaroids por folha A4
-    kit: 8, // vendido de 8 em 8 = 2 folhas
+    servico: 13, // recorte de contorno na Silhouette Cameo
+    porFolha: 9, // grade 3 x 3 numa folha A4
+    kit: 9, // uma folha rende o kit inteiro
     /* Preço POR KIT, não do lote: a faixa multiplica pela quantidade.
        2 kits a R$ 18,45 = R$ 36,90; 4 a R$ 17,45 = R$ 69,80. */
     faixas: [
@@ -100,9 +101,9 @@ const PRODUTOS = [
       [4, 17.45],
     ],
     descricao:
-      "Kit com 8 fotos estilo Polaroid (8,8 x 10,7 cm) em papel fotográfico " +
-      "Jojo RC Glossy Super Crystal Seda 260g. Impressão jato de tinta Epson L18050. " +
-      "Cabem 4 por folha A4 — o kit usa 2 folhas.",
+      "Kit com 9 fotos estilo Polaroid, 5 x 8,5 cm cada, em papel fotográfico " +
+      "Jojo RC Glossy Super Crystal Seda 260g. Impressão jato de tinta Epson L18050 " +
+      "e recorte na Silhouette Cameo. As 9 fotos saem de uma única folha A4, em grade 3 x 3.",
   },
 ];
 
@@ -176,7 +177,12 @@ for (const p of PRODUTOS) {
     : { area_factor: 2, ink_coverage: 1 }; // simulação antes de criar
 
   const impFolha = custoImpressao(fmt);
-  const custoFolha = impFolha + Number(mat.unit_cost);
+  /* Recorte na Cameo, quando o produto precisa: a polaroid sai
+     picotada da folha, não inteira. Cobrado por FOLHA, não por foto. */
+  const svc = p.servico
+    ? Number((await c.query(`select base_cost from services where id=$1`, [p.servico])).rows[0]?.base_cost || 0)
+    : 0;
+  const custoFolha = impFolha + Number(mat.unit_cost) + svc;
   const folhasPorKit = p.kit ? p.kit / p.porFolha : 1;
   const custo = custoFolha * folhasPorKit;
 
@@ -221,12 +227,14 @@ try {
         `update products set name=$2, description=$3, product_category_id=$4,
            printer_id=$5, printer_category_id=$6, print_format_id=$7, color_mode='color',
            base_material_id=$8, base_material_qty=$9, cost_snapshot=$10,
+           base_service_id=$12,
            sell_price=$11, final_price=$11, calculation_mode='unit',
            pieces_per_sheet=1, pages_per_unit=1, print_sides=1,
            min_order_qty=1, default_quantity=1, active=true, track_stock=false
          where id=$1`,
         [id, x.name, x.descricao, catFoto, EPSON, CAT_JATO, x.fmtId, x.matId,
-         (x.kit ? x.kit / x.porFolha : 1).toFixed(3), x.custo.toFixed(4), precoBase.toFixed(4)],
+         (x.kit ? x.kit / x.porFolha : 1).toFixed(3), x.custo.toFixed(4), precoBase.toFixed(4),
+         x.servico || null],
       );
       atualizados++;
     } else {
@@ -234,15 +242,16 @@ try {
         `insert into products
            (name, sku, description, product_category_id, printer_id, printer_category_id,
             print_format_id, color_mode, base_material_id, base_material_qty,
-            cost_snapshot, sell_price, final_price, calculation_mode, pieces_per_sheet,
+            cost_snapshot, sell_price, final_price, base_service_id, calculation_mode, pieces_per_sheet,
             pages_per_unit, print_sides, waste_percent, setup_sheets, min_order_qty,
             default_quantity, margin, active, track_stock, lead_time_creation,
             lead_time_production, lead_time_finishing, lead_time_serial, copies)
-         values ($1,$2,$3,$4,$5,$6,$7,'color',$8,$9,$10,$11,$11,'unit',1,1,1,0,0,1,1,0.4,
+         values ($1,$2,$3,$4,$5,$6,$7,'color',$8,$9,$10,$11,$11,$12,'unit',1,1,1,0,0,1,1,0.4,
                  true,false,0,1,0,false,1)
          returning id`,
         [x.name, x.sku, x.descricao, catFoto, EPSON, CAT_JATO, x.fmtId, x.matId,
-         (x.kit ? x.kit / x.porFolha : 1).toFixed(3), x.custo.toFixed(4), precoBase.toFixed(4)],
+         (x.kit ? x.kit / x.porFolha : 1).toFixed(3), x.custo.toFixed(4), precoBase.toFixed(4),
+         x.servico || null],
       );
       id = r.rows[0].id;
       criados++;
@@ -253,7 +262,7 @@ try {
       await c.query(
         `insert into product_price_tiers (product_id, min_quantity, unit_price, label)
          values ($1,$2,$3,$4)`,
-        [id, q, v, q === 1 ? (x.kit ? "1 kit" : "avulsa") : `a partir de ${q}`],
+        [id, q, v, q === 1 ? (x.kit ? `1 kit (${x.kit} fotos)` : "avulsa") : `a partir de ${q}${x.kit ? " kits" : ""}`],
       );
     }
   }
