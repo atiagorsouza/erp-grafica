@@ -91,6 +91,13 @@ const TABELAS = [
   { nome: "production_schedules", desc: "agendamentos de produção" },
   { nome: "message_templates", desc: "modelos de mensagem", opcional: true },
   { nome: "commemorative_dates", desc: "calendário comercial", opcional: true },
+  /* CONTADOR DE DOCUMENTOS — precisa vir junto (v3.68.1).
+     Sem esta tabela, a instalação do zero quebrava: a base leva 4
+     compras numeradas CMP-2026-0001..0004, mas o contador nascia
+     zerado e a primeira compra nova tentava gerar CMP-2026-0001 de
+     novo, batendo em purchases_number_unique (HTTP 500). O mesmo
+     valeria para orçamento, pedido e venda. */
+  { nome: "document_counters", desc: "contadores de numeração", opcional: true },
 ];
 
 /* Limpas no destino antes da carga. Da folha para a raiz. */
@@ -110,6 +117,7 @@ const LIMPAR = [
   "materials", "material_categories",
   "item_categories",
   "message_templates", "commemorative_dates",
+  "document_counters",
   "settings",
 ];
 

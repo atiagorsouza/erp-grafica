@@ -1,6 +1,6 @@
 -- ==================================================================
 -- BASE CURADA — VTDIGITAL
--- Gerado em 2026-08-24T05:46:04.137Z
+-- Gerado em 2026-08-24T06:05:41.922Z
 --
 -- Carrega a CONFIGURAÇÃO do sistema: painel, categorias, parque
 -- gráfico, materiais conferidos e produtos com preço.
@@ -43,6 +43,7 @@ delete from materials;
 delete from item_categories;
 delete from message_templates;
 delete from commemorative_dates;
+delete from document_counters;
 delete from settings;
 
 -- ── carga ──
@@ -954,6 +955,13 @@ insert into commemorative_dates ("id", "title", "date", "month", "day", "month_d
 insert into commemorative_dates ("id", "title", "date", "month", "day", "month_day", "type", "relevance", "icon", "action_hint", "category", "description", "active", "recurring", "created_at", "updated_at") values (88, 'Réveillon / Ano Novo', '2000-12-31T00:00:00.000Z', 12, 31, '12-31', 'data_comercial', 'alta', '🎉', 'Convites, cardápios, banners, material de festa', 'comercial', NULL, true, true, '2026-08-22T22:38:42.634Z', '2026-08-22T22:38:42.634Z');
 select setval(pg_get_serial_sequence('commemorative_dates','id'), coalesce((select max(id) from commemorative_dates), 1), true);
 
+-- contadores de numeração (4)
+insert into document_counters ("id", "document_type", "year", "current", "updated_at") values (1, 'quote', 2026, 4, '2026-08-24T05:44:10.820Z');
+insert into document_counters ("id", "document_type", "year", "current", "updated_at") values (2, 'order', 2026, 4, '2026-08-24T05:44:11.602Z');
+insert into document_counters ("id", "document_type", "year", "current", "updated_at") values (3, 'sale', 2026, 4, '2026-08-24T05:44:10.601Z');
+insert into document_counters ("id", "document_type", "year", "current", "updated_at") values (4, 'purchase', 2026, 4, '2026-08-24T05:44:11.164Z');
+select setval(pg_get_serial_sequence('document_counters','id'), coalesce((select max(id) from document_counters), 1), true);
+
 commit;
 
--- 799 registros carregados.
+-- 803 registros carregados.
