@@ -2156,7 +2156,36 @@ async function main() {
     );
     const p = await pool.query(`DELETE FROM products  WHERE name LIKE 'E2E %'`);
     const m = await pool.query(`DELETE FROM materials WHERE name LIKE 'E2E %'`);
-    const total = (p.rowCount || 0) + (m.rowCount || 0);
+
+    /* Faltavam COMPRAS e FORNECEDORES: cada execução criava um
+       "E2E Fornecedor <timestamp>" e duas compras, e nada disso era
+       apagado. Em um dia de trabalho viraram 46 fornecedores e 28
+       compras fantasma no cadastro do dono — o suficiente para
+       atrapalhar na hora de escolher fornecedor numa compra real.
+
+       As compras saem primeiro porque seguram o fornecedor pela
+       chave estrangeira. Também caem as compras que ficaram sem
+       fornecedor e sem observação, que são as criadas pelo próprio
+       teste. Compra de verdade tem fornecedor ou observação. */
+    if (await pool.query(`SELECT to_regclass('public.purchase_items') IS NOT NULL ok`).then((x) => x.rows[0].ok)) {
+      await pool.query(
+        `DELETE FROM purchase_items WHERE purchase_id IN (
+           SELECT id FROM purchases
+            WHERE supplier_id IN (SELECT id FROM suppliers WHERE name LIKE 'E2E Fornecedor %')
+               OR (supplier_id IS NULL AND COALESCE(notes,'') = ''))`
+      );
+    }
+    const co = await pool.query(
+      `DELETE FROM purchases
+        WHERE supplier_id IN (SELECT id FROM suppliers WHERE name LIKE 'E2E Fornecedor %')
+           OR (supplier_id IS NULL AND COALESCE(notes,'') = '')`
+    );
+    const f = await pool.query(
+      `DELETE FROM suppliers WHERE name LIKE 'E2E Fornecedor %'
+         AND NOT EXISTS (SELECT 1 FROM materials mm WHERE mm.supplier_id = suppliers.id)`
+    );
+
+    const total = (p.rowCount || 0) + (m.rowCount || 0) + (co.rowCount || 0) + (f.rowCount || 0);
     if (total) console.log(`🧹 limpeza: ${total} registro(s) e ${r.rowCount || 0} movimento(s) de teste removidos`);
   } catch (e) {
     console.warn("⚠ não consegui limpar os dados de teste:", e.message);
