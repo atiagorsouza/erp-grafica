@@ -1,3 +1,7 @@
+## [3.68.3] — 2026-08-24
+
+- 3D: filamento e material do estoque, impressora cobra so horas
+
 # Changelog — PrintFlow ERP
 
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).  
