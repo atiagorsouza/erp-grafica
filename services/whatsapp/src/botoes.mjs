@@ -34,6 +34,7 @@
    undefined, e o erro só aparece em execução (o fallback engoliria
    para sempre, mandando texto e nunca botão). */
 import { proto, generateWAMessageFromContent } from "baileys";
+import { enviarHumanizado } from "./humanizar.mjs";
 
 /** Tipos de botão que fazem sentido para uma gráfica. */
 export const TIPOS = {
@@ -159,7 +160,9 @@ export async function enviarComBotoes(sock, jid, { texto, rodape, titulo, botoes
   const lista = (botoes || []).filter(Boolean).slice(0, 3);
 
   if (!lista.length) {
-    await sock.sendMessage(jid, { text: texto });
+    await enviarHumanizado(sock, jid, texto, () =>
+      sock.sendMessage(jid, { text: texto })
+    );
     return { ok: true, modo: "texto" };
   }
 
@@ -172,7 +175,10 @@ export async function enviarComBotoes(sock, jid, { texto, rodape, titulo, botoes
        o formato dela. */
     console.warn("[botoes] nativo falhou, mandando como texto:", e?.message || e);
     try {
-      await sock.sendMessage(jid, { text: comoTexto({ texto, rodape, botoes: lista }) });
+      const corpo = comoTexto({ texto, rodape, botoes: lista });
+      await enviarHumanizado(sock, jid, corpo, () =>
+        sock.sendMessage(jid, { text: corpo })
+      );
       return { ok: true, modo: "texto-fallback", erro: e?.message };
     } catch (e2) {
       return { ok: false, modo: "falhou", erro: e2?.message };

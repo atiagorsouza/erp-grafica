@@ -601,12 +601,30 @@ async function main() {
       body: JSON.stringify({ op: "create", data }),
     }).then(async (r) => ({ status: r.status, body: await r.json() }));
 
-  /* documento é obrigatório no cadastro completo, mas o balcão (F8) segue livre */
+  /* CPF é obrigatório em TODO cadastro — inclusive no balcão (v3.67.0).
+     A trava tem escape de boa-fé: quem não tem o documento na mão
+     escreve o motivo e a venda segue, com o motivo gravado na ficha. */
   const semDoc = await post({ name: "SMOKE CRM Sem Documento" });
   assert(semDoc.status === 422, "cadastro completo exige CPF/CNPJ");
 
   const rapido = await post({ name: "SMOKE CRM Balcao", quickEntry: true });
-  assert(rapido.status === 200, "cadastro rápido do PDV dispensa documento");
+  assert(rapido.status === 422, "cadastro rápido do PDV também exige CPF");
+
+  const dispensa = await post({
+    name: "SMOKE CRM Dispensa",
+    quickEntry: true,
+    documentWaiverReason: "cliente vai trazer o CPF depois",
+  });
+  assert(dispensa.status === 200, "motivo de dispensa libera o cadastro sem CPF");
+  assert(
+    dispensa.body?.row?.documentWaiverReason === "cliente vai trazer o CPF depois",
+    "motivo da dispensa fica gravado na ficha"
+  );
+  assert(!!dispensa.body?.row?.documentWaiverAt, "dispensa registra a data da decisão");
+
+  /* Motivo curto demais não vale como justificativa. */
+  const dispensaVazia = await post({ name: "SMOKE CRM Dispensa Ruim", quickEntry: true, documentWaiverReason: "x" });
+  assert(dispensaVazia.status === 422, "motivo vazio não dispensa o CPF");
 
   const docRuim = await post({ name: "SMOKE CRM Doc Ruim", document: "111.111.111-11" });
   assert(docRuim.status === 422, "CPF com dígito verificador inválido é recusado");
@@ -859,8 +877,15 @@ async function main() {
   assert(pSku.status === 409, "SKU duplicado é recusado");
   assert(String(pSku.body.error || "").includes("SKU"), "erro de SKU duplicado é específico");
 
+  /* 422 (guarda no lib, que diz QUAL produto já usa) ou 409 (rede de
+     segurança na rota, a partir do índice único do banco). Os dois
+     recusam; o 422 é o que dá o nome do produto ao operador. */
   const pBar = await prodPost({ ...base, name: "SMOKE PROD Barcode Repetido", barcode: `789${stamp}`.slice(0, 13) });
-  assert(pBar.status === 409, "código de barras duplicado é recusado");
+  assert(pBar.status === 422 || pBar.status === 409, `código de barras duplicado é recusado (${pBar.status})`);
+  assert(
+    /já está em|já existe/i.test(String(pBar.body.error || "")),
+    `o erro de código repetido é legível (${pBar.body.error})`
+  );
   assert(
     !String(pBar.body.error || "").toLowerCase().includes("insert into"),
     "erro de produto duplicado não vaza SQL"
@@ -1223,6 +1248,25 @@ async function main() {
     );
     const pzId = Number(pz.id);
 
+    /* O corte é CONFIGURÁVEL pelo painel, e os checks abaixo têm o
+       valor 17:00 embutido nas contas. Ler o que estiver no banco
+       transforma uma mudança legítima do dono em teste vermelho:
+       aconteceu de verdade quando o corte virou 15:00 e o resultado
+       (2026-08-21) coincidiu com o "hoje" da máquina, o que levou a
+       um diagnóstico errado de fuso horário.
+
+       Então: fixa 17:00 aqui, mede, e devolve o valor do dono no
+       fim. O que está sob teste é a REGRA do corte, não a preferência
+       comercial de quem usa. */
+    const [corteAntes] = await sql(
+      "select value from settings where key='prazo_horario_corte'"
+    );
+    const corteOriginal = corteAntes?.value ?? null;
+    await sql(
+      `insert into settings (key,value,category) values ('prazo_horario_corte','17:00','prazo')
+       on conflict (key) do update set value=excluded.value`
+    );
+
     /* Quarta-feira 19/08/2026. Antes das 17h a produção começa hoje e
        entrega quinta; depois das 17h escorrega para sexta. */
     const antes = await prazo("2026-08-19T16:30:00", pzId);
@@ -1252,6 +1296,24 @@ async function main() {
     assert(
       proSabado.data === "2026-08-21" && proSabado.retiradaSabado === "2026-08-22",
       `pronto na sexta oferece retirada no sábado (${proSabado.retiradaSabado})`
+    );
+
+    /* Devolve o corte do dono. Um teste que muda configuração e não
+       restaura é pior que teste nenhum: silenciosamente reescreve a
+       operação de quem usa o sistema. */
+    if (corteOriginal === null) {
+      await sql("delete from settings where key='prazo_horario_corte'");
+    } else {
+      await sql("update settings set value=$1 where key='prazo_horario_corte'", [
+        corteOriginal,
+      ]);
+    }
+    const [corteDepois] = await sql(
+      "select value from settings where key='prazo_horario_corte'"
+    );
+    assert(
+      (corteDepois?.value ?? null) === corteOriginal,
+      `horário de corte do painel foi devolvido intacto (${corteDepois?.value ?? "removido"})`
     );
 
     await sql("DELETE FROM products WHERE id=$1", [pzId]);
@@ -1447,6 +1509,444 @@ async function main() {
       if (v === null) await sql("delete from settings where key=$1", [k]);
       else await sql("update settings set value=$2 where key=$1", [k, v]);
     }
+  }
+
+  // 11.7-bis) Segredos não saem em texto puro (auditoria v3.62.0)
+  //
+  // GET /api/crud/settings devolvia TODOS os valores sem máscara — só
+  // as logos eram protegidas. Assim que o dono preenchesse o token do
+  // SuperFrete (ou a senha de SMTP), a credencial passaria a ser
+  // devolvida a quem abrisse o endereço.
+  {
+    const [antes] = await sql("select value from settings where key='superfrete_token'");
+    const original = antes ? antes.value : null;
+
+    await sql(
+      "insert into settings (key,value,category) values ('superfrete_token',$1,'integracao') " +
+      "on conflict (key) do update set value=excluded.value",
+      ["SEGREDO-DE-TESTE-abc123"]
+    );
+
+    const painel = await req("/api/crud/settings");
+    const token = painel.rows.find((r) => r.key === "superfrete_token");
+    assert(token && token.value === "__SET__",
+      "token de integração é mascarado no painel");
+
+    // A chave PIX é pública (sai no cupom): não pode ser mascarada.
+    const pix = painel.rows.find((r) => r.key === "pix_key");
+    assert(!pix || pix.value !== "__SET__",
+      "chave PIX continua visível (é pública, sai no cupom)");
+
+    // Devolver o marcador não pode apagar o segredo guardado.
+    const eco = await fetch(`${BASE_URL}/api/crud/settings`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ op: "save", data: { key: "superfrete_token", value: "__SET__", category: "integracao" } }),
+    });
+    assert(eco.status === 422, "reenviar __SET__ num segredo é recusado (422)");
+    const [depois] = await sql("select value from settings where key='superfrete_token'");
+    assert(depois.value === "SEGREDO-DE-TESTE-abc123",
+      "o segredo continua intacto depois da tentativa");
+
+    if (original === null) await sql("delete from settings where key='superfrete_token'");
+    else await sql("update settings set value=$1 where key='superfrete_token'", [original]);
+  }
+
+  // 11.7-ter) Entradas inválidas viram 400, não 500 (auditoria v3.62.0)
+  //
+  // IDs do banco são integer de 4 bytes (teto 2.147.483.647).
+  // `Number.isFinite` aceitava 999999999999, o valor chegava ao Postgres
+  // e estourava lá: o operador via "erro interno" no que era só um id
+  // inválido, e o log de produção enchia de ruído.
+  {
+    for (const rota of ["customers", "orders", "quotes", "products", "transactions", "sales"]) {
+      const r = await fetch(`${BASE_URL}/api/crud/${rota}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ op: "update", id: 999999999999, data: {} }),
+      });
+      assert(r.status === 400, `id acima do limite em /${rota} responde 400 (não 500)`);
+    }
+  }
+
+  // 11.7-quater) Estoque negativo é recusado no cadastro (auditoria v3.62.0)
+  //
+  // A API aceitava stock:-999 com 200 OK e gravava. Não existe CHECK
+  // constraint no banco, então a aplicação é a única defesa.
+  // Movimentação continua podendo deixar saldo negativo — ela ajusta
+  // por `stock + delta` e não passa por este schema.
+  {
+    const r = await fetch(`${BASE_URL}/api/crud/materials`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ op: "create", data: { name: "E2E Estoque Negativo", unit: "un", stock: -999 } }),
+    });
+    assert(r.status === 400, "estoque negativo no cadastro é recusado (400)");
+    const [achado] = await sql("select id from materials where name='E2E Estoque Negativo'");
+    assert(!achado, "material com estoque negativo não foi gravado");
+  }
+
+  // 11.7-quinquies) Orçamento por WhatsApp (v3.64.0)
+  //
+  // O orçamento só sabia imprimir. O texto sai do catálogo editável
+  // (Painel → Mensagens), não do código: a forma de falar com o cliente
+  // é do dono.
+  {
+    const [orc] = await sql(
+      "select q.id from quotes q join quote_items i on i.quote_id=q.id group by q.id limit 1"
+    );
+    if (orc) {
+      const r = await fetch(`${BASE_URL}/api/quotes/whatsapp`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ id: Number(orc.id) }),
+      });
+      assert(r.status === 200, "texto do orçamento para WhatsApp é montado");
+      const d = await r.json();
+      assert(typeof d.texto === "string" && d.texto.length > 20,
+        "o texto vem preenchido");
+      assert(!/\{\w+\}/.test(d.texto),
+        "nenhuma variável ficou por expandir no texto");
+      assert(d.texto.includes("R$"),
+        "o texto traz os valores em reais");
+
+      // Editar o padrão pelo Painel tem de mudar o que o cliente recebe.
+      await sql(
+        "insert into message_templates (slug, body, active) values ('orcamento.enviar',$1,true) " +
+        "on conflict (slug) do update set body=excluded.body",
+        ["TESTE-E2E {numero} total {total}"]
+      );
+      const r2 = await fetch(`${BASE_URL}/api/quotes/whatsapp`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ id: Number(orc.id) }),
+      });
+      const d2 = await r2.json();
+      assert(d2.texto.startsWith("TESTE-E2E"),
+        "texto editado no Painel é o que sai para o cliente");
+      await sql("delete from message_templates where slug='orcamento.enviar'");
+    }
+
+    const ruim = await fetch(`${BASE_URL}/api/quotes/whatsapp`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: 999999999999 }),
+    });
+    assert(ruim.status === 400, "id inválido no envio por WhatsApp responde 400");
+  }
+
+  // 11.7-sexies) Senha de e-mail e tokens não vazam (v3.65.0)
+  //
+  // A API já mascarava (v3.63.0), mas a PÁGINA /configuracoes é outro
+  // caminho: lê o banco direto e injeta no HTML. A senha aparecia em
+  // texto puro no código-fonte, mesmo com o campo em branco na tela.
+  // Duas listas precisam andar juntas — a da API e a da página.
+  {
+    const [antes] = await sql("select value from settings where key='smtp_password'");
+    const original = antes ? antes.value : null;
+    await sql(
+      "insert into settings (key,value,category) values ('smtp_password',$1,'email') " +
+      "on conflict (key) do update set value=excluded.value",
+      ["SenhaDeTesteE2E#123"]
+    );
+
+    const painel = await req("/api/crud/settings");
+    const campo = painel.rows.find((r) => r.key === "smtp_password");
+    assert(campo && campo.value === "__SET__", "senha de e-mail é mascarada na API");
+
+    const html = await (await fetch(`${BASE_URL}/configuracoes`)).text();
+    assert(!html.includes("SenhaDeTesteE2E#123"),
+      "senha de e-mail não aparece no HTML da página de configurações");
+
+    const eco = await fetch(`${BASE_URL}/api/crud/settings`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ op: "save", data: { key: "smtp_password", value: "__SET__", category: "email" } }),
+    });
+    assert(eco.status === 422, "reenviar __SET__ na senha é recusado (422)");
+    const [depois] = await sql("select value from settings where key='smtp_password'");
+    assert(depois.value === "SenhaDeTesteE2E#123", "a senha continua intacta");
+
+    if (original === null) await sql("delete from settings where key='smtp_password'");
+    else await sql("update settings set value=$1 where key='smtp_password'", [original]);
+  }
+
+  // 11.7-septies) Teste de e-mail dá erro em português (v3.65.0)
+  {
+    /* Este bloco mede UMA coisa: faltando o servidor de saída, o erro
+       sai em português. Para isso o resto precisa estar preenchido —
+       senão a rota reclama antes de outro campo vazio (foi o que
+       aconteceu num banco recém-criado: veio "Preencha o campo
+       Enviar teste para", que está correto, mas não é o que este
+       check mede). Monta o cenário inteiro em vez de depender do que
+       estiver no banco. */
+    const chavesMail = ["smtp_host", "smtp_test_to", "smtp_password"];
+    const mailAntes = new Map();
+    for (const k of chavesMail) {
+      const [r] = await sql("select value from settings where key=$1", [k]);
+      mailAntes.set(k, r?.value ?? null);
+    }
+    const cenario = {
+      smtp_host: "",
+      smtp_test_to: "smoke@vtdigital.local",
+      smtp_password: "SenhaDeTesteE2E#123",
+    };
+    for (const [k, v] of Object.entries(cenario)) {
+      await sql(
+        `insert into settings (key,value,category) values ($1,$2,'email')
+         on conflict (key) do update set value=excluded.value`,
+        [k, v]
+      );
+    }
+    const r = await fetch(`${BASE_URL}/api/email/testar`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    const d = await r.json();
+    assert(r.status === 422, "teste sem servidor configurado responde 422");
+    assert(/servidor/i.test(d.error || ""),
+      `a mensagem de erro do e-mail é legível em português (${d.error || "sem mensagem"})`);
+
+    for (const k of chavesMail) {
+      const v = mailAntes.get(k);
+      if (v === null) await sql("delete from settings where key=$1", [k]);
+      else await sql("update settings set value=$2 where key=$1", [k, v]);
+    }
+  }
+
+  // 11.7-octies) Código de barras no material (v3.66.0)
+  //
+  // O leitor só vale se o código for único: com dois materiais no mesmo
+  // código, bipar vira sorteio. E o campo tem que aceitar EAN-13 puro,
+  // sem máscara.
+  {
+    const cod = String(Date.now()).slice(-13).padStart(13, "7");
+    const criar = (nome, barcode) =>
+      fetch(`${BASE_URL}/api/crud/materials`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ op: "create", data: { name: nome, unit: "folha", barcode } }),
+      });
+
+    const r1 = await criar(`ZZ BARCODE ${stamp}`, cod);
+    const d1 = await r1.json();
+    assert(r1.ok && d1.row?.barcode === cod, `material salva o código de barras (${d1.row?.barcode})`);
+
+    /* O segundo material com o MESMO código tem que ser recusado, e a
+       mensagem precisa dizer qual material já usa — senão o operador
+       fica procurando às cegas. */
+    const r2 = await criar(`ZZ BARCODE DUP ${stamp}`, cod);
+    const d2 = await r2.json();
+    assert(r2.status === 422, `código de barras repetido é recusado (${r2.status})`);
+    assert(
+      /já está em/.test(String(d2.error || "")),
+      `o erro diz qual material já usa o código (${d2.error})`
+    );
+
+    /* Letra no meio não é código de barras — o leitor nunca manda isso,
+       mas a digitação manual manda. Aqui o 400 vem do schema (formato),
+       enquanto o duplicado acima dá 422 (regra de negócio): são erros
+       de natureza diferente e o sistema já os separa assim. */
+    const r3 = await criar(`ZZ BARCODE RUIM ${stamp}`, "78912ABC");
+    const d3 = await r3.json();
+    assert(r3.status === 400, `código de barras com letra é recusado (${r3.status})`);
+    assert(
+      /dígitos/.test(String(d3.error || "")),
+      `o erro explica o formato esperado (${d3.error})`
+    );
+
+    await sql("delete from materials where name like $1", [`ZZ BARCODE%${stamp}`]);
+  }
+
+  // 11.7-nonies) Validade do link de cadastro vem do painel (v3.66.0)
+  //
+  // Era constante no código: mudar exigia programador. O dono reclamou
+  // que 7 dias é pouco para quem manda orçamento na sexta.
+  {
+    const [antes] = await sql(
+      "select value from settings where key='cadastro_link_validade_dias'"
+    );
+    const original = antes?.value ?? null;
+
+    await sql(
+      `insert into settings (key,value,category) values ('cadastro_link_validade_dias','30','crm')
+       on conflict (key) do update set value='30'`
+    );
+
+    const r = await fetch(`${BASE_URL}/api/crm/registration-link`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ op: "criar", customerId }),
+    });
+    const d = await r.json();
+    assert(r.ok, "link de cadastro é criado com validade do painel");
+
+    /* 30 dias a partir de agora, com folga de 1 dia para não quebrar
+       por causa do relógio virando durante o teste. */
+    const dias = (new Date(d.link?.expiresAt).getTime() - Date.now()) / 86400000;
+    assert(
+      dias > 28.5 && dias < 30.5,
+      `o link passa a valer 30 dias quando o painel manda (${dias.toFixed(1)})`
+    );
+
+    if (original === null) {
+      await sql("delete from settings where key='cadastro_link_validade_dias'");
+    } else {
+      await sql("update settings set value=$1 where key='cadastro_link_validade_dias'", [original]);
+    }
+    await sql("delete from registration_links where customer_id=$1", [customerId]);
+  }
+
+  // 11.7-decies) Chat: lote de mensagens, ficha e respostas rápidas (v3.66.0)
+  //
+  // O chat trazia 200 mensagens de uma vez numa caixa de altura fixa:
+  // conversa de meses virava parede de texto sem fim. Agora vem um lote
+  // e a tela oferece "ver anteriores".
+  {
+    const fone = `5521${String(Date.now()).slice(-9)}`;
+    await sql(
+      `insert into whatsapp_conversas (phone_e164, customer_id, etapa)
+       values ($1,$2,'humano') on conflict (phone_e164) do nothing`,
+      [fone, customerId]
+    );
+    await sql(
+      `insert into whatsapp_mensagens (phone_e164, direcao, texto, criado_em)
+       select $1, case when i%2=0 then 'recebida' else 'enviada' end,
+              'smoke '||i, now() - ((80 - i)||' minutes')::interval
+         from generate_series(1,80) i`,
+      [fone]
+    );
+
+    const lote = await req(`/api/whatsapp-chat?fone=${fone}`);
+    assert(lote.mensagens.length === 30, `chat traz 30 mensagens por vez (${lote.mensagens.length})`);
+    assert(lote.total === 80, `o chat sabe quantas existem ao todo (${lote.total})`);
+    assert(lote.temAnteriores === true, "o chat avisa que há mensagens anteriores");
+
+    /* A última mensagem tem que estar no lote: quem abre a conversa
+       quer ver o fim dela, não o começo. */
+    const ultima = lote.mensagens[lote.mensagens.length - 1];
+    assert(ultima.texto === "smoke 80", `o lote termina na mensagem mais nova (${ultima.texto})`);
+
+    const maior = await req(`/api/whatsapp-chat?fone=${fone}&limite=80`);
+    assert(maior.mensagens.length === 80, `"ver anteriores" alcança o histórico todo (${maior.mensagens.length})`);
+    assert(maior.temAnteriores === false, "no fim do histórico o aviso some");
+
+    /* Ficha: é o que evita abrir outra aba no meio do atendimento. */
+    const f = await req(`/api/whatsapp-chat?ficha=${customerId}`);
+    assert(!!f.ficha?.nome, "a ficha do chat traz o nome do cliente");
+    assert(Array.isArray(f.ficha?.pedidos), "a ficha do chat traz os pedidos");
+    assert(typeof f.ficha?.ltv === "number", `a ficha do chat traz o LTV (${f.ficha?.ltv})`);
+
+    /* Respostas rápidas vêm do catálogo editável — se o dono mudar o
+       texto no Painel, o atalho muda junto. */
+    const rap = await req("/api/whatsapp-chat?rapidas=1");
+    assert(rap.rapidas.length >= 5, `há respostas rápidas para o chat (${rap.rapidas.length})`);
+    assert(
+      rap.rapidas.every((r) => r.texto && r.titulo),
+      "toda resposta rápida tem título e texto"
+    );
+
+    await sql("delete from whatsapp_mensagens where phone_e164=$1", [fone]);
+    await sql("delete from whatsapp_conversas where phone_e164=$1", [fone]);
+  }
+
+  // 11.7-undecies) Vendedor e comissão sobre a margem (v3.67.0)
+  //
+  // Comissão é dinheiro saindo: erro aqui vira briga com o vendedor.
+  // Estes checks travam as três decisões do dono — só pedido FECHADO
+  // conta, a base é a MARGEM (não o total), e item sem produto usa a
+  // margem estimada e é marcado como tal.
+  {
+    const [vend] = await sql(
+      `insert into sellers (name, nickname, commission_rate, active)
+       values ($1,'ZZTeste',10,true) returning id`,
+      [`ZZ VENDEDOR ${stamp}`]
+    );
+    const vendedorId = Number(vend.id);
+
+    /* Produto de custo conhecido: 100 de custo, vendido a 200.
+       Margem 100 × 10% = 10 de comissão. Números redondos de
+       propósito — teste que exige calculadora esconde erro. */
+    const [prod] = await sql(
+      `insert into products (name, calculation_mode, cost_snapshot, final_price, margin, active)
+       values ($1,'unit',100,200,0.5,true) returning id`,
+      [`ZZ PROD COM ${stamp}`]
+    );
+    const prodId = Number(prod.id);
+
+    const criarPedido = (numero, status, itens, total) =>
+      sql(
+        `insert into orders (number, customer_id, status, seller_id, seller_name, items, subtotal, discount, total, updated_at)
+         values ($1,$2,$3,$4,'ZZTeste',$5::jsonb,$6,0,$6, now()) returning id`,
+        [numero, customerId, status, vendedorId, JSON.stringify(itens), total]
+      );
+
+    await criarPedido(`ZZ-FECHADO-${stamp}`, "concluido",
+      [{ productId: prodId, quantity: 1, unitPrice: 200, total: 200 }], 200);
+
+    /* Mesmo valor, mas ainda em produção: NÃO pode entrar. */
+    await criarPedido(`ZZ-ABERTO-${stamp}`, "confirmado",
+      [{ productId: prodId, quantity: 1, unitPrice: 200, total: 200 }], 200);
+
+    /* Cancelado nunca paga comissão. */
+    await criarPedido(`ZZ-CANCEL-${stamp}`, "cancelado",
+      [{ productId: prodId, quantity: 1, unitPrice: 200, total: 200 }], 200);
+
+    /* O extrato filtra pelo dia em São Paulo, mas o container roda em
+       UTC: entre 21h e meia-noite os dois calendários discordam, e o
+       pedido criado agora cairia "ontem" para o extrato. Pedir a data
+       ao BANCO — a mesma fonte que o extrato usa — em vez de calcular
+       aqui. Uma janela de um dia para trás cobre a virada. */
+    const [{ hoje_sp: hoje, ontem_sp: ontem }] = await sql(
+      `SELECT (now() AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo')::date::text AS hoje_sp,
+              ((now() AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo')::date - 1)::text AS ontem_sp`
+    );
+    const ext = await req(`/api/crud/sellers?extrato=${vendedorId}&de=${ontem}&ate=${hoje}`);
+
+    assert(ext.extrato.linhas.length === 1,
+      `só pedido fechado entra na comissão (${ext.extrato.linhas.length} de 3)`);
+    assert(ext.extrato.totalMargem === 100,
+      `a margem é preço menos custo, não o total (${ext.extrato.totalMargem})`);
+    assert(ext.extrato.totalComissao === 10,
+      `comissão = 10% sobre a margem de 100 (${ext.extrato.totalComissao})`);
+    assert(ext.extrato.linhas[0].estimado === false,
+      "pedido com produto cadastrado não é estimado");
+
+    /* Item digitado à mão: sem custo conhecido, usa a margem padrão
+       do painel e AVISA — o vendedor precisa saber o que é conta e o
+       que é estimativa. */
+    await criarPedido(`ZZ-AVULSO-${stamp}`, "concluido",
+      [{ productId: null, quantity: 1, unitPrice: 100, total: 100, description: "avulso" }], 100);
+
+    const ext2 = await req(`/api/crud/sellers?extrato=${vendedorId}&de=${ontem}&ate=${hoje}`);
+    const avulso = ext2.extrato.linhas.find((l) => l.numero.startsWith("ZZ-AVULSO"));
+    assert(!!avulso, "pedido com item avulso entra no extrato");
+    assert(avulso.estimado === true, "linha sem produto é marcada como estimada");
+    assert(avulso.margem > 0, `item avulso usa a margem padrão (${avulso.margem})`);
+
+    /* Comissão acima de 100% é erro de digitação, não regra. */
+    const ruim = await fetch(`${BASE_URL}/api/crud/sellers`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ op: "create", data: { name: "ZZ Absurdo", commissionRate: 300 } }),
+    });
+    assert(ruim.status === 400, `comissão acima de 100% é recusada (${ruim.status})`);
+
+    /* Desativar preserva o histórico: o extrato antigo continua. */
+    const off = await fetch(`${BASE_URL}/api/crud/sellers`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ op: "archive", id: vendedorId }),
+    });
+    assert(off.ok, "vendedor é desativado, não apagado");
+    const [aindaLa] = await sql("select active from sellers where id=$1", [vendedorId]);
+    assert(aindaLa && aindaLa.active === false, "o cadastro continua no banco, inativo");
+
+    await sql("delete from orders where number like $1", [`ZZ-%${stamp}`]);
+    await sql("delete from products where id=$1", [prodId]);
+    await sql("delete from sellers where id=$1", [vendedorId]);
+    await sql("delete from sellers where name like 'ZZ Absurdo%'");
   }
 
   // 11.8) Versão carimbada no banco (v3.53.2)
@@ -1656,7 +2156,72 @@ async function main() {
     );
     const p = await pool.query(`DELETE FROM products  WHERE name LIKE 'E2E %'`);
     const m = await pool.query(`DELETE FROM materials WHERE name LIKE 'E2E %'`);
-    const total = (p.rowCount || 0) + (m.rowCount || 0);
+
+    /* Faltavam COMPRAS e FORNECEDORES: cada execução criava um
+       "E2E Fornecedor <timestamp>" e duas compras, e nada disso era
+       apagado. Em um dia de trabalho viraram 46 fornecedores e 28
+       compras fantasma no cadastro do dono — o suficiente para
+       atrapalhar na hora de escolher fornecedor numa compra real.
+
+       As compras saem primeiro porque seguram o fornecedor pela
+       chave estrangeira. Também caem as compras que ficaram sem
+       fornecedor e sem observação, que são as criadas pelo próprio
+       teste. Compra de verdade tem fornecedor ou observação. */
+    if (await pool.query(`SELECT to_regclass('public.purchase_items') IS NOT NULL ok`).then((x) => x.rows[0].ok)) {
+      await pool.query(
+        `DELETE FROM purchase_items WHERE purchase_id IN (
+           SELECT id FROM purchases
+            WHERE supplier_id IN (SELECT id FROM suppliers WHERE name LIKE 'E2E Fornecedor %')
+               OR (supplier_id IS NULL AND COALESCE(notes,'') = ''))`
+      );
+    }
+    const co = await pool.query(
+      `DELETE FROM purchases
+        WHERE supplier_id IN (SELECT id FROM suppliers WHERE name LIKE 'E2E Fornecedor %')
+           OR (supplier_id IS NULL AND COALESCE(notes,'') = '')`
+    );
+    const f = await pool.query(
+      `DELETE FROM suppliers WHERE name LIKE 'E2E Fornecedor %'
+         AND NOT EXISTS (SELECT 1 FROM materials mm WHERE mm.supplier_id = suppliers.id)`
+    );
+
+    /* CLIENTES: o teste cria "E2E Cliente" e "E2E Publico" (este pelo
+       cadastro público do portal) e nunca apagava nenhum dos dois.
+       Quatro execuções deixavam quatro clientes falsos no cadastro —
+       e eles entravam na base curada que vai para o servidor.
+
+       Tudo que pendura no cliente sai antes, senão a chave
+       estrangeira barra. */
+    const clientesLixo = `SELECT id FROM customers WHERE name LIKE 'E2E %'`;
+    for (const [tabela, coluna] of [
+      ["crm_activities", "lead_id"],
+      ["crm_leads", "customer_id"],
+      ["transactions", "customer_id"],
+      ["deliveries", "order_id"],
+      ["quote_items", "quote_id"],
+    ]) {
+      const alvo =
+        coluna === "order_id"
+          ? `SELECT id FROM orders WHERE customer_id IN (${clientesLixo})`
+          : coluna === "quote_id"
+            ? `SELECT id FROM quotes WHERE customer_id IN (${clientesLixo})`
+            : coluna === "lead_id"
+              ? `SELECT id FROM crm_leads WHERE customer_id IN (${clientesLixo})`
+              : clientesLixo;
+      await pool
+        .query(`DELETE FROM ${tabela} WHERE ${coluna} IN (${alvo})`)
+        .catch(() => {});
+    }
+    for (const t of ["sales", "orders", "quotes"]) {
+      await pool
+        .query(`DELETE FROM ${t} WHERE customer_id IN (${clientesLixo})`)
+        .catch(() => {});
+    }
+    const cl = await pool.query(`DELETE FROM customers WHERE name LIKE 'E2E %'`);
+
+    const total =
+      (p.rowCount || 0) + (m.rowCount || 0) + (co.rowCount || 0) +
+      (f.rowCount || 0) + (cl.rowCount || 0);
     if (total) console.log(`🧹 limpeza: ${total} registro(s) e ${r.rowCount || 0} movimento(s) de teste removidos`);
   } catch (e) {
     console.warn("⚠ não consegui limpar os dados de teste:", e.message);

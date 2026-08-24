@@ -10,6 +10,22 @@ export const dynamic = "force-dynamic";
    Ver o comentário abaixo. */
 const PESADAS = new Set(["company_logo", "company_logo_dark", "company_logo_icon"]);
 
+/* Segredos: senha de e-mail e tokens de integração.
+
+   A API já os mascarava (v3.63.0), mas ESTA PÁGINA é outro caminho —
+   ela lê o banco direto e injeta os valores no HTML. A senha aparecia
+   em texto puro no código-fonte da página, mesmo com o campo em
+   branco na tela. Encontrado em teste de navegador, v3.65.0.
+
+   Ao criar campo de senha novo no Painel, acrescente a chave aqui E
+   em `api/crud/settings`. As duas listas precisam andar juntas. */
+const SEGREDOS = new Set([
+  "smtp_password",
+  "superfrete_token",
+  "wa_token",
+  "infinitepay_api_key",
+]);
+
 export default async function ConfiguracoesPage() {
   const rows = await db.select().from(settings);
 
@@ -29,7 +45,7 @@ export default async function ConfiguracoesPage() {
      ETag e cache. A tela precisa saber SE existe logo, não QUAL é o
      base64 dela. */
   const enxutas = rows.map((r) =>
-    PESADAS.has(r.key) && (r.value?.length ?? 0) > 0
+    (PESADAS.has(r.key) || SEGREDOS.has(r.key)) && (r.value?.length ?? 0) > 0
       ? { ...r, value: "__SET__" }
       : r
   );

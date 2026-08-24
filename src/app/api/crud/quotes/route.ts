@@ -1,4 +1,5 @@
 import { archiveQuote, createQuote, updateQuote } from "@/lib/quotes";
+import { idValido } from "@/lib/api-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -31,14 +32,14 @@ export async function POST(req: Request) {
     }
 
     if (op === "update") {
-      if (!Number.isFinite(id)) return Response.json({ error: "id obrigatório" }, { status: 400 });
+      if (!idValido(id)) return Response.json({ error: "id obrigatório" }, { status: 400 });
       const result = await updateQuote(id, data);
       if ("error" in result) return Response.json(result, { status: result.status });
       return Response.json(result);
     }
 
     if (op === "delete" || op === "archive") {
-      if (!Number.isFinite(id)) return Response.json({ error: "id obrigatório" }, { status: 400 });
+      if (!idValido(id)) return Response.json({ error: "id obrigatório" }, { status: 400 });
       const result = await archiveQuote(id, String(body.reason || data.reason || "Arquivado pelo usuário"));
       if ("error" in result) return Response.json(result, { status: result.status });
       return Response.json(result);

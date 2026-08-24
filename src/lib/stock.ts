@@ -5,7 +5,7 @@ import { db } from "@/db";
 import { materials, products, purchases, stockMovements, suppliers } from "@/db/schema";
 import { eq, sql } from "drizzle-orm";
 import { nextDocumentNumber } from "@/lib/documents";
-import { formatCEP, formatPhone, isValidEmail } from "@/lib/validators";
+import { formatCEP, formatPhone, isValidCNPJ, isValidEmail, onlyDigits } from "@/lib/validators";
 import { round2, toDecimalString, toNumber } from "@/lib/money";
 import { upsertAutoTransaction } from "@/lib/finance";
 import { todayISO } from "@/lib/period";
@@ -34,14 +34,28 @@ function round3(n: number): number {
 const finite = z.coerce.number().finite();
 const materialSchema = z.object({
   name: z.string().trim().min(2, "Nome obrigatório").max(180),
+  /* Código de barras: só dígitos, 6 a 20 posições. EAN-13 e DUN-14 são
+     os formatos que aparecem em embalagem de insumo; o intervalo largo
+     aceita também EAN-8 e códigos internos numéricos. */
+  barcode: z.string().trim().regex(/^\d{6,20}$/, "Código de barras deve ter de 6 a 20 dígitos").nullable().optional(),
+  sku: z.string().trim().max(60).nullable().optional(),
   categoryId: z.coerce.number().int().positive().nullable().optional(),
+  supplierId: z.coerce.number().int().positive().nullable().optional(),
   unit: z.string().trim().min(1).max(40).default("unidade"),
   unitCost: finite.min(0).max(999999999).default(0),
   packName: z.string().trim().max(120).nullable().optional(),
   packQuantity: finite.min(0).max(999999999).default(0),
   packCost: finite.min(0).max(999999999).default(0),
   supplier: z.string().trim().max(180).nullable().optional(),
-  stock: finite.min(-999999999).max(999999999).default(0),
+  /* Saldo digitado à mão no cadastro não pode ser negativo — é sempre
+     erro de digitação, e a API aceitava `-999` com 200 OK (auditoria
+     v3.62.0). Todos os outros campos numéricos aqui já usavam .min(0).
+
+     Isto NÃO impede saldo negativo real: as movimentações de estoque
+     ajustam por `stock + delta` direto no banco e não passam por este
+     schema, então uma baixa maior que o saldo continua registrando o
+     negativo — que é informação legítima de inventário. */
+  stock: finite.min(0, "Estoque não pode ser negativo").max(999999999).default(0),
   minStock: finite.min(0).max(999999999).default(0),
   notes: z.string().trim().max(1000).nullable().optional(),
 });
@@ -50,6 +64,7 @@ const supplierSchema = z.object({
   name: z.string().trim().min(2, "Nome obrigatório").max(180),
   tradeName: z.string().trim().max(180).nullable().optional(),
   document: z.string().trim().max(32).nullable().optional(),
+  stateRegistration: z.string().trim().max(32).nullable().optional(),
   contactName: z.string().trim().max(120).nullable().optional(),
   email: z.string().trim().max(180).nullable().optional(),
   phone: z.string().trim().max(40).nullable().optional(),
@@ -150,7 +165,25 @@ export async function saveMaterial(raw: unknown, id?: number) {
      custeado pelo valor velho. */
   const derived = derivedUnitCost(d.packCost, d.packQuantity);
   const effectiveUnitCost = derived ?? d.unitCost;
-  const data = { name: d.name, categoryId: d.categoryId || null, unit: d.unit, unitCost: toDecimalString(effectiveUnitCost, 4), packName: nullable(d.packName), packQuantity: toDecimalString(d.packQuantity, 3), packCost: toDecimalString(d.packCost, 4), supplier: nullable(d.supplier), stock: toDecimalString(d.stock, 3), minStock: toDecimalString(d.minStock, 3), notes: nullable(d.notes) };
+
+  /* Código de barras repetido quebra o uso que justifica o campo: bipar
+     e achar o insumo. Com dois materiais no mesmo código, o leitor vira
+     sorteio. Avisa qual já usa em vez de só recusar. */
+  if (d.barcode) {
+    const iguais = await db
+      .select({ id: materials.id, name: materials.name })
+      .from(materials)
+      .where(eq(materials.barcode, d.barcode))
+      .limit(2);
+    const conflito = iguais.find((m) => m.id !== id);
+    if (conflito) {
+      return {
+        error: `O código ${d.barcode} já está em "${conflito.name}".`,
+        status: 422,
+      } satisfies StockError;
+    }
+  }
+  const data = { name: d.name, barcode: nullable(d.barcode), sku: nullable(d.sku), categoryId: d.categoryId || null, supplierId: d.supplierId || null, unit: d.unit, unitCost: toDecimalString(effectiveUnitCost, 4), packName: nullable(d.packName), packQuantity: toDecimalString(d.packQuantity, 3), packCost: toDecimalString(d.packCost, 4), supplier: nullable(d.supplier), stock: toDecimalString(d.stock, 3), minStock: toDecimalString(d.minStock, 3), notes: nullable(d.notes) };
   if (id) {
     const [row] = await db.update(materials).set(data).where(eq(materials.id, id)).returning();
     if (!row) return { error: "Material não encontrado", status: 404 } satisfies StockError;
@@ -177,8 +210,15 @@ export async function saveSupplier(raw: unknown, id?: number) {
   if ("error" in parsed) return parsed;
   const d = parsed.data;
   if (d.email && !isValidEmail(d.email)) return { error: "E-mail inválido", status: 422 } satisfies StockError;
+  /* A tela já valida, mas a API é porta de entrada própria: importação
+     e chamada direta não passam pelo formulário. */
+  if (d.document) {
+    const doc = onlyDigits(d.document);
+    if (doc && !isValidCNPJ(doc)) return { error: "CNPJ inválido", status: 422 } satisfies StockError;
+  }
   const data = {
-    name: d.name, tradeName: nullable(d.tradeName), document: nullable(d.document), contactName: nullable(d.contactName),
+    name: d.name, tradeName: nullable(d.tradeName), document: nullable(d.document),
+    stateRegistration: nullable(d.stateRegistration), contactName: nullable(d.contactName),
     email: d.email ? d.email.trim().toLowerCase() : null, phone: d.phone ? formatPhone(d.phone) : null, whatsapp: d.whatsapp ? formatPhone(d.whatsapp) : null,
     website: nullable(d.website), cep: d.cep ? formatCEP(d.cep) : null, street: nullable(d.street), number: nullable(d.number), complement: nullable(d.complement), district: nullable(d.district), city: nullable(d.city), state: d.state ? d.state.toUpperCase().slice(0,2) : null,
     paymentTerms: nullable(d.paymentTerms), leadTimeDays: d.leadTimeDays, notes: nullable(d.notes), active: d.active,

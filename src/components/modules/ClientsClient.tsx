@@ -29,6 +29,7 @@ import {
 import { Icon } from "@/components/icons";
 import { cn, initials } from "@/lib/format";
 import { formatCEP, formatCNPJ, formatCPF, formatPhone, formatStateRegistration } from "@/lib/validators";
+import { focarPrimeiroErro, semErros, validaCEP, validaDocumentoObrigatorio, validaEmail, validaSite, validaTelefone, validaUF, type ErrosCadastro } from "@/lib/cadastro-validacao";
 import { todayISO } from "@/lib/period";
 import { PedirCadastroModal } from "@/components/modules/PedirCadastroModal";
 
@@ -115,7 +116,7 @@ type PaginacaoClientes = {
   origem: string;
 };
 
-export function ClientsClient({ customers, leads, activities, quotes, orders, sales, registrationLinks = [], paginacao }: {
+export function ClientsClient({ customers, leads, activities, quotes, orders, sales, registrationLinks = [], paginacao, aniversariantes = [], cadastrosIncompletos = [] }: {
   customers: Row[];
   paginacao: PaginacaoClientes;
   leads: Row[];
@@ -126,6 +127,10 @@ export function ClientsClient({ customers, leads, activities, quotes, orders, sa
   /** Links de cadastro público vivos (v3.50.0). Opcional para não
       quebrar quem monta este componente em teste. */
   registrationLinks?: Row[];
+  /** Aniversariantes dos próximos 15 dias — só de quem já comprou. */
+  aniversariantes?: { id: number; nome: string; telefone: string | null; dia: number; mes: number; faltam: number; ltv: number; optOut: boolean }[];
+  /** Clientes que compraram mas têm cadastro pela metade. */
+  cadastrosIncompletos?: { id: number; nome: string; telefone: string | null; faltando: string[]; pedidos: number; ltv: number }[];
 }) {
   const router = useRouter();
   const refresh = () => router.refresh();
@@ -175,6 +180,7 @@ export function ClientsClient({ customers, leads, activities, quotes, orders, sa
   const [drawerId, setDrawerId] = useState<number | null>(params.get("id") ? Number(params.get("id")) : null);
   const [form, setForm] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
+  const [errosForm, setErrosForm] = useState<ErrosCadastro>({});
   const [deleting, setDeleting] = useState(false);
   const [fetchingCep, setFetchingCep] = useState(false);
   const [actForm, setActForm] = useState({ type: "nota", title: "", description: "" });
@@ -190,8 +196,11 @@ export function ClientsClient({ customers, leads, activities, quotes, orders, sa
      diferentes e o retrabalho de conferir pontuação. */
   const setMasked =
     (k: string, mask: (v: string) => string) =>
-    (e: { target: { value: string } }) =>
+    (e: { target: { value: string } }) => {
       setForm((f) => ({ ...f, [k]: mask(e.target.value) }));
+      setErrosForm((x) => (x[k] ? { ...x, [k]: "" } : x));
+    };
+  const limpaErro = (k: string) => setErrosForm((x) => (x[k] ? { ...x, [k]: "" } : x));
 
   /* O documento muda de máscara conforme PF/PJ escolhido no seletor. */
   const setDocument = (e: { target: { value: string } }) =>
@@ -199,6 +208,7 @@ export function ClientsClient({ customers, leads, activities, quotes, orders, sa
       ...f,
       document: f.type === "pj" ? formatCNPJ(e.target.value) : formatCPF(e.target.value),
     }));
+
   const drawer = customers.find((c) => Number(c.id) === drawerId) || null;
 
   /* Último link de cadastro por cliente. A lista já vem ordenada do
@@ -263,7 +273,28 @@ export function ClientsClient({ customers, leads, activities, quotes, orders, sa
 
   /* Salvar cliente */
   async function saveCustomer(id?: number) {
-    if (!form.name?.trim()) return toast.error("Informe o nome / razão social");
+    /* A ficha já mascarava, mas aceitava CPF impossível e e-mail sem
+       arroba. O cadastro do cliente é a origem de documento fiscal e
+       de mensagem — errado aqui, errado em tudo depois. */
+    const tipo = (form.type === "pj" ? "pj" : "pf") as "pf" | "pj";
+    const e: ErrosCadastro = {};
+    if (!form.name?.trim()) e.name = tipo === "pj" ? "Informe a razão social" : "Informe o nome";
+    const checagens: [string, string | null][] = [
+      ["document", validaDocumentoObrigatorio(form.document, tipo, form.documentWaiverReason)],
+      ["email", validaEmail(form.email)],
+      ["phone", validaTelefone(form.phone)],
+      ["whatsapp", validaTelefone(form.whatsapp)],
+      ["secondaryPhone", validaTelefone(form.secondaryPhone)],
+      ["cep", validaCEP(form.cep)],
+      ["state", validaUF(form.state)],
+      ["website", validaSite(form.website)],
+    ];
+    for (const [campo, erro] of checagens) if (erro) e[campo] = erro;
+    setErrosForm(e);
+    if (!semErros(e)) {
+      setTimeout(focarPrimeiroErro, 0);
+      return toast.error(Object.values(e)[0] || "Confira os campos destacados");
+    }
     setSaving(true);
     try {
       const data = {
@@ -271,6 +302,7 @@ export function ClientsClient({ customers, leads, activities, quotes, orders, sa
         name: form.name.trim(),
         tradeName: form.tradeName?.trim() || null,
         document: form.document?.trim() || null,
+        documentWaiverReason: form.documentWaiverReason?.trim() || null,
         email: form.email?.trim() || null,
         phone: form.phone?.trim() || null,
         whatsapp: form.whatsapp?.trim() || null,
@@ -464,6 +496,116 @@ export function ClientsClient({ customers, leads, activities, quotes, orders, sa
           </>
         )}
       </div>
+
+      {/* ── ALERTAS DO CRM ──
+          A tela listava e filtrava, mas não sugeria nada. Saber que
+          existem 200 clientes não diz o que fazer com eles; estas duas
+          faixas viram trabalho concreto do dia.
+
+          Só aparecem quando há o que mostrar: bloco vazio permanente
+          vira ruído e o olho aprende a ignorar. */}
+      {tab === "carteira" && (aniversariantes.length > 0 || cadastrosIncompletos.length > 0) && (
+        <div className="mb-4 grid grid-cols-1 gap-3 lg:grid-cols-2">
+          {aniversariantes.length > 0 && (
+            <div className="rounded-xl border border-paper-200 bg-paper-50 p-3.5">
+              <p className="mb-0.5 flex items-center gap-1.5 text-[12.5px] font-bold text-ink-900">
+                🎂 Aniversários
+              </p>
+              <p className="mb-2.5 text-[11px] text-ink-500">
+                Clientes que já compraram. Um “parabéns” não é venda — é o
+                contato que faz lembrarem de você.
+              </p>
+              <div className="space-y-1.5">
+                {aniversariantes.slice(0, 5).map((a) => (
+                  <div
+                    key={a.id}
+                    className="flex items-center gap-2 rounded-lg border border-paper-200 bg-white px-2.5 py-1.5"
+                  >
+                    <div className="min-w-0 grow">
+                      <p className="truncate text-[12px] font-semibold text-ink-900">{a.nome}</p>
+                      <p className="font-mono text-[10px] text-ink-400">
+                        {String(a.dia).padStart(2, "0")}/{String(a.mes).padStart(2, "0")}
+                        {" · "}já comprou {formatMoney(a.ltv)}
+                      </p>
+                    </div>
+                    <Badge tone={a.faltam === 0 ? "green" : "cyan"}>
+                      {a.faltam === 0 ? "hoje" : a.faltam === 1 ? "amanhã" : `em ${a.faltam}d`}
+                    </Badge>
+                    {a.optOut ? (
+                      <Badge tone="magenta">não aceita</Badge>
+                    ) : (
+                      <IconButton
+                        size="sm"
+                        name="whatsapp"
+                        label="Parabenizar no WhatsApp"
+                        onClick={() => {
+                          const primeiro = a.nome.trim().split(/\s+/)[0];
+                          const texto = `Oi, ${primeiro}! 🎉\n\nPassando para desejar um feliz aniversário! Muita saúde e sucesso.\n\nUm abraço da equipe VTDIGITAL.`;
+                          const fone = String(a.telefone || "").replace(/\D/g, "");
+                          window.open(
+                            fone
+                              ? `https://wa.me/55${fone}?text=${encodeURIComponent(texto)}`
+                              : `https://wa.me/?text=${encodeURIComponent(texto)}`,
+                            "_blank"
+                          );
+                        }}
+                      />
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {cadastrosIncompletos.length > 0 && (
+            <div className="rounded-xl border border-paper-200 bg-paper-50 p-3.5">
+              <p className="mb-0.5 flex items-center gap-1.5 text-[12.5px] font-bold text-ink-900">
+                📋 Cadastros pela metade
+              </p>
+              <p className="mb-2.5 text-[11px] text-ink-500">
+                Já compraram, mas falta dado. Sem e-mail não recebem orçamento;
+                sem CPF não saem documentos. Os que mais gastaram primeiro.
+              </p>
+              <div className="space-y-1.5">
+                {cadastrosIncompletos.slice(0, 5).map((c) => (
+                  <div
+                    key={c.id}
+                    className="flex items-center gap-2 rounded-lg border border-paper-200 bg-white px-2.5 py-1.5"
+                  >
+                    <div className="min-w-0 grow">
+                      <p className="truncate text-[12px] font-semibold text-ink-900">{c.nome}</p>
+                      <p className="truncate font-mono text-[10px] text-amber-700">
+                        falta {c.faltando.join(", ")}
+                      </p>
+                    </div>
+                    <span className="font-mono text-[11px] font-bold text-proc-c-strong tnum">
+                      {formatMoney(c.ltv)}
+                    </span>
+                    <IconButton
+                      size="sm"
+                      name="send"
+                      label="Pedir cadastro por WhatsApp"
+                      onClick={() => {
+                        /* O cliente pode não estar na página atual: a
+                           carteira é paginada. Se não achar, leva a
+                           busca até ele em vez de não fazer nada. */
+                        const alvo = customers.find((x) => Number(x.id) === c.id);
+                        if (alvo) setCadastroModal(alvo);
+                        else router.push(`/clientes?q=${encodeURIComponent(c.nome)}`);
+                      }}
+                    />
+                  </div>
+                ))}
+              </div>
+              {cadastrosIncompletos.length > 5 && (
+                <p className="mt-2 text-[11px] text-ink-400">
+                  e mais {cadastrosIncompletos.length - 5} com cadastro incompleto.
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ── CARTEIRA ── */}
       {tab === "carteira" && (
@@ -703,15 +845,32 @@ export function ClientsClient({ customers, leads, activities, quotes, orders, sa
               </Field>
             )}
 
-            <Field label={form.type === "pj" ? "CNPJ" : "CPF"} required>
+            <Field label={form.type === "pj" ? "CNPJ" : "CPF"} required erro={errosForm.document}>
               <Input
                 mono
                 value={form.document || ""}
-                onChange={setDocument}
+                onChange={(e) => { setDocument(e); limpaErro("document"); }}
                 inputMode="numeric"
                 placeholder={form.type === "pj" ? "00.000.000/0001-00" : "000.000.000-00"}
               />
             </Field>
+
+            {/* Escape de boa-fé: só aparece quando o documento está em
+                branco. Sem ele o operador inventa "000.000.000-00" e o
+                cadastro fica pior do que vazio. */}
+            {!String(form.document || "").trim() && (
+              <Field
+                label="Sem o documento agora?"
+                className="sm:col-span-2"
+                hint="Registre o motivo para salvar mesmo assim"
+              >
+                <Input
+                  value={form.documentWaiverReason || ""}
+                  onChange={(e) => { set("documentWaiverReason")(e); limpaErro("document"); }}
+                  placeholder="Ex.: cliente vai trazer depois — venda de balcão"
+                />
+              </Field>
+            )}
 
             <Field label="Origem do cliente">
               <Select value={form.origin || ""} onChange={set("origin")}>
@@ -800,6 +959,7 @@ export function ClientsClient({ customers, leads, activities, quotes, orders, sa
               label="CEP"
               className="sm:col-span-2"
               hint={fetchingCep ? "buscando endereço…" : "preenche o resto sozinho"}
+              erro={errosForm.cep}
             >
               <Input
                 mono
@@ -825,7 +985,7 @@ export function ClientsClient({ customers, leads, activities, quotes, orders, sa
             <Field label="Cidade">
               <Input value={form.city || ""} onChange={set("city")} />
             </Field>
-            <Field label="UF">
+            <Field label="UF" erro={errosForm.state}>
               <Input
                 value={form.state || ""}
                 onChange={(e) => setForm((f) => ({ ...f, state: e.target.value.toUpperCase().slice(0, 2) }))}
@@ -838,7 +998,7 @@ export function ClientsClient({ customers, leads, activities, quotes, orders, sa
         {/* ── CONTATO ── */}
         <FormSection title="Contato">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <Field label="Telefone">
+            <Field label="Telefone" erro={errosForm.phone}>
               <Input
                 mono
                 value={form.phone || ""}
@@ -847,7 +1007,7 @@ export function ClientsClient({ customers, leads, activities, quotes, orders, sa
                 placeholder="(21) 3000-0000"
               />
             </Field>
-            <Field label="WhatsApp">
+            <Field label="WhatsApp" erro={errosForm.whatsapp}>
               <Input
                 mono
                 value={form.whatsapp || ""}
@@ -856,8 +1016,8 @@ export function ClientsClient({ customers, leads, activities, quotes, orders, sa
                 placeholder="(21) 99999-0000"
               />
             </Field>
-            <Field label="E-mail" className="sm:col-span-2">
-              <Input value={form.email || ""} onChange={set("email")} type="email" placeholder="email@empresa.com.br" />
+            <Field label="E-mail" className="sm:col-span-2" erro={errosForm.email}>
+              <Input value={form.email || ""} onChange={(e) => { set("email")(e); limpaErro("email"); }} type="email" placeholder="email@empresa.com.br" />
             </Field>
 
             {form.type === "pj" && (

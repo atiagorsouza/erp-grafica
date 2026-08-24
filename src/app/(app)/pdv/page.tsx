@@ -5,12 +5,13 @@ import { and, asc, eq, isNull } from "drizzle-orm";
 import { getCategoriesByModule, listProducts } from "@/lib/queries";
 import { getPricingDefaults } from "@/lib/settings";
 import { PosClient } from "@/components/modules/PosClient";
+import { listarVendedores } from "@/lib/comissao";
 
 export const metadata: Metadata = { title: "PDV · Frente de Caixa" };
 export const dynamic = "force-dynamic";
 
 export default async function PdvPage() {
-  const [productCats, defaults, productRows, tierRows, customerRows, openSessions] = await Promise.all([
+  const [productCats, defaults, productRows, tierRows, customerRows, openSessions, vendedores] = await Promise.all([
     getCategoriesByModule("product"),
     getPricingDefaults(),
     listProducts(),
@@ -21,12 +22,14 @@ export default async function PdvPage() {
       .from(cashSessions)
       .where(and(eq(cashSessions.status, "aberto"), isNull(cashSessions.closedAt)))
       .limit(1),
+    listarVendedores(),
   ]);
 
   const session = openSessions[0];
 
   return (
     <PosClient
+      sellers={vendedores.map((v) => ({ id: v.id, nome: String(v.nickname || v.name) }))}
       products={productRows
         .filter((p) => p.active !== false)
         .map((p) => ({

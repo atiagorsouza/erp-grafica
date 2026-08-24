@@ -30,6 +30,7 @@ import { criarGerenciador } from "./conexao.mjs";
 import { criarPreCadastro } from "./pre-cadastro.mjs";
 import { paraJid, doJid } from "./telefone.mjs";
 import { enviarComBotoes } from "./botoes.mjs";
+import { enviarHumanizado } from "./humanizar.mjs";
 
 const PORTA = Number(process.env.WA_PORT || 3101);
 const HOST = process.env.WA_HOST || "127.0.0.1";
@@ -213,7 +214,12 @@ const servidor = http.createServer(async (req, res) => {
         if (!r.ok) return json(res, 502, { erro: r.erro || "falha ao enviar" });
         modo = r.modo;
       } else {
-        enviada = await sock.sendMessage(jid, { text: String(texto) });
+        /* Humanizado: lê, mostra "digitando…" e só então envia. Sem
+           isso a mensagem aparece instantaneamente do lado do cliente
+           — assinatura de robô e risco de bloqueio do número. */
+        enviada = await enviarHumanizado(sock, jid, String(texto), () =>
+          sock.sendMessage(jid, { text: String(texto) })
+        );
       }
 
       gerenciador.contarEnviada();

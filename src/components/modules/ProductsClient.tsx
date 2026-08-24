@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { mutate } from "@/lib/mutate";
 import {
@@ -35,12 +35,49 @@ import {
   Toggle,
   toast,
 } from "@/components/ui";
-import { Icon } from "@/components/icons";
+import { Icon, type IconName } from "@/components/icons";
 import { CategoriasManager } from "@/components/modules/CategoriasManager";
 import { cn } from "@/lib/format";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Row = Record<string, any>;
+
+/* Bloco de formulário com título e explicação.
+   Antes cada seção do modal se apresentava de um jeito: umas tinham
+   caixa cinza e título, outras eram uma grade solta sem nome nenhum
+   ("Comercial" e a identificação do produto), e a de logística usava
+   <p> com tamanho diferente das outras. Quem abria o cadastro não
+   sabia onde uma coisa terminava e a outra começava. Agora todas
+   passam por aqui. */
+function Bloco({
+  titulo,
+  icone,
+  descricao,
+  acao,
+  children,
+}: {
+  titulo: string;
+  icone: IconName;
+  descricao?: ReactNode;
+  acao?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <section className="rounded-xl border border-paper-200 bg-paper-100/50 p-4">
+      <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+        <h4 className="flex items-center gap-2 font-mono text-[10.5px] font-semibold tracking-[0.16em] text-ink-600 uppercase">
+          <Icon name={icone} size={13} />
+          {titulo}
+        </h4>
+        {acao}
+      </div>
+      {descricao && (
+        <p className="mb-3.5 text-[12px] leading-relaxed text-ink-500">{descricao}</p>
+      )}
+      <div className={descricao ? "" : "mt-3.5"}>{children}</div>
+    </section>
+  );
+}
 
 const num = (v: unknown, fallback = 0): number => {
   if (v === null || v === undefined || v === "") return fallback;
@@ -162,6 +199,9 @@ export function ProductsClient({
       format,
       colorMode,
       pagesPerUnit: num(form.pagesPerUnit, 1),
+      /* Produto fracionado: o clique da folha se divide entre as
+         peças que ela rende (4 panfletos numa A4, 10 cartões...). */
+      piecesPerSheet: num(form.piecesPerSheet, 1),
       copies: num(form.copies, 1),
       machineMinutes: num(form.machineMinutes, 0),
       baseMaterial,
@@ -337,7 +377,14 @@ export function ProductsClient({
   }
 
   const filtered = products.filter((p) => {
-    const matchQ = !q || String(p.name).toLowerCase().includes(q.toLowerCase()) || String(p.sku || "").toLowerCase().includes(q.toLowerCase());
+    /* Busca também pelo código de barras: quem tem o leitor na mão
+       espera bipar e achar o produto, do mesmo jeito que no PDV. */
+    const termo = q.toLowerCase();
+    const matchQ =
+      !q ||
+      String(p.name).toLowerCase().includes(termo) ||
+      String(p.sku || "").toLowerCase().includes(termo) ||
+      String(p.barcode || "").includes(q.trim());
     /* Filtrar por uma mestre traz tudo que está abaixo dela — é o que
        o operador espera ao escolher "Brindes & Estamparia". */
     const filhosDoFiltro = productCats
@@ -544,9 +591,23 @@ export function ProductsClient({
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_340px]">
           {/* Coluna de configuração */}
           <div className="space-y-5">
-            <section className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <Bloco
+              titulo="Identificação"
+              icone="tag"
+              descricao="Como o produto aparece no PDV, no orçamento e na busca."
+            >
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <Field label="Nome" required className="sm:col-span-2">
                 <Input value={form.name || ""} onChange={set("name")} placeholder="Ex.: Cartão de Visita 4x4 (100un)" />
+              </Field>
+              {/* O PDV já lia o código de barras, mas não havia onde
+                  cadastrá-lo: só entrava por importação. Com o leitor,
+                  basta clicar no campo e bipar. */}
+              <Field label="Código de barras" hint="Clique aqui e bipe com o leitor">
+                <Input mono value={form.barcode || ""} onChange={set("barcode")} placeholder="7891234567890" />
+              </Field>
+              <Field label="Código interno (SKU)" hint="Em branco, o sistema gera um">
+                <Input mono value={form.sku || ""} onChange={set("sku")} placeholder="CAR-4X4-100" />
               </Field>
               <Field label="Descrição" className="sm:col-span-2">
                 <Textarea value={form.description || ""} onChange={set("description")} placeholder="Detalhes comerciais do produto…" className="min-h-[60px]" />
@@ -574,6 +635,19 @@ export function ProductsClient({
                   ))}
                 </Select>
               </Field>
+            </div>
+            </Bloco>
+
+            {/* Terceirizados: o custo não vem do nosso motor, vem de
+                tabela de fornecedor (DTF UV, têxtil, lona) ou de um
+                serviço já cadastrado. Estava misturado com nome e SKU,
+                o que fazia parecer parte da identificação. */}
+            <Bloco
+              titulo="Custo de terceiros"
+              icone="building"
+              descricao="Só para o que não sai das nossas máquinas. Deixe em branco se imprimimos aqui."
+            >
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <Field label="Serviço agregado" hint="opcional">
                 <Combobox
                   value={form.baseServiceId || ""}
@@ -614,15 +688,18 @@ export function ProductsClient({
                   />
                 </Field>
               )}
-            </section>
+            </div>
+            </Bloco>
 
-            {/* Motor */}
-            <section className="rounded-xl border border-paper-200 bg-paper-100/50 p-4">
-              <div className="mb-3.5 flex flex-wrap items-center justify-between gap-2">
-                <h4 className="flex items-center gap-2 font-mono text-[10.5px] font-semibold tracking-[0.16em] text-ink-600 uppercase">
-                  <Icon name="printer" size={13} />
-                  Motor de impressão
-                </h4>
+            <Bloco
+              titulo="Motor de impressão"
+              icone="printer"
+              descricao={
+                calcMode === "unit"
+                  ? "Unitário: o custo é calculado para UMA peça. Use para foto, cópia, copo e caneca."
+                  : "Por tiragem: o custo é calculado para o lote inteiro e dividido depois. Use para panfleto, cartão e adesivo."
+              }
+              acao={
                 <Segmented
                   value={calcMode}
                   onChange={setCalcMode}
@@ -631,7 +708,8 @@ export function ProductsClient({
                     { value: "batch", label: "Por tiragem" },
                   ]}
                 />
-              </div>
+              }
+            >
               <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
                 <Field label="Impressora" hint="define a categoria de custo">
                   <Combobox
@@ -668,6 +746,16 @@ export function ProductsClient({
                     </Field>
                     <Field label="Vias / cópias">
                       <Input mono value={form.copies || ""} onChange={set("copies")} />
+                    </Field>
+                    {/* Produto fracionado: 4 panfletos numa A4, 10 cartões,
+                        9 polaroids. O clique da folha se divide por este
+                        número — sem ele, cada peça carrega a impressão da
+                        folha inteira. */}
+                    <Field
+                      label="Peças por folha"
+                      hint="quantas saem de uma folha — 1 se o produto ocupa a folha toda"
+                    >
+                      <Input mono value={form.piecesPerSheet || ""} onChange={set("piecesPerSheet")} />
                     </Field>
                     {num(printer?.hourlyRate, 0) > 0 && (
                       <Field
@@ -711,20 +799,21 @@ export function ProductsClient({
                   </>
                 )}
               </div>
-            </section>
+            </Bloco>
 
             {/* Prazo de entrega — vale para QUALQUER produto, por isso
                 fica fora do bloco de impressão. */}
-            <section className="rounded-xl border border-paper-200 bg-paper-100/50 p-4">
-              <h4 className="mb-1 flex items-center gap-2 font-mono text-[10.5px] font-semibold tracking-[0.16em] text-ink-600 uppercase">
-                <Icon name="clock" size={13} />
-                Prazo de entrega
-              </h4>
-              <p className="mb-3.5 text-[12px] leading-relaxed text-ink-500">
-                Em <strong>dias úteis</strong>, contados da aprovação da arte. Não confunda com
-                minutos de máquina: uma peça 3D roda 6&nbsp;h na impressora mas o cliente recebe
-                em 4 dias. Num pedido com vários itens vale o maior, não a soma.
-              </p>
+            <Bloco
+              titulo="Prazo de entrega"
+              icone="clock"
+              descricao={
+                <>
+                  Em <strong>dias úteis</strong>, contados da aprovação da arte. Não confunda com
+                  minutos de máquina: uma peça 3D roda 6&nbsp;h na impressora mas o cliente recebe
+                  em 4 dias. Num pedido com vários itens vale o maior, não a soma.
+                </>
+              }
+            >
               {/* Dica ABAIXO do campo, não ao lado: o Field padrão põe
                   rótulo e dica na mesma linha, e em três colunas
                   estreitas a dica atropela o rótulo. */}
@@ -761,14 +850,14 @@ export function ProductsClient({
               <p className="mt-3 rounded-lg bg-paper-200/60 px-3 py-2 font-mono text-[11.5px] text-ink-600">
                 total: {(Number(form.leadTimeCreation || 0) + Number(form.leadTimeProduction || 0) + Number(form.leadTimeFinishing || 0)) || 0} dia(s) útil(eis)
               </p>
-            </section>
+            </Bloco>
 
             {/* Material base + insumos */}
-            <section className="rounded-xl border border-paper-200 bg-paper-100/50 p-4">
-              <h4 className="mb-3.5 flex items-center gap-2 font-mono text-[10.5px] font-semibold tracking-[0.16em] text-ink-600 uppercase">
-                <Icon name="boxes" size={13} />
-                Materiais & insumos
-              </h4>
+            <Bloco
+              titulo="Materiais & insumos"
+              icone="boxes"
+              descricao="O material base é a folha/objeto que vira o produto. Insumo extra é o que se gasta junto: primer, fita, embalagem."
+            >
               <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-[1fr_130px]">
                 <Field label="Material base">
                   <Combobox
@@ -800,18 +889,14 @@ export function ProductsClient({
                   Insumo extra
                 </Button>
               </div>
-            </section>
+            </Bloco>
 
             {/* Faixas de preço por quantidade */}
-            <section className="rounded-xl border border-paper-200 bg-paper-100/50 p-4">
-              <h4 className="mb-1.5 flex items-center gap-2 font-mono text-[10.5px] font-semibold tracking-[0.16em] text-ink-600 uppercase">
-                <Icon name="tag" size={13} />
-                Preço por quantidade
-              </h4>
-              <p className="mb-3.5 text-[11.5px] text-ink-500">
-                Para quem vende em lote: mínimo 50, depois 100, 250… Vale a maior faixa
-                que o pedido alcançar. Sem faixas, usa o preço calculado acima.
-              </p>
+            <Bloco
+              titulo="Preço por quantidade"
+              icone="tag"
+              descricao="Para quem vende em lote: mínimo 50, depois 100, 250… Vale a maior faixa que o pedido alcançar. Sem faixas, usa o preço calculado acima."
+            >
               <div className="space-y-2">
                 {tiers.map((t, i) => {
                   const q = num(t.minQuantity);
@@ -854,14 +939,14 @@ export function ProductsClient({
                   Faixa de quantidade
                 </Button>
               </div>
-            </section>
+            </Bloco>
 
             {/* Acabamentos */}
-            <section className="rounded-xl border border-paper-200 bg-paper-100/50 p-4">
-              <h4 className="mb-3.5 flex items-center gap-2 font-mono text-[10.5px] font-semibold tracking-[0.16em] text-ink-600 uppercase">
-                <Icon name="scissors" size={13} />
-                Acabamentos
-              </h4>
+            <Bloco
+              titulo="Acabamentos"
+              icone="scissors"
+              descricao="Corte, laminação, espiral, refile. Entram por unidade ou por folha, conforme cadastrado em Serviços."
+            >
               <div className="space-y-2">
                 {compFinishings.map((f, i) => (
                   <div key={i} className="grid grid-cols-[1fr_90px_130px_90px_32px] items-center gap-2">
@@ -888,10 +973,17 @@ export function ProductsClient({
                   Acabamento
                 </Button>
               </div>
-            </section>
+            </Bloco>
 
-            {/* Comercial */}
-            <section className="grid grid-cols-2 gap-3.5 sm:grid-cols-4">
+            {/* Margem e disponibilidade estavam numa grade solta, sem
+                título: quem abria o cadastro via quatro caixinhas
+                órfãs entre acabamento e frete. */}
+            <Bloco
+              titulo="Margem & disponibilidade"
+              icone="wallet"
+              descricao="A margem é o que se soma sobre o custo para chegar ao preço. Produto inativo some do PDV mas continua no histórico."
+            >
+            <div className="grid grid-cols-2 gap-3.5 sm:grid-cols-4">
               <Field label={calcMode === "batch" ? "Lucro alvo (%)" : "Margem (%)"}>
                 <Input mono value={form.margin || ""} onChange={set("margin")} />
               </Field>
@@ -910,17 +1002,15 @@ export function ProductsClient({
                   <option value="false">Inativo</option>
                 </Select>
               </Field>
-            </section>
+            </div>
+            </Bloco>
 
             {/* Logística — alimenta a cotação de frete (SuperFrete) */}
-            <section>
-              <p className="mb-2 flex items-center gap-1.5 font-mono text-[10px] font-semibold tracking-[0.14em] text-ink-500 uppercase">
-                <Icon name="truck" size={12} />
-                Logística · frete
-                <span className="ml-1 normal-case tracking-normal text-ink-400">
-                  deixe zerado para usar o pacote padrão
-                </span>
-              </p>
+            <Bloco
+              titulo="Logística · frete"
+              icone="truck"
+              descricao="Medidas da embalagem, para a cotação de frete. Deixe zerado para usar o pacote padrão da loja."
+            >
               <div className="grid grid-cols-2 gap-3.5 sm:grid-cols-4">
                 <Field label="Peso" hint="kg">
                   <Input mono inputMode="decimal" value={form.shipWeight || ""} onChange={set("shipWeight")} placeholder="0,000" />
@@ -935,7 +1025,7 @@ export function ProductsClient({
                   <Input mono inputMode="decimal" value={form.shipLength || ""} onChange={set("shipLength")} placeholder="0" />
                 </Field>
               </div>
-            </section>
+            </Bloco>
           </div>
 
           {/* Coluna do breakdown */}

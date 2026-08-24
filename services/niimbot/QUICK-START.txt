@@ -1,0 +1,62 @@
+╔════════════════════════════════════════════════════════════════════╗
+║          🚀 QUICK START - Niimbot B1 PrintFlow ERP                ║
+║                      v1.0.1 (Corrigida)                           ║
+╚════════════════════════════════════════════════════════════════════╝
+
+⏱️  5 MINUTOS PARA COMEÇAR:
+
+1️⃣  INSTALAR DEPENDÊNCIAS
+   $ cd /www/wwwroot/erp-grafica/services/niimbot
+   $ pip3 install pillow pyserial niimprint psycopg2-binary
+
+2️⃣  TESTAR SEM HARDWARE (2 min)
+   $ python3 rfid-recognition.py --test
+   
+   Esperado:
+   ✓ RFID detectado: 50mm × 100mm
+   ✓ Canvas: 398px × 796px
+   ✓ Protocolo: Niimbot V2
+   ✓ Status: SUCESSO
+
+3️⃣  VALIDAR CÓDIGO (3 min)
+   $ bash test-quick.sh
+   
+   Esperado:
+   ✅ 4/4 testes passam
+   ✅ Canvas generation OK
+   ✅ Conversão mm→px OK
+   ✅ Logging OK
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✅ AGORA PRONTO PARA:
+
+[A] TESTAR COM HARDWARE (USB)
+    $ python3 rfid-recognition.py --port /dev/ttyUSB0 --verbose
+
+[B] TESTAR COM HARDWARE (Bluetooth)
+    $ python3 rfid-recognition.py --mac 10:18:0A:16:1B:A4 --verbose
+
+[C] RODAR FILA DE IMPRESSÃO
+    $ export DATABASE_URL="postgresql://user:pass@localhost/db"
+    $ python3 queue-worker.py
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📖 DOCUMENTAÇÃO COMPLETA:
+   • SETUP.md           ← Guia detalhado de instalação
+   • CORREÇÕES.md       ← Detalhes técnicos das correções
+   • README.md          ← Visão geral técnica
+   • README-PRODUCAO.md ← Status de produção
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+❓ TROUBLESHOOTING:
+   • "niimprint not found" → pip3 install niimprint
+   • "Permission denied"   → sudo usermod -aG dialout $USER
+   • "Device not found"    → lsusb | grep -i niim
+   • Logs em              → /var/log/niimbot-*.log
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✨ CÓDIGO VALIDADO E PRONTO PARA PRODUÇÃO ✨

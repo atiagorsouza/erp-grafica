@@ -367,24 +367,37 @@ export function Field({
   hint,
   required,
   className,
+  erro,
   children,
 }: {
   label: string;
   hint?: string;
   required?: boolean;
   className?: string;
+  /** Mensagem de validação. Some com a dica e marca o campo em vermelho. */
+  erro?: string;
   children: ReactNode;
 }) {
   return (
-    <label className={cn("block", className)}>
+    <label className={cn("block", className)} data-erro={erro ? "1" : undefined}>
       <span className="mb-1.5 flex items-baseline justify-between">
-        <span className="text-[11.5px] font-semibold tracking-wide text-ink-600 uppercase">
+        <span
+          className={cn(
+            "text-[11.5px] font-semibold tracking-wide uppercase",
+            erro ? "text-red-600" : "text-ink-600"
+          )}
+        >
           {label}
           {required && <span className="ml-0.5 text-proc-m">*</span>}
         </span>
-        {hint && <span className="text-[10.5px] text-ink-400">{hint}</span>}
+        {/* A dica sai de cena quando há erro: duas linhas de texto
+            miúdo competindo só atrapalham a leitura. */}
+        {hint && !erro && <span className="text-[10.5px] text-ink-400">{hint}</span>}
       </span>
-      {children}
+      <span className={cn("block", erro && "[&_input]:border-red-400 [&_select]:border-red-400 [&_textarea]:border-red-400")}>
+        {children}
+      </span>
+      {erro && <span className="mt-1 block text-[11px] font-medium text-red-600">{erro}</span>}
     </label>
   );
 }

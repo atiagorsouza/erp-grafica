@@ -4,6 +4,7 @@ import { crmLeads, crmActivities, quotes, orders, sales, registrationLinks } fro
 import { desc, inArray } from "drizzle-orm";
 import { getCustomersPage, TAMANHO_PAGINA_PADRAO } from "@/lib/queries";
 import { ClientsClient } from "@/components/modules/ClientsClient";
+import { aniversariantes, cadastrosIncompletos } from "@/lib/crm-alertas";
 
 export const metadata: Metadata = { title: "Clientes & CRM" };
 export const dynamic = "force-dynamic";
@@ -33,7 +34,7 @@ export default async function ClientesPage({
   const pageClientes = await getCustomersPage({ pagina, porPagina, busca, status, origem });
   const idsVisiveis = pageClientes.linhas.map((c) => Number(c.id));
 
-  const [leads, activities, quoteRows, orderRows, saleRows, regLinks] = await Promise.all([
+  const [leads, activities, quoteRows, orderRows, saleRows, regLinks, nivers, incompletos] = await Promise.all([
     db.select().from(crmLeads).orderBy(desc(crmLeads.updatedAt)),
     idsVisiveis.length
       ? db.select().from(crmActivities).where(inArray(crmActivities.customerId, idsVisiveis)).orderBy(desc(crmActivities.createdAt))
@@ -54,10 +55,15 @@ export default async function ClientesPage({
       .from(registrationLinks)
       .where(inArray(registrationLinks.status, ["pendente", "aberto", "concluido"]))
       .orderBy(desc(registrationLinks.createdAt)),
+    /* Alertas do CRM: o que pedir ao operador HOJE. */
+    aniversariantes(15),
+    cadastrosIncompletos(20),
   ]);
 
   return (
     <ClientsClient
+      aniversariantes={nivers}
+      cadastrosIncompletos={incompletos}
       customers={pageClientes.linhas}
       paginacao={{
         total: pageClientes.total,

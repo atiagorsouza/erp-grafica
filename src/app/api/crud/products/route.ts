@@ -1,4 +1,5 @@
 import { archiveProduct, createProduct, updateProduct } from "@/lib/products";
+import { idValido } from "@/lib/api-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -23,11 +24,11 @@ export async function POST(req: Request) {
   try {
     if (op === "create") return jsonResult(await createProduct(data));
     if (op === "update") {
-      if (!Number.isFinite(id)) return Response.json({ error: "id obrigatório" }, { status: 400 });
+      if (!idValido(id)) return Response.json({ error: "id obrigatório" }, { status: 400 });
       return jsonResult(await updateProduct(id, data));
     }
     if (op === "delete" || op === "archive") {
-      if (!Number.isFinite(id)) return Response.json({ error: "id obrigatório" }, { status: 400 });
+      if (!idValido(id)) return Response.json({ error: "id obrigatório" }, { status: 400 });
       return jsonResult(await archiveProduct(id, String(data.reason || "Arquivado pelo usuário")));
     }
     return Response.json({ error: "op inválido" }, { status: 400 });

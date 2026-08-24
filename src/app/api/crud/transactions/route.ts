@@ -9,6 +9,7 @@ import {
   settleTransaction,
   updateTransaction,
 } from "@/lib/finance";
+import { idValido } from "@/lib/api-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -58,7 +59,7 @@ export async function POST(req: Request) {
   const op = String(body.op || "");
   const id = Number(body.id);
   const needsId = ["update", "settle", "reopen", "delete", "restore"];
-  if (needsId.includes(op) && !Number.isFinite(id)) {
+  if (needsId.includes(op) && !idValido(id)) {
     return Response.json({ error: "id obrigatório" }, { status: 400 });
   }
 

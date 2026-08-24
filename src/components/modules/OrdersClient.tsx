@@ -188,6 +188,101 @@ export function OrdersClient({
   const [newCustomerOpen, setNewCustomerOpen] = useState(false);
   const [printDoc, setPrintDoc] = useState<{ order: Row; mode: "a4" | "thermal" } | null>(null);
 
+  /* ── Envio por WhatsApp ────────────────────────────────────────
+     Antes o botão só abria o wa.me numa aba nova. Quando o navegador
+     bloqueia pop-up (o padrão em muita instalação), NADA acontecia —
+     nem erro, nem aviso. Foi o que o dono viu: "não fez ação".
+
+     Agora usa o mesmo caminho já provado em Orçamentos: prévia
+     editável e envio pelo serviço, com o wa.me só como saída quando
+     o envio direto não é possível. */
+  const [zap, setZap] = useState<null | {
+    order: Row;
+    texto: string;
+    cliente: { nome: string; phone: string | null; whatsapp: string | null; whatsappOptOut: boolean | null } | null;
+  }>(null);
+  const [zapCarregando, setZapCarregando] = useState(false);
+  const [zapEnviando, setZapEnviando] = useState(false);
+  const [zapFalhou, setZapFalhou] = useState<string | null>(null);
+
+  async function abrirWhatsApp(order: Row) {
+    setZapCarregando(true);
+    try {
+      const r = await fetch("/api/orders/whatsapp", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ id: Number(order.id) }),
+      });
+      const d = await r.json();
+      if (!r.ok) {
+        toast.error("Não foi possível montar a mensagem", d?.error || "Tente de novo.");
+        return;
+      }
+      setZapFalhou(null);
+      setZap({ order, texto: d.texto, cliente: d.cliente });
+    } catch {
+      toast.error("Não foi possível montar a mensagem", "Verifique a conexão.");
+    } finally {
+      setZapCarregando(false);
+    }
+  }
+
+  function abrirNoWhatsAppWeb() {
+    if (!zap) return;
+    const c = zap.cliente;
+    const numero = c && !isWhatsAppBlocked(c as Row) ? whatsappNumber(c as Row) : "";
+    const url = numero
+      ? `https://wa.me/55${numero}?text=${encodeURIComponent(zap.texto)}`
+      : `https://wa.me/?text=${encodeURIComponent(zap.texto)}`;
+    window.open(url, "_blank");
+    setZap(null);
+    setZapFalhou(null);
+  }
+
+  async function enviarPeloServico() {
+    if (!zap) return;
+    const c = zap.cliente;
+
+    if (c && isWhatsAppBlocked(c as Row)) {
+      toast.error("Cliente não aceita WhatsApp", "Escolha outro canal.");
+      return;
+    }
+    const numero = c ? whatsappNumber(c as Row) : "";
+    if (!numero) {
+      setZapFalhou("Este pedido não tem número de WhatsApp no cadastro do cliente.");
+      return;
+    }
+
+    setZapEnviando(true);
+    setZapFalhou(null);
+    try {
+      const r = await fetch("/api/whatsapp/enviar", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ para: `55${numero}`, texto: zap.texto }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (r.ok) {
+        toast.success("Mensagem enviada", `Foi para ${formatPhone(String(c?.whatsapp || c?.phone || ""))}.`);
+        setZap(null);
+        return;
+      }
+      if (r.status === 409) {
+        setZapFalhou("O WhatsApp do sistema está desconectado. Reconecte em Atendimento → WhatsApp → Conexão.");
+      } else if (r.status === 403) {
+        setZapFalhou("Este contato pediu para não receber mensagens.");
+      } else if (r.status === 502 || r.status === 503) {
+        setZapFalhou("O serviço do WhatsApp não está no ar. Veja em Atendimento → WhatsApp → Conexão.");
+      } else {
+        setZapFalhou(String(d?.erro || d?.error || "Não consegui enviar agora."));
+      }
+    } catch {
+      setZapFalhou("Não consegui falar com o serviço do WhatsApp.");
+    } finally {
+      setZapEnviando(false);
+    }
+  }
+
   const order = useMemo(() => orders.find((o) => Number(o.id) === openId) || null, [orders, openId]);
   const custName = useCallback(
     (id: unknown) => customersList.find((c) => Number(c.id) === Number(id)) || null,
@@ -769,6 +864,19 @@ export function OrdersClient({
                 >
                   Imprimir OS (A4)
                 </Button>
+                {/* Avisar o cliente é ação frequente e não deveria
+                    exigir abrir a prévia de impressão antes. */}
+                <Button
+                  variant="soft"
+                  icon="whatsapp"
+                  disabled={zapCarregando}
+                  onClick={() => {
+                    setOpenId(null);
+                    abrirWhatsApp(order);
+                  }}
+                >
+                  {zapCarregando ? "Montando…" : "Avisar por WhatsApp"}
+                </Button>
                 {order.status !== "cancelado" && order.financialStatus !== "pago" && (
                   <Button
                     variant="ink"
@@ -1347,30 +1455,15 @@ export function OrdersClient({
                 variant="soft"
                 size="sm"
                 icon="whatsapp"
+                disabled={zapCarregando}
                 onClick={() => {
                   if (!printDoc) return;
                   const o = printDoc.order;
-                  const c = custName(o.customerId);
-                  const text = `*${company.name}*\n*ORDEM DE PRODUÇÃO ${o.number}*\nStatus: ${o.status}\nCliente: ${c ? c.name : "Consumidor final"}\nTotal: ${formatBRL(Number(o.total || 0))}\nPrazo: ${o.dueDate || "A definir"}`;
-
-                  /* O cliente pode ter pedido para não receber WhatsApp.
-                     Não preenchemos o destinatário: a mensagem abre em
-                     branco e o operador decide. */
-                  if (isWhatsAppBlocked(c)) {
-                    toast.info(
-                      "Cliente não aceita WhatsApp",
-                      "O texto abrirá sem destinatário — escolha outro canal se possível."
-                    );
-                  }
-
-                  const cleanPhone = whatsappNumber(c);
-                  const url = cleanPhone
-                    ? `https://wa.me/55${cleanPhone}?text=${encodeURIComponent(text)}`
-                    : `https://wa.me/?text=${encodeURIComponent(text)}`;
-                  window.open(url, "_blank");
+                  setPrintDoc(null);
+                  abrirWhatsApp(o);
                 }}
               >
-                WhatsApp
+                {zapCarregando ? "Montando…" : "WhatsApp"}
               </Button>
 
               <Button
@@ -1500,6 +1593,77 @@ export function OrdersClient({
         <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-[11.5px] text-amber-800">
           O status do pedido será marcado como cancelado. Esta ação não exclui o registro.
         </p>
+      </Modal>
+
+      {/* ── PRÉVIA DO WHATSAPP ── mesma conduta de Orçamentos: o texto
+          vem pronto do catálogo editável e fica editável aqui antes de
+          sair. Ninguém envia às cegas. */}
+      <Modal
+        open={!!zap}
+        onClose={() => { setZap(null); setZapFalhou(null); }}
+        title="Avisar cliente por WhatsApp"
+        subtitle="Confira e ajuste o texto antes de enviar. Para mudar o padrão, use Painel → Mensagens."
+        width="max-w-lg"
+        footer={
+          <div className="flex w-full items-center justify-between gap-2">
+            <Button variant="ghost" onClick={() => { setZap(null); setZapFalhou(null); }}>
+              Cancelar
+            </Button>
+            {zapFalhou ? (
+              <Button icon="whatsapp" variant="outline" onClick={abrirNoWhatsAppWeb}>
+                Abrir no WhatsApp Web
+              </Button>
+            ) : (
+              <Button icon="whatsapp" onClick={enviarPeloServico} disabled={zapEnviando}>
+                {zapEnviando ? "Enviando…" : "Enviar pelo WhatsApp"}
+              </Button>
+            )}
+          </div>
+        }
+      >
+        {zap && (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-2 text-[11.5px]">
+              <span className="text-ink-500">
+                Para:{"\u00a0"}
+                <strong className="text-ink-700">{zap.cliente?.nome || "— sem cliente —"}</strong>
+              </span>
+              {zap.cliente && isWhatsAppBlocked(zap.cliente as Row) ? (
+                <Badge tone="magenta">Não aceita WhatsApp</Badge>
+              ) : whatsappNumber((zap.cliente || {}) as Row) ? (
+                <span className="font-mono text-ink-500">
+                  {formatPhone(String(zap.cliente?.whatsapp || zap.cliente?.phone || ""))}
+                </span>
+              ) : (
+                <Badge tone="cyan">Sem número no cadastro</Badge>
+              )}
+            </div>
+
+            <Textarea
+              value={zap.texto}
+              onChange={(e) => setZap({ ...zap, texto: e.target.value })}
+              rows={11}
+              className="font-mono text-[12px] leading-relaxed"
+            />
+
+            {zapFalhou && (
+              <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2.5">
+                <p className="text-[12px] font-semibold text-amber-900">
+                  Não deu para enviar pelo sistema
+                </p>
+                <p className="mt-0.5 text-[11.5px] leading-relaxed text-amber-800">{zapFalhou}</p>
+                <p className="mt-1.5 text-[11px] text-amber-700">
+                  O texto está pronto: use o botão ao lado para abrir o WhatsApp Web.
+                </p>
+              </div>
+            )}
+
+            <p className="text-[11px] text-ink-400">
+              O WhatsApp mostra *texto entre asteriscos* em negrito e
+              _entre sublinhados_ em itálico.
+            </p>
+          </div>
+        )}
       </Modal>
 
       {/* ÁREA ISOLADA DE IMPRESSÃO A4 (EXATA À FOTO DE REFERÊNCIA) */}

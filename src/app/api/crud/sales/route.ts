@@ -1,4 +1,5 @@
 import { createSale, cancelSale } from "@/lib/sales";
+import { idValido } from "@/lib/api-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -21,7 +22,7 @@ export async function POST(req: Request) {
   try {
     if (body.op === "cancel") {
       const id = Number(body.id);
-      if (!Number.isFinite(id)) {
+      if (!idValido(id)) {
         return Response.json({ error: "id obrigatório" }, { status: 400 });
       }
       const reason = String(body.reason || "").trim();

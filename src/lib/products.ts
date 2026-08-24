@@ -218,6 +218,8 @@ async function buildCalculation(data: ProductPayload) {
     format,
     colorMode: data.colorMode as ColorMode,
     pagesPerUnit: data.pagesPerUnit,
+    /* Produto fracionado: o clique se divide entre as peças da folha. */
+    piecesPerSheet: data.piecesPerSheet,
     copies: data.copies,
     machineMinutes: data.machineMinutes,
     baseMaterial,
@@ -333,12 +335,37 @@ function baseProductData(data: ProductPayload, calc: Awaited<ReturnType<typeof b
   };
 }
 
+/* Código de barras repetido quebra justamente o uso que justifica o
+   campo: bipar no PDV e achar UM produto. O banco tem índice único,
+   mas sozinho ele devolve erro 500 cru ("duplicate key ... 23505"),
+   que na tela vira "não foi possível concluir" — sem dizer o que
+   houve nem qual produto já usa o código.
+
+   Isto ficou de fora quando o campo virou editável na tela (v3.66.0):
+   a guarda foi feita em materiais e esquecida aqui. Só apareceu
+   porque o smoke tentou reutilizar um código. */
+async function barcodeEmUso(barcode: string | null, ignorarId?: number) {
+  if (!barcode) return null;
+  const iguais = await db
+    .select({ id: products.id, name: products.name })
+    .from(products)
+    .where(eq(products.barcode, barcode))
+    .limit(2);
+  const conflito = iguais.find((p) => p.id !== ignorarId);
+  return conflito
+    ? ({ error: `O código ${barcode} já está em "${conflito.name}".`, status: 422 } satisfies ProductError)
+    : null;
+}
+
 export async function createProduct(raw: unknown) {
   const parsed = parse(raw);
   if ("error" in parsed) return parsed;
   const data = parsed.data;
   const calc = await buildCalculation(data);
   if ("error" in calc) return calc;
+
+  const duplicado = await barcodeEmUso(nullable(data.barcode));
+  if (duplicado) return duplicado;
 
   const row = await db.transaction(async (tx) => {
     const [created] = await tx.insert(products).values(baseProductData(data, calc) as never).returning();
@@ -370,6 +397,10 @@ export async function updateProduct(id: number, raw: unknown) {
   const data = parsed.data;
   const calc = await buildCalculation(data);
   if ("error" in calc) return calc;
+
+  const duplicado = await barcodeEmUso(nullable(data.barcode), id);
+  if (duplicado) return duplicado;
+
   const previousStock = toNumber(existing.stock, 0);
 
   const row = await db.transaction(async (tx) => {

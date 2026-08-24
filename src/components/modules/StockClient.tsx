@@ -28,6 +28,8 @@ import {
 import { Icon } from "@/components/icons";
 import { CategoriasManager } from "@/components/modules/CategoriasManager";
 import { cn } from "@/lib/format";
+import { formatCEP, formatCNPJ, formatPhone } from "@/lib/validators";
+import { focarPrimeiroErro, semErros, validaFornecedor, type ErrosCadastro } from "@/lib/cadastro-validacao";
 
  
 type Row = Record<string, any>;
@@ -47,15 +49,53 @@ export function StockClient({ materials, suppliers, purchases, materialCats, mov
   const [matModal, setMatModal] = useState<null | { edit?: Row }>(null);
   const [movModal, setMovModal] = useState<null | { material?: Row }>(null);
   const [supModal, setSupModal] = useState<null | { edit?: Row }>(null);
+  const [errosSup, setErrosSup] = useState<ErrosCadastro>({});
+  const [buscandoCep, setBuscandoCep] = useState(false);
   const [buyModal, setBuyModal] = useState(false);
   const [buyItems, setBuyItems] = useState<{ materialId: string; quantity: string; unitCost: string }[]>([]);
   const [onlyLow, setOnlyLow] = useState(false);
+  const [busca, setBusca] = useState("");
 
   const set = (k: string) => (e: { target: { value: string } }) => setForm((f) => ({ ...f, [k]: e.target.value }));
+  /* Campo com máscara: formata enquanto digita e limpa o erro do
+     campo assim que o operador mexe nele. Deixar o vermelho aceso
+     enquanto ele corrige é ruído. */
+  const setMasked = (k: string, fmt: (v: string) => string) => (e: { target: { value: string } }) => {
+    const v = fmt(e.target.value);
+    setForm((f) => ({ ...f, [k]: v }));
+    setErrosSup((x) => (x[k] ? { ...x, [k]: "" } : x));
+  };
   const catName = (id: unknown) => materialCats.find((c) => Number(c.id) === Number(id));
 
   const lowCount = materials.filter((m) => Number(m.stock) <= Number(m.minStock || 0)).length;
-  const shown = materials.filter((m) => !onlyLow || Number(m.stock) <= Number(m.minStock || 0));
+
+  /* Busca do estoque, pensada para o leitor de código de barras.
+     O leitor digita o código e dá Enter — então o campo aceita tanto
+     texto (nome, SKU, fornecedor) quanto o código bipado. Quando o
+     termo é só dígitos e casa exatamente com um barcode, esse material
+     vem primeiro: bipar tem que achar UM item, não uma lista. */
+  const supName = (id: unknown) => suppliers.find((s) => Number(s.id) === Number(id))?.name;
+  const termo = busca.trim().toLowerCase();
+  const soDigitos = /^\d{6,20}$/.test(termo);
+  const shown = materials
+    .filter((m) => {
+      if (onlyLow && Number(m.stock) > Number(m.minStock || 0)) return false;
+      if (!termo) return true;
+      if (soDigitos && String(m.barcode || "") === termo) return true;
+      return (
+        String(m.name || "").toLowerCase().includes(termo) ||
+        String(m.sku || "").toLowerCase().includes(termo) ||
+        String(m.barcode || "").includes(termo) ||
+        String(m.supplier || "").toLowerCase().includes(termo) ||
+        String(supName(m.supplierId) || "").toLowerCase().includes(termo)
+      );
+    })
+    .sort((a, b) => {
+      if (!soDigitos) return 0;
+      const ea = String(a.barcode || "") === termo ? 0 : 1;
+      const eb = String(b.barcode || "") === termo ? 0 : 1;
+      return ea - eb;
+    });
 
   /* ── Agrupamento por categoria (v3.57.0) ──────────────────────
      A lista era plana, com a categoria só numa coluna. Com papelaria,
@@ -86,7 +126,6 @@ export function StockClient({ materials, suppliers, purchases, materialCats, mov
     });
   })();
   const matName = (id: unknown) => materials.find((m) => Number(m.id) === Number(id))?.name;
-  const supName = (id: unknown) => suppliers.find((s) => Number(s.id) === Number(id))?.name;
 
   async function run(fn: () => Promise<unknown>, ok: string) {
     setSaving(true);
@@ -107,7 +146,12 @@ export function StockClient({ materials, suppliers, purchases, materialCats, mov
     run(async () => {
       const data = {
         name: form.name,
+        /* Só dígitos: o leitor às vezes manda espaço no fim, e um
+           barcode com espaço nunca casa na busca. */
+        barcode: String(form.barcode || "").replace(/\D/g, "") || null,
+        sku: form.sku?.trim() || null,
         categoryId: form.categoryId || null,
+        supplierId: form.supplierId || null,
         unit: form.unit || "unidade",
         unitCost: form.unitCost || "0",
         packName: form.packName || null,
@@ -154,8 +198,40 @@ export function StockClient({ materials, suppliers, purchases, materialCats, mov
     }, kind === "entrada" ? "Entrada registrada" : kind === "saida" ? "Saída registrada" : `Saldo ajustado para ${qty}`);
   }
 
-  const saveSup = (id?: number) =>
-    run(async () => {
+  /* Preenche o endereço pelo CEP, igual ao cadastro de cliente.
+     Nunca sobrescreve número e complemento: o ViaCEP não os conhece. */
+  async function buscarCepFornecedor(valor: string) {
+    const limpo = String(valor || "").replace(/\D/g, "");
+    if (limpo.length !== 8) return;
+    setBuscandoCep(true);
+    try {
+      const r = await fetch(`/api/cep/${limpo}`);
+      if (!r.ok) return;
+      const d = (await r.json()) as { street?: string; district?: string; city?: string; state?: string };
+      setForm((f) => ({
+        ...f,
+        street: d.street || f.street || "",
+        district: d.district || f.district || "",
+        city: d.city || f.city || "",
+        state: d.state || f.state || "",
+      }));
+    } catch {
+      /* sem internet ou CEP inexistente: digita à mão */
+    } finally {
+      setBuscandoCep(false);
+    }
+  }
+
+  const saveSup = (id?: number) => {
+    /* Valida ANTES de chamar a API: erro de digitação vira aviso no
+       campo, não erro 422 genérico depois do round-trip. */
+    const e = validaFornecedor(form);
+    setErrosSup(e);
+    if (!semErros(e)) {
+      setTimeout(focarPrimeiroErro, 0);
+      return;
+    }
+    return run(async () => {
       const data = {
         name: form.name,
         tradeName: form.tradeName || null,
@@ -164,6 +240,12 @@ export function StockClient({ materials, suppliers, purchases, materialCats, mov
         email: form.email || null,
         phone: form.phone || null,
         whatsapp: form.whatsapp || null,
+        website: form.website || null,
+        cep: form.cep || null,
+        street: form.street || null,
+        number: form.number || null,
+        complement: form.complement || null,
+        district: form.district || null,
         city: form.city || null,
         state: form.state || null,
         paymentTerms: form.paymentTerms || null,
@@ -174,7 +256,9 @@ export function StockClient({ materials, suppliers, purchases, materialCats, mov
       if (id) await mutate("suppliers", "update", data, id);
       else await mutate("suppliers", "create", data);
       setSupModal(null);
+      setErrosSup({});
     }, "Fornecedor salvo");
+  };
 
   async function saveBuy() {
     const items = buyItems.filter((i) => i.materialId && Number(i.quantity) > 0);
@@ -220,6 +304,39 @@ export function StockClient({ materials, suppliers, purchases, materialCats, mov
   const packCost = Number(form.packCost || 0);
   const packUnitCost = packQty > 0 && packCost > 0 ? packCost / packQty : null;
 
+  /* ── Ajuda para calcular o rendimento ──────────────────────────
+     "Rende quantos" é fácil para resma (500 folhas, está na etiqueta)
+     e difícil para tudo que vem em rolo: um vinil de 1,22 m × 50 m dá
+     61 m², e essa conta era feita na calculadora do celular — com o
+     erro indo direto para o custo de todo produto que usa o material.
+
+     A calculadora aparece só quando a unidade pede, e o resultado
+     PREENCHE o campo em vez de ficar num canto: número que o operador
+     tem de copiar à mão é número que ele digita errado. */
+  const unidade = String(form.unit || "unidade");
+  const ehArea = unidade === "metro²";
+  const ehComprimento = ["metro", "metro linear", "centímetro"].includes(unidade);
+  const ehFolha = ["folha", "resma", "bloco", "cento", "milheiro"].includes(unidade);
+
+  const larguraRolo = Number(form.calcLargura || 0);
+  const compRolo = Number(form.calcComprimento || 0);
+  const folhasPorPacote = Number(form.calcFolhas || 0);
+  const pacotesPorCaixa = Number(form.calcPacotes || 0);
+
+  const rendimentoCalculado = ehArea
+    ? larguraRolo > 0 && compRolo > 0
+      ? larguraRolo * compRolo
+      : null
+    : ehFolha
+      ? folhasPorPacote > 0
+        ? folhasPorPacote * (pacotesPorCaixa > 0 ? pacotesPorCaixa : 1)
+        : null
+      : ehComprimento
+        ? compRolo > 0
+          ? compRolo
+          : null
+        : null;
+
   return (
     <div>
       <PageHeader
@@ -256,11 +373,33 @@ export function StockClient({ materials, suppliers, purchases, materialCats, mov
         )}
       </div>
 
+      {/* ── BUSCA DOS MATERIAIS ──
+          Serve para digitar e para bipar: o leitor manda o código e um
+          Enter, e o material aparece sozinho. */}
+      {tab === "materiais" && (
+        <div className="mb-4">
+          <Input
+            value={busca}
+            onChange={(e) => setBusca(e.target.value)}
+            placeholder="Buscar material, código interno, fornecedor — ou bipe o código de barras"
+          />
+          {termo && (
+            <p className="mt-1.5 font-mono text-[10.5px] text-ink-400">
+              {shown.length === 0
+                ? soDigitos
+                  ? `Nenhum material com o código ${termo}. Cadastre-o em "Novo material".`
+                  : "Nada encontrado."
+                : `${shown.length} de ${materials.length}`}
+            </p>
+          )}
+        </div>
+      )}
+
       {/* ── MATERIAIS ── */}
       {tab === "materiais" && (
-        shown.length === 0 ? (
+        shown.length === 0 && !termo ? (
           <EmptyState icon="boxes" title="Nenhum material" hint="Cadastre papéis, tintas, etiquetas e insumos com estoque mínimo." />
-        ) : (
+        ) : shown.length === 0 ? null : (
           <div className="space-y-5">
           {grupos.map((g) => {
             const criticos = g.itens.filter(
@@ -490,6 +629,20 @@ export function StockClient({ materials, suppliers, purchases, materialCats, mov
         footer={<><Button variant="ghost" onClick={() => setMatModal(null)}>Cancelar</Button><Button loading={saving} icon="check" onClick={() => saveMat(matModal?.edit ? Number(matModal.edit.id) : undefined)}>Salvar</Button></>}>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Field label="Nome" required className="sm:col-span-2"><Input value={form.name || ""} onChange={set("name")} placeholder="Papel Couché 150g A4" /></Field>
+          {/* Código de barras: o leitor age como teclado. Clique no
+              campo, bipe a embalagem e ele preenche sozinho — sem
+              digitar treze dígitos e sem errar um deles. */}
+          <Field label="Código de barras" hint="Clique aqui e bipe a embalagem com o leitor">
+            <Input
+              mono
+              value={form.barcode || ""}
+              onChange={set("barcode")}
+              placeholder="7891234567890"
+            />
+          </Field>
+          <Field label="Código interno (SKU)" hint="Opcional — se você usa numeração própria">
+            <Input mono value={form.sku || ""} onChange={set("sku")} placeholder="PAP-COU-150" />
+          </Field>
           <Field label="Categoria">
             <Select value={form.categoryId || ""} onChange={set("categoryId")}>
               <option value="">Sem categoria</option>
@@ -498,7 +651,25 @@ export function StockClient({ materials, suppliers, purchases, materialCats, mov
           </Field>
           <Field label="Unidade">
             <Select value={form.unit || "unidade"} onChange={set("unit")}>
-              {["folha", "unidade", "metro", "kg", "rolo", "pacote", "caixa"].map((u) => <option key={u}>{u}</option>)}
+              {/* A unidade é a que o insumo é CONSUMIDO, não comprada:
+                  você compra a resma e gasta a folha. Faltavam medidas
+                  que a gráfica usa todo dia — m² para vinil e lona,
+                  resma para papel, ml/litro para tinta.
+
+                  Agrupadas para não virar uma lista de 20 itens onde
+                  ninguém acha nada. */}
+              <optgroup label="Papel e impressão">
+                {["folha", "resma", "bloco", "cento", "milheiro"].map((u) => <option key={u}>{u}</option>)}
+              </optgroup>
+              <optgroup label="Comprimento e área">
+                {["metro", "metro²", "metro linear", "centímetro"].map((u) => <option key={u}>{u}</option>)}
+              </optgroup>
+              <optgroup label="Peso e volume">
+                {["kg", "grama", "litro", "ml"].map((u) => <option key={u}>{u}</option>)}
+              </optgroup>
+              <optgroup label="Embalagem e avulso">
+                {["unidade", "par", "jogo", "rolo", "bobina", "pacote", "caixa", "cartela", "tubo", "galão"].map((u) => <option key={u}>{u}</option>)}
+              </optgroup>
             </Select>
           </Field>
           {/* ── EMBALAGEM DE COMPRA ──
@@ -519,6 +690,72 @@ export function StockClient({ materials, suppliers, purchases, materialCats, mov
                 <Input mono value={form.packCost || ""} onChange={set("packCost")} placeholder="28,00" />
               </Field>
             </div>
+            {/* Calculadora do rendimento — só aparece quando a unidade
+                escolhida exige uma conta. */}
+            {(ehArea || ehComprimento || ehFolha) && (
+              <div className="mt-3 rounded-lg border border-dashed border-cyan-300 bg-white/70 px-3 py-2.5">
+                <p className="mb-2 font-mono text-[10px] tracking-wide text-cyan-800 uppercase">
+                  {ehArea
+                    ? "Não sabe quantos m²? Meça o rolo"
+                    : ehFolha
+                      ? "Não sabe o total? Conte a embalagem"
+                      : "Não sabe o total? Meça o rolo"}
+                </p>
+                <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
+                  {ehArea && (
+                    <>
+                      <Field label="Largura (m)">
+                        <Input mono value={form.calcLargura || ""} onChange={set("calcLargura")} placeholder="1,22" />
+                      </Field>
+                      <Field label="Comprimento (m)">
+                        <Input mono value={form.calcComprimento || ""} onChange={set("calcComprimento")} placeholder="50" />
+                      </Field>
+                    </>
+                  )}
+                  {ehComprimento && (
+                    <Field label="Comprimento do rolo">
+                      <Input mono value={form.calcComprimento || ""} onChange={set("calcComprimento")} placeholder="26" />
+                    </Field>
+                  )}
+                  {ehFolha && (
+                    <>
+                      <Field label="Folhas por pacote">
+                        <Input mono value={form.calcFolhas || ""} onChange={set("calcFolhas")} placeholder="500" />
+                      </Field>
+                      <Field label="Pacotes na caixa" hint="1 se comprar avulso">
+                        <Input mono value={form.calcPacotes || ""} onChange={set("calcPacotes")} placeholder="10" />
+                      </Field>
+                    </>
+                  )}
+                  <div className="flex items-end">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={rendimentoCalculado === null}
+                      onClick={() =>
+                        setForm((f) => ({
+                          ...f,
+                          packQuantity: String(Number(rendimentoCalculado?.toFixed(3))),
+                        }))
+                      }
+                    >
+                      {rendimentoCalculado !== null
+                        ? `Usar ${Number(rendimentoCalculado.toFixed(3)).toLocaleString("pt-BR")}`
+                        : "Preencha ao lado"}
+                    </Button>
+                  </div>
+                </div>
+                {ehArea && rendimentoCalculado !== null && (
+                  <p className="mt-1.5 font-mono text-[10.5px] text-ink-500">
+                    {larguraRolo.toLocaleString("pt-BR")} × {compRolo.toLocaleString("pt-BR")} ={" "}
+                    <strong className="text-cyan-700">
+                      {Number(rendimentoCalculado.toFixed(3)).toLocaleString("pt-BR")} m²
+                    </strong>
+                  </p>
+                )}
+              </div>
+            )}
+
             {packUnitCost !== null ? (
               <p className="mt-3 rounded-lg bg-white px-3 py-2 font-mono text-[12px] text-ink-700">
                 <span className="text-ink-400">{formatMoney(packCost)} ÷ {packQty.toLocaleString("pt-BR")} = </span>
@@ -536,7 +773,24 @@ export function StockClient({ materials, suppliers, purchases, materialCats, mov
           <Field label="Custo unitário (R$)" hint={packUnitCost !== null ? "Calculado pela embalagem acima" : `Por ${form.unit || "unidade"}`}>
             <Input mono disabled={packUnitCost !== null} value={packUnitCost !== null ? packUnitCost.toFixed(6).replace(/0+$/, "").replace(/\.$/, "") : (form.unitCost || "")} onChange={set("unitCost")} />
           </Field>
-          <Field label="Fornecedor (texto)"><Input value={form.supplier || ""} onChange={set("supplier")} /></Field>
+          {/* Fornecedor de verdade: escolhido do cadastro, não digitado.
+              Digitar deixava "Kalunga", "kalunga" e "KALUNGA " como três
+              fornecedores diferentes — e nenhum deles com CNPJ ou prazo.
+              O campo de texto antigo continua embaixo, só de leitura,
+              enquanto houver material não vinculado. */}
+          <Field label="Fornecedor" hint={suppliers.length ? "Do cadastro de fornecedores" : "Cadastre em Estoque → Fornecedores"}>
+            <Combobox
+              value={form.supplierId || ""}
+              onChange={(v) => setForm((f) => ({ ...f, supplierId: v }))}
+              placeholder={suppliers.length ? "Selecionar…" : "Nenhum fornecedor cadastrado"}
+              options={suppliers.map((s) => ({ value: String(s.id), label: String(s.tradeName || s.name) }))}
+            />
+          </Field>
+          {form.supplier && !form.supplierId && (
+            <Field label="Fornecedor antigo (texto)" hint="Escolha acima para vincular ao cadastro">
+              <Input value={form.supplier} disabled />
+            </Field>
+          )}
           <Field label="Estoque atual"><Input mono value={form.stock || "0"} onChange={set("stock")} /></Field>
           <Field label="Estoque mínimo"><Input mono value={form.minStock || "0"} onChange={set("minStock")} /></Field>
         </div>
@@ -575,24 +829,112 @@ export function StockClient({ materials, suppliers, purchases, materialCats, mov
       {/* ── MODAL FORNECEDOR ── */}
       <Modal open={!!supModal} onClose={() => setSupModal(null)} title={supModal?.edit ? "Editar fornecedor" : "Novo fornecedor"}
         footer={<><Button variant="ghost" onClick={() => setSupModal(null)}>Cancelar</Button><Button loading={saving} icon="check" onClick={() => saveSup(supModal?.edit ? Number(supModal.edit.id) : undefined)}>Salvar</Button></>}>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <Field label="Razão social" required><Input value={form.name || ""} onChange={set("name")} /></Field>
-          <Field label="Nome fantasia"><Input value={form.tradeName || ""} onChange={set("tradeName")} /></Field>
-          <Field label="CNPJ"><Input mono value={form.document || ""} onChange={set("document")} /></Field>
-          <Field label="Contato"><Input value={form.contactName || ""} onChange={set("contactName")} /></Field>
-          <Field label="E-mail"><Input value={form.email || ""} onChange={set("email")} /></Field>
-          <Field label="Telefone"><Input mono value={form.phone || ""} onChange={set("phone")} /></Field>
-          <Field label="Cidade / UF">
-            <div className="flex gap-2">
-              <Input value={form.city || ""} onChange={set("city")} />
-              <Input value={form.state || ""} onChange={set("state")} className="w-16" />
+        <div className="space-y-4">
+          {/* IDENTIFICAÇÃO */}
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <Field label="Razão social" required erro={errosSup.name}>
+              <Input value={form.name || ""} onChange={(e) => { set("name")(e); setErrosSup((x) => (x.name ? { ...x, name: "" } : x)); }} placeholder="Papelaria Central LTDA" />
+            </Field>
+            <Field label="Nome fantasia" hint="Como você chama no dia a dia">
+              <Input value={form.tradeName || ""} onChange={set("tradeName")} placeholder="Papelaria Central" />
+            </Field>
+            <Field label="CNPJ" erro={errosSup.document}>
+              <Input mono value={form.document || ""} onChange={setMasked("document", formatCNPJ)} placeholder="00.000.000/0000-00" inputMode="numeric" />
+            </Field>
+            <Field label="Inscrição estadual" hint="Opcional">
+              <Input mono value={form.stateRegistration || ""} onChange={set("stateRegistration")} />
+            </Field>
+          </div>
+
+          {/* CONTATO */}
+          <div className="border-t border-paper-200 pt-3.5">
+            <p className="mb-2.5 text-[11.5px] font-bold text-ink-700">Contato</p>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <Field label="Pessoa de contato" hint="Com quem você fala">
+                <Input value={form.contactName || ""} onChange={set("contactName")} placeholder="Marcos — vendas" />
+              </Field>
+              <Field label="E-mail" erro={errosSup.email}>
+                <Input value={form.email || ""} onChange={(e) => { set("email")(e); setErrosSup((x) => (x.email ? { ...x, email: "" } : x)); }} placeholder="vendas@fornecedor.com.br" inputMode="email" />
+              </Field>
+              <Field label="Telefone" erro={errosSup.phone}>
+                <Input mono value={form.phone || ""} onChange={setMasked("phone", formatPhone)} placeholder="(21) 2038-3504" inputMode="tel" />
+              </Field>
+              <Field label="WhatsApp" erro={errosSup.whatsapp}>
+                <Input mono value={form.whatsapp || ""} onChange={setMasked("whatsapp", formatPhone)} placeholder="(21) 97886-9414" inputMode="tel" />
+              </Field>
+              <Field label="Site" className="sm:col-span-2" erro={errosSup.website}>
+                <Input value={form.website || ""} onChange={(e) => { set("website")(e); setErrosSup((x) => (x.website ? { ...x, website: "" } : x)); }} placeholder="fornecedor.com.br" />
+              </Field>
             </div>
-          </Field>
-          <Field label="Condição de pagamento"><Input value={form.paymentTerms || ""} onChange={set("paymentTerms")} placeholder="28 dias" /></Field>
-          <Field label="Lead time (dias)"><Input mono value={form.leadTimeDays || "0"} onChange={set("leadTimeDays")} /></Field>
-          <Field label="Ativo?">
-            <Select value={form.active ?? "true"} onChange={set("active")}><option value="true">Sim</option><option value="false">Não</option></Select>
-          </Field>
+          </div>
+
+          {/* ENDEREÇO — não existia; sem ele não dá para conferir frete
+              nem saber de onde vem a mercadoria. */}
+          <div className="border-t border-paper-200 pt-3.5">
+            <p className="mb-2.5 text-[11.5px] font-bold text-ink-700">Endereço</p>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-6">
+              <Field label="CEP" className="sm:col-span-2" hint={buscandoCep ? "buscando…" : "Preenche sozinho"} erro={errosSup.cep}>
+                <Input
+                  mono
+                  value={form.cep || ""}
+                  onChange={(e) => {
+                    const v = formatCEP(e.target.value);
+                    setForm((f) => ({ ...f, cep: v }));
+                    setErrosSup((x) => (x.cep ? { ...x, cep: "" } : x));
+                    if (v.replace(/\D/g, "").length === 8) void buscarCepFornecedor(v);
+                  }}
+                  placeholder="21810-000"
+                  inputMode="numeric"
+                />
+              </Field>
+              <Field label="Rua / Logradouro" className="sm:col-span-4">
+                <Input value={form.street || ""} onChange={set("street")} />
+              </Field>
+              <Field label="Número" className="sm:col-span-1">
+                <Input mono value={form.number || ""} onChange={set("number")} placeholder="910" />
+              </Field>
+              <Field label="Complemento" className="sm:col-span-2" hint="Sala, galpão, fundos">
+                <Input value={form.complement || ""} onChange={set("complement")} placeholder="Galpão 2" />
+              </Field>
+              <Field label="Bairro" className="sm:col-span-3">
+                <Input value={form.district || ""} onChange={set("district")} />
+              </Field>
+              <Field label="Cidade" className="sm:col-span-4">
+                <Input value={form.city || ""} onChange={set("city")} />
+              </Field>
+              <Field label="UF" className="sm:col-span-2" erro={errosSup.state}>
+                <Input
+                  mono
+                  value={form.state || ""}
+                  onChange={(e) => {
+                    setForm((f) => ({ ...f, state: e.target.value.toUpperCase().slice(0, 2) }));
+                    setErrosSup((x) => (x.state ? { ...x, state: "" } : x));
+                  }}
+                  placeholder="RJ"
+                  maxLength={2}
+                />
+              </Field>
+            </div>
+          </div>
+
+          {/* COMERCIAL */}
+          <div className="border-t border-paper-200 pt-3.5">
+            <p className="mb-2.5 text-[11.5px] font-bold text-ink-700">Condições comerciais</p>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+              <Field label="Condição de pagamento">
+                <Input value={form.paymentTerms || ""} onChange={set("paymentTerms")} placeholder="28 dias" />
+              </Field>
+              <Field label="Prazo de entrega" hint="Em dias" erro={errosSup.leadTimeDays}>
+                <Input mono value={form.leadTimeDays || "0"} onChange={(e) => { set("leadTimeDays")(e); setErrosSup((x) => (x.leadTimeDays ? { ...x, leadTimeDays: "" } : x)); }} inputMode="numeric" />
+              </Field>
+              <Field label="Ativo?">
+                <Select value={form.active ?? "true"} onChange={set("active")}><option value="true">Sim</option><option value="false">Não</option></Select>
+              </Field>
+              <Field label="Observações" className="sm:col-span-3" hint="O que você precisa lembrar deste fornecedor">
+                <Textarea value={form.notes || ""} onChange={set("notes")} placeholder="Pedido mínimo R$ 300. Entrega só às terças." />
+              </Field>
+            </div>
+          </div>
         </div>
       </Modal>
 

@@ -45,7 +45,7 @@ const cats = [
   ["Jato de Tinta", "jato-de-tinta", "pagina", "folha", "0.01", "0.03", "0.40", "0.10", "💧", "#3b82f6"],
   ["Sublimação", "sublimacao", "pagina", "folha", "0.01", "0.05", "0.50", "1.00", "🔥", "#f97316"],
   ["Térmica", "termica", "etiqueta", "etiqueta", "0.005", "0.03", "0.50", "1.00", "🏷️", "#8b5cf6"],
-  ["Recorte / Plotter", "recorte-plotter", "pagina", "folha", "0.01", "0.08", "0.50", "1.00", "✂️", "#ec4899"],
+  ["Recorte / Plotter", "recorte-plotter", "pagina", "folha", "0.004", "0.08", "0.50", "1.00", "✂️", "#ec4899"],
   ["Impressão 3D", "impressao-3d", "grama", "grama", "0", "0.05", "0.60", "1.00", "🧊", "#10b981"],
 ];
 const catId = {};
@@ -113,8 +113,19 @@ const cons = [
      categoria, o motor somaria os três em toda etiqueta. */
   ["termica", "Cabeça térmica (rateio)", "900", 300000, "both", "mechanical", null],
 
-  ["recorte-plotter", "Lâmina de corte (rateio)", "120", 3000, "both", "mechanical", null],
-  ["recorte-plotter", "Base de corte (rateio)", "90", 500, "both", "mechanical", "500 folhas confirmado pelo usuário."],
+  /* Cameo 5 — valores levantados pelo dono em 2026-08 com base no preço
+     oficial dos insumos. Lâmina Tipo B R$ 180 / 1.000 folhas = R$ 0,18;
+     base de corte padrão R$ 120 / 500 ciclos = R$ 0,24. Total R$ 0,42
+     por folha, que é o custo real de recorte hoje.
+
+     A base é o item que mais pesa. Trocando para a eletrostática (sem
+     cola) esse custo tende a sumir — por isso os dois estão separados
+     e editáveis na tela, não somados num número só. */
+  ["recorte-plotter", "Lâmina de corte Tipo B (rateio)", "180", 1000, "both", "mechanical", "R$ 180 ÷ 1.000 folhas = R$ 0,18/folha. Vida útil média em papel até 180g."],
+  /* Uma base só para tudo: o dono compra a A3 genérica e corta nela
+     tanto A3 quanto A4. A base original 12x12" (R$ 120) não entra na
+     conta porque não é usada — o A3 (420 mm) não cabe nos 305 mm dela. */
+  ["recorte-plotter", "Base de corte A3 (genérica, rateio)", "42", 500, "both", "mechanical", "R$ 42 ÷ 500 ciclos = R$ 0,084/folha. Cabe A3 e sobra espaço para A4."],
 
   ["impressao-3d", "Filamento PLA (1kg)", "110", 1000, "both", "colorant", null],
   ["impressao-3d", "Bico + manutenção (rateio por grama)", "150", 20000, "both", "mechanical", null],
@@ -161,7 +172,11 @@ const fmts = [
   ["termica", "Pulseira 250x25mm", "250", "25", "5", "1.00", "252", 1],
 
   ["recorte-plotter", "Folha de recorte A4", "210", "297", "1", "1.00", "0", 1],
-  ["recorte-plotter", "Folha de recorte A3", "297", "420", "2", "1.00", "0", 1],
+  /* areaFactor 1 (não 2) de propósito: no recorte o custo por folha é o
+     mesmo em A4 e A3. A lâmina se gasta pelo COMPRIMENTO DE CORTE, não
+     pelo tamanho da folha, e as duas usam a mesma base A3. Um A4 cheio
+     de letras miúdas gasta mais lâmina que um A3 com um círculo. */
+  ["recorte-plotter", "Folha de recorte A3", "297", "420", "1", "1.00", "0", 1],
 
   ["impressao-3d", "Peça 3D (por grama)", "0", "0", "1", "1.00", "0", 1],
 ];

@@ -35,7 +35,7 @@ export interface DefinicaoMensagem {
   /** Variáveis aceitas, com explicação para a tela. */
   variaveis: { nome: string; descricao: string }[];
   /** Agrupamento na tela. */
-  grupo: "bot" | "cadastro";
+  grupo: "bot" | "cadastro" | "orcamento" | "pedido" | "rapidas" | "campanha";
   /** false = mensagem essencial, não pode ser desligada. */
   desligavel?: boolean;
 }
@@ -150,6 +150,175 @@ export const CATALOGO: DefinicaoMensagem[] = [
       "{link}\n\n" +
       "Já deixei seu nome e telefone preenchidos. O link vale {validade} dias.\n\n" +
       "— {empresa}",
+  },
+
+  /* ── Orçamento por WhatsApp ──
+     Nasceu do balcão: o cliente pede orçamento e o sistema só sabia
+     imprimir. O texto fica aqui, editável pelo Painel, porque a forma
+     de falar com o cliente é do dono — não do programador.
+
+     `itens` chega pronto (uma linha por item) porque o preenchimento
+     é troca simples de {chave}: não sabe montar lista. */
+  {
+    slug: "orcamento.enviar",
+    titulo: "Envio do orçamento por WhatsApp",
+    quando: 'Você clica em "WhatsApp" na tela de Orçamentos.',
+    grupo: "orcamento",
+    variaveis: [
+      VAR_NOME,
+      VAR_EMPRESA,
+      { nome: "numero", descricao: "Número do orçamento (ex.: ORC-2026-0042)" },
+      { nome: "itens", descricao: "Lista dos itens, um por linha, já formatada" },
+      { nome: "total", descricao: "Valor total (ex.: R$ 300,00)" },
+      { nome: "validade", descricao: "Data até quando a proposta vale" },
+    ],
+    padrao:
+      "Olá, {nome}! 🙂\n\n" +
+      "Segue o orçamento que você pediu:\n\n" +
+      "*{numero}*\n" +
+      "{itens}\n\n" +
+      "*Total: {total}*\n" +
+      "_Válido até {validade}_\n\n" +
+      "Qualquer dúvida é só chamar. Se aprovar, me avisa que já coloco na produção!\n\n" +
+      "— {empresa}",
+  },
+
+  /* ── Pedido ──────────────────────────────────────────────────────
+     O texto que vai ao cliente quando o pedido já existe. Não é a
+     ordem de produção: aquilo é papel interno, cheio de status que
+     não dizem nada para quem comprou. Aqui vale o que ele quer saber
+     — o que pediu, quanto é, quando fica pronto. */
+  {
+    slug: "pedido.andamento",
+    titulo: "Andamento do pedido por WhatsApp",
+    quando: 'Você clica em "WhatsApp" na tela de Pedidos & OS.',
+    grupo: "pedido",
+    variaveis: [
+      VAR_NOME,
+      VAR_EMPRESA,
+      { nome: "numero", descricao: "Número do pedido (ex.: PED-2026-0042)" },
+      { nome: "situacao", descricao: "Em que pé está a produção, em português" },
+      { nome: "total", descricao: "Valor total (ex.: R$ 300,00)" },
+      { nome: "prazo", descricao: "Data prevista de entrega" },
+    ],
+    padrao:
+      "Oi, {nome}! 🙂\n\n" +
+      "Passando o andamento do seu pedido *{numero}*:\n\n" +
+      "*Situação:* {situacao}\n" +
+      "*Previsão de entrega:* {prazo}\n" +
+      "*Total:* {total}\n\n" +
+      "Qualquer dúvida é só chamar!\n\n" +
+      "— {empresa}",
+  },
+  {
+    slug: "pedido.pronto",
+    titulo: "Pedido pronto para retirada",
+    quando: 'Atalho na tela de Pedidos, quando o trabalho fica pronto.',
+    grupo: "pedido",
+    variaveis: [
+      VAR_NOME,
+      VAR_EMPRESA,
+      { nome: "numero", descricao: "Número do pedido" },
+      { nome: "total", descricao: "Valor total" },
+    ],
+    padrao:
+      "Boa notícia, {nome}! ✅\n\n" +
+      "Seu pedido *{numero}* está pronto.\n\n" +
+      "Pode retirar de segunda a sexta das 9h às 18h, ou sábado até as 13h, " +
+      "na Rua Araquém, 910 — Bangu.\n\n" +
+      "— {empresa}",
+  },
+
+  /* ── Respostas rápidas ──────────────────────────────────────────
+     Atalhos de um clique no chat, para quando o operador assumiu a
+     conversa e o robô está calado. São as perguntas que mais chegam:
+     digitar a mesma resposta dez vezes por dia é trabalho que o
+     sistema devia poupar.
+
+     Todas editáveis pelo Painel → Mensagens, como tudo que o cliente
+     lê. O texto sai exatamente como estiver ali. */
+  {
+    slug: "rapida.saudacao",
+    titulo: "Bom dia / boa tarde",
+    quando: "Atalho no chat — abrir o atendimento.",
+    grupo: "rapidas",
+    desligavel: true,
+    variaveis: [VAR_NOME, VAR_EMPRESA],
+    padrao:
+      "Oi, {nome}! Aqui é da {empresa} 🙂\n\n" +
+      "Em que posso te ajudar hoje?",
+  },
+  {
+    slug: "rapida.prazo",
+    titulo: "Prazo de produção",
+    quando: 'Atalho no chat — responder "quanto tempo demora?".',
+    grupo: "rapidas",
+    desligavel: true,
+    variaveis: [VAR_NOME],
+    padrao:
+      "O prazo depende do que você precisa, {nome}.\n\n" +
+      "Impressão rápida costuma sair no mesmo dia ou no dia seguinte. " +
+      "Trabalhos com arte, acabamento especial ou quantidade maior levam de 2 a 5 dias úteis.\n\n" +
+      "Me diz o que você precisa que eu te falo o prazo certinho.",
+  },
+  {
+    slug: "rapida.pagamento",
+    titulo: "Formas de pagamento",
+    quando: 'Atalho no chat — responder "como posso pagar?".',
+    grupo: "rapidas",
+    desligavel: true,
+    variaveis: [],
+    padrao:
+      "Aceitamos PIX, dinheiro, débito e crédito 💳\n\n" +
+      "No PIX ou dinheiro trabalhamos com 50% na aprovação e 50% na entrega. " +
+      "No cartão o valor é integral, e dá para parcelar.\n\n" +
+      "Qual fica melhor para você?",
+  },
+  {
+    slug: "rapida.endereco",
+    titulo: "Endereço e horário",
+    quando: 'Atalho no chat — responder "onde vocês ficam?".',
+    grupo: "rapidas",
+    desligavel: true,
+    variaveis: [VAR_EMPRESA],
+    padrao:
+      "Estamos na Rua Araquém, 910 — Bangu, Rio de Janeiro 📍\n\n" +
+      "Atendemos de segunda a sexta, das 9h às 18h, e sábado até as 13h.\n\n" +
+      "Te espero por aqui!",
+  },
+  {
+    slug: "rapida.arte",
+    titulo: "Pedir a arte",
+    quando: "Atalho no chat — pedir o arquivo para produzir.",
+    grupo: "rapidas",
+    desligavel: true,
+    variaveis: [VAR_NOME],
+    padrao:
+      "{nome}, me manda a arte por aqui mesmo 📎\n\n" +
+      "Se puder, em PDF ou PNG em boa qualidade. Se você ainda não tem, a gente cria para você — é só avisar.",
+  },
+  {
+    slug: "rapida.pronto",
+    titulo: "Pedido pronto para retirada",
+    quando: "Atalho no chat — avisar que o trabalho ficou pronto.",
+    grupo: "rapidas",
+    desligavel: true,
+    variaveis: [VAR_NOME, VAR_EMPRESA],
+    padrao:
+      "Boa notícia, {nome}! Seu pedido está pronto ✅\n\n" +
+      "Pode retirar de segunda a sexta das 9h às 18h, ou sábado até as 13h, " +
+      "na Rua Araquém, 910 — Bangu.\n\n" +
+      "— {empresa}",
+  },
+  {
+    slug: "rapida.aguarde",
+    titulo: "Já te respondo",
+    quando: "Atalho no chat — avisar que vai demorar um pouco.",
+    grupo: "rapidas",
+    desligavel: true,
+    variaveis: [],
+    padrao:
+      "Recebi sua mensagem! Só um minutinho que já te respondo direitinho 🙂",
   },
 ];
 

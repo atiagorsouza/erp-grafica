@@ -9,9 +9,12 @@ import os
 import sys
 import time
 import logging
+import signal
+import threading
 import psycopg2
 import psycopg2.extras
 from datetime import datetime
+from contextlib import contextmanager
 
 # Importar diretamente sem módulo (arquivo tem hífen, não underscore)
 import importlib.util
@@ -99,8 +102,17 @@ def update_job_status(conn, job_id, status, error=None):
         return False
 
 
-def process_job(job):
-    """Processar um job de impressão."""
+def process_job_with_timeout(job, timeout=60):
+    """
+    Processar um job com timeout.
+
+    Args:
+        job: Job dict com id, order_id, label_width_mm, label_height_mm
+        timeout: Segundos máximos (padrão: 60s)
+
+    Returns:
+        True se sucesso, False se timeout/erro
+    """
     job_id = job['id']
     order_id = job['order_id']
     width_mm = float(job['label_width_mm'])
@@ -108,28 +120,39 @@ def process_job(job):
 
     logger.info(f"📝 Processando job #{job_id} (pedido #{order_id})")
     logger.info(f"   Dimensões: {width_mm}mm × {height_mm}mm")
+    logger.info(f"   Timeout: {timeout}s")
 
-    try:
-        # Criar worker
-        if CONNECTION_TYPE == 'bluetooth':
-            worker = NiimbotRFIDWorker('bluetooth', NIIMBOT_MAC)
-        else:
-            worker = NiimbotRFIDWorker('usb', NIIMBOT_PORT)
+    result = {'success': False}
 
-        # Executar ciclo completo
-        success = worker.print_test_label()
-        worker.close()
+    def run_print():
+        try:
+            if CONNECTION_TYPE == 'bluetooth':
+                worker = NiimbotRFIDWorker('bluetooth', NIIMBOT_MAC)
+            else:
+                worker = NiimbotRFIDWorker('usb', NIIMBOT_PORT)
 
-        if success:
-            logger.info(f"✅ Job #{job_id} SUCESSO")
-            return True
-        else:
-            logger.error(f"❌ Job #{job_id} FALHOU no ciclo de impressão")
-            return False
+            success = worker.print_test_label()
+            worker.close()
+            result['success'] = success
+        except Exception as e:
+            logger.error(f"❌ Job #{job_id} ERRO: {e}")
+            result['success'] = False
 
-    except Exception as e:
-        logger.error(f"❌ Job #{job_id} ERRO: {e}")
+    thread = threading.Thread(target=run_print, daemon=False)
+    thread.daemon = False
+    thread.start()
+    thread.join(timeout=timeout)
+
+    if thread.is_alive():
+        logger.error(f"❌ Job #{job_id} TIMEOUT (excedeu {timeout}s)")
         return False
+
+    if result['success']:
+        logger.info(f"✅ Job #{job_id} SUCESSO")
+    else:
+        logger.error(f"❌ Job #{job_id} FALHOU no ciclo de impressão")
+
+    return result['success']
 
 
 def worker_loop():
@@ -161,21 +184,32 @@ def worker_loop():
                 time.sleep(10)
                 continue
 
-            # Atualizar para 'processing'
-            update_job_status(conn, job['id'], 'processing')
+            job_id = job['id']
+
+            # Atualizar para 'processing' com verificação
+            if not update_job_status(conn, job_id, 'processing'):
+                logger.error(f"❌ Falha ao atualizar status processing do job #{job_id}, ignorando")
+                conn.close()
+                time.sleep(2)
+                continue
+
             conn.close()
 
-            # Processar job
-            success = process_job(job)
+            # Processar job com timeout (máx 60 segundos)
+            success = process_job_with_timeout(job, timeout=60)
 
             # Reabrir conexão e atualizar status final
             conn = get_db()
             if conn:
                 if success:
-                    update_job_status(conn, job['id'], 'completed')
+                    update_job_status(conn, job_id, 'completed')
+                    logger.info(f"✓ Job #{job_id} marcado como 'completed' no BD")
                 else:
-                    update_job_status(conn, job['id'], 'error', 'Falha na impressão')
+                    update_job_status(conn, job_id, 'error', 'Falha na impressão')
+                    logger.info(f"✓ Job #{job_id} marcado como 'error' no BD")
                 conn.close()
+            else:
+                logger.error(f"⚠️  Não pude atualizar BD após job #{job_id}")
 
             # Aguardar antes do próximo job
             time.sleep(2)

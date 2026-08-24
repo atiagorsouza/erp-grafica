@@ -25,7 +25,7 @@ import {
 } from "@/components/ui";
 import { Icon } from "@/components/icons";
 import { cn } from "@/lib/format";
-import { formatCEP, formatDocumentAuto, formatPhone } from "@/lib/validators";
+import { formatCEP, formatDocumentAuto, formatPhone, isWhatsAppBlocked, whatsappNumber } from "@/lib/validators";
 import { applyDiscount, formatBRL, round2, toNumber, toPositive } from "@/lib/money";
 
 import type { CompanyIdentity } from "@/lib/company";
@@ -127,6 +127,131 @@ export function QuotesClient({
   const [viewId, setViewId] = useState<number | null>(null);
   const [newCustomerOpen, setNewCustomerOpen] = useState(false);
   const [printDoc, setPrintDoc] = useState<{ quote: Row; mode: "a4" | "thermal" } | null>(null);
+
+  /* Prévia do WhatsApp: o texto vem pronto do servidor (catálogo
+     editável) e fica editável aqui antes de sair. Mandar orçamento é a
+     cara da empresa indo para o cliente — ninguém envia às cegas. */
+  const [zap, setZap] = useState<null | {
+    quote: Row;
+    texto: string;
+    cliente: { nome: string; phone: string | null; whatsapp: string | null; whatsappOptOut: boolean | null } | null;
+  }>(null);
+  const [zapCarregando, setZapCarregando] = useState(false);
+  /* Enviando pelo serviço; e o aviso de "não deu, quer abrir o Web?".
+     Guardar o motivo separado do envio permite mostrar a saída
+     alternativa sem esconder o que houve. */
+  const [zapEnviando, setZapEnviando] = useState(false);
+  const [zapFalhou, setZapFalhou] = useState<string | null>(null);
+
+  /* Abre o WhatsApp Web com o texto — o caminho antigo, agora só como
+     saída quando o envio direto não é possível. */
+  function abrirNoWhatsAppWeb() {
+    if (!zap) return;
+    const c = zap.cliente;
+    const numero = c && !isWhatsAppBlocked(c as Row) ? whatsappNumber(c as Row) : "";
+    const url = numero
+      ? `https://wa.me/55${numero}?text=${encodeURIComponent(zap.texto)}`
+      : `https://wa.me/?text=${encodeURIComponent(zap.texto)}`;
+    window.open(url, "_blank");
+    setZap(null);
+    setZapFalhou(null);
+  }
+
+  /* Envio direto pelo serviço do WhatsApp (Baileys).
+     Antes o botão só abria o wa.me: o operador ainda precisava esperar
+     o WhatsApp Web, conferir o contato e clicar em enviar. Três passos
+     manuais para uma mensagem que o sistema já sabia escrever.
+
+     O serviço grava a mensagem em `whatsapp_mensagens`, então o envio
+     aparece sozinho no histórico do cliente — quem atender depois vê
+     o que já foi mandado. */
+  async function enviarPeloServico() {
+    if (!zap) return;
+    const c = zap.cliente;
+
+    if (c && isWhatsAppBlocked(c as Row)) {
+      toast.error(
+        "Cliente não aceita WhatsApp",
+        "Escolha outro canal. O envio direto respeita o opt-out."
+      );
+      return;
+    }
+
+    const numero = c ? whatsappNumber(c as Row) : "";
+    if (!numero) {
+      setZapFalhou("Este orçamento não tem número de WhatsApp no cadastro.");
+      return;
+    }
+
+    setZapEnviando(true);
+    setZapFalhou(null);
+    try {
+      const r = await fetch("/api/whatsapp/enviar", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ para: `55${numero}`, texto: zap.texto }),
+      });
+      const d = await r.json().catch(() => ({}));
+
+      if (r.ok) {
+        toast.success(
+          "Orçamento enviado",
+          `Foi para ${formatPhone(String(c?.whatsapp || c?.phone || ""))}.`
+        );
+        setZap(null);
+        return;
+      }
+
+      /* Cada motivo tem uma frase própria: "falhou" sozinho obriga o
+         operador a adivinhar se o problema é dele ou do sistema. */
+      if (r.status === 409) {
+        setZapFalhou(
+          "O WhatsApp do sistema está desconectado. Reconecte em Atendimento → WhatsApp → Conexão."
+        );
+      } else if (r.status === 403) {
+        setZapFalhou("Este contato pediu para não receber mensagens.");
+      } else if (r.status === 422) {
+        setZapFalhou(String(d?.erro || "O número do cadastro não é válido para WhatsApp."));
+      } else if (r.status === 502 || r.status === 503) {
+        /* O proxy devolve "não está rodando" quando não alcança o
+           serviço. Sozinha, a frase manda o operador chamar suporte;
+           com o caminho da tela, ele mesmo resolve. */
+        setZapFalhou(
+          "O serviço do WhatsApp não está no ar. Veja em Atendimento → WhatsApp → Conexão."
+        );
+      } else {
+        setZapFalhou(String(d?.erro || d?.error || "Não consegui enviar agora."));
+      }
+    } catch {
+      setZapFalhou("Não consegui falar com o serviço do WhatsApp.");
+    } finally {
+      setZapEnviando(false);
+    }
+  }
+
+  async function abrirWhatsApp(quote: Row) {
+    setZapCarregando(true);
+    try {
+      const r = await fetch("/api/quotes/whatsapp", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ id: Number(quote.id) }),
+      });
+      const d = await r.json();
+      if (!r.ok) {
+        toast.error("Não foi possível montar a mensagem", d?.error || "Tente de novo.");
+        return;
+      }
+      /* Limpa o aviso da tentativa anterior: reabrir a prévia já
+         mostrando "não deu para enviar" seria mentira. */
+      setZapFalhou(null);
+      setZap({ quote, texto: d.texto, cliente: d.cliente });
+    } catch {
+      toast.error("Não foi possível montar a mensagem", "Verifique a conexão.");
+    } finally {
+      setZapCarregando(false);
+    }
+  }
 
   const view = useMemo(() => quotes.find((q) => Number(q.id) === viewId) || null, [quotes, viewId]);
   const viewItems = useMemo(
@@ -513,6 +638,18 @@ export function QuotesClient({
                       >
                         Imprimir
                       </Button>
+                      {/* Mandar orçamento é a ação mais frequente desta
+                          tela. Antes só existia dentro da prévia de
+                          impressão (Imprimir → WhatsApp), o que obrigava
+                          a abrir um documento A4 para enviar uma
+                          mensagem. Aqui é um clique direto da lista. */}
+                      <IconButton
+                        size="sm"
+                        name="whatsapp"
+                        label="Enviar por WhatsApp"
+                        loading={zapCarregando}
+                        onClick={() => abrirWhatsApp(q)}
+                      />
                       {q.status === "rascunho" && (
                         <IconButton
                           size="sm"
@@ -1043,15 +1180,30 @@ export function QuotesClient({
         width="max-w-4xl"
         footer={
           <div className="flex items-center justify-between w-full">
-            <Button
-              variant="ink"
-              icon="printer"
-              onClick={() => {
-                window.print();
-              }}
-            >
-              Imprimir A4
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="ink"
+                icon="printer"
+                onClick={() => {
+                  window.print();
+                }}
+              >
+                Imprimir A4
+              </Button>
+              <Button
+                variant="soft"
+                icon="whatsapp"
+                disabled={zapCarregando}
+                onClick={() => {
+                  if (!printDoc) return;
+                  const q = printDoc.quote;
+                  setPrintDoc(null);
+                  abrirWhatsApp(q);
+                }}
+              >
+                {zapCarregando ? "Montando…" : "WhatsApp"}
+              </Button>
+            </div>
             <Button variant="ghost" onClick={() => setPrintDoc(null)}>
               Fechar
             </Button>
@@ -1073,6 +1225,92 @@ export function QuotesClient({
           </div>
         )}
       </Drawer>
+
+      {/* ── PRÉVIA DO WHATSAPP ──
+         O texto sai do catálogo editável (Painel → Mensagens) e pode
+         ser ajustado aqui antes de enviar, sem virar padrão. */}
+      <Modal
+        open={!!zap}
+        onClose={() => setZap(null)}
+        title="Enviar orçamento por WhatsApp"
+        subtitle="Confira e ajuste o texto antes de enviar. Para mudar o padrão, use Painel → Mensagens."
+        width="max-w-lg"
+        footer={
+          <div className="flex w-full items-center justify-between gap-2">
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setZap(null);
+                setZapFalhou(null);
+              }}
+            >
+              Cancelar
+            </Button>
+            {/* Enquanto o envio direto for possível, é UM clique. A
+                saída pelo WhatsApp Web só aparece quando o direto
+                falha — assim o caminho bom não fica competindo com o
+                caminho de emergência. */}
+            {zapFalhou ? (
+              <Button icon="whatsapp" variant="outline" onClick={abrirNoWhatsAppWeb}>
+                Abrir no WhatsApp Web
+              </Button>
+            ) : (
+              <Button icon="whatsapp" onClick={enviarPeloServico} disabled={zapEnviando}>
+                {zapEnviando ? "Enviando…" : "Enviar pelo WhatsApp"}
+              </Button>
+            )}
+          </div>
+        }
+      >
+        {zap && (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-2 text-[11.5px]">
+              <span className="text-ink-500">
+                Para:{"\u00a0"}
+                <strong className="text-ink-700">
+                  {zap.cliente?.nome || "— sem cliente —"}
+                </strong>
+              </span>
+              {zap.cliente && isWhatsAppBlocked(zap.cliente as Row) ? (
+                <Badge tone="magenta">Não aceita WhatsApp</Badge>
+              ) : whatsappNumber((zap.cliente || {}) as Row) ? (
+                <span className="font-mono text-ink-500">
+                  {formatPhone(String(zap.cliente?.whatsapp || zap.cliente?.phone || ""))}
+                </span>
+              ) : (
+                <Badge tone="cyan">Sem número — você escolhe</Badge>
+              )}
+            </div>
+
+            <Textarea
+              value={zap.texto}
+              onChange={(e) => setZap({ ...zap, texto: e.target.value })}
+              rows={12}
+              className="font-mono text-[12px] leading-relaxed"
+            />
+
+            {zapFalhou && (
+              <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2.5">
+                <p className="text-[12px] font-semibold text-amber-900">
+                  Não deu para enviar pelo sistema
+                </p>
+                <p className="mt-0.5 text-[11.5px] leading-relaxed text-amber-800">
+                  {zapFalhou}
+                </p>
+                <p className="mt-1.5 text-[11px] text-amber-700">
+                  O texto está pronto: use o botão ao lado para abrir o
+                  WhatsApp Web e enviar por lá.
+                </p>
+              </div>
+            )}
+
+            <p className="text-[11px] text-ink-400">
+              O WhatsApp mostra *texto entre asteriscos* em negrito e
+              _entre sublinhados_ em itálico.
+            </p>
+          </div>
+        )}
+      </Modal>
 
       {/* ÁREA ISOLADA DE IMPRESSÃO A4 PROPOSTA COMERCIAL */}
       {printDoc && (

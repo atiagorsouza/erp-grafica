@@ -25,7 +25,8 @@ import {
   toNumber,
   toPositive,
 } from "@/lib/money";
-import { formatDocumentAuto, isWhatsAppBlocked, whatsappNumber } from "@/lib/validators";
+import { formatCEP, formatDocumentAuto, formatPhone, isWhatsAppBlocked, whatsappNumber } from "@/lib/validators";
+import { focarPrimeiroErro, semErros, validaClienteRapido, type ErrosCadastro } from "@/lib/cadastro-validacao";
 
 import type { CompanyIdentity } from "@/lib/company";
 export type PosCompany = CompanyIdentity;
@@ -245,6 +246,7 @@ const uid = () =>
    ================================================================== */
 
 export function PosClient({
+  sellers,
   products: allProducts,
   productCats,
   customers: initialCustomers,
@@ -254,6 +256,8 @@ export function PosClient({
   pdvConfig,
   cashSession: initialSession,
 }: {
+  /** vendedores cadastrados — o cupom deixa de depender de texto livre */
+  sellers: { id: number; nome: string }[];
   products: PosProduct[];
   productCats: PosCategory[];
   customers: PosCustomer[];
@@ -281,6 +285,10 @@ export function PosClient({
   const [splitOn, setSplitOn] = useState(false);
   const [splitLines, setSplitLines] = useState<SplitLine[]>([]);
   const [sellerName, setSellerName] = useState(pdvConfig.sellerDefault || "OPERADOR");
+  /* Guardar o ID além do nome: o nome ainda vai no cupom (e no
+     histórico antigo), mas é o ID que liga a venda ao extrato de
+     comissão. Sem ele, "Tiago" e "TIAGO" seriam pessoas diferentes. */
+  const [sellerId, setSellerId] = useState<number | null>(null);
   const [deliveryMode, setDeliveryMode] = useState(
     pdvConfig.deliveryDefault || "Retirada no balcão"
   );
@@ -419,6 +427,17 @@ export function PosClient({
 
   /* ---------------- catálogo ---------------- */
   const products = useMemo(() => allProducts.filter((p) => p.active !== false), [allProducts]);
+  /* Só as categorias que TÊM produto. O cadastro acumulou 60
+     categorias de várias tentativas de taxonomia; mostrar todas
+     enche a tela de abas vazias e esconde as três que importam.
+     Categoria sem produto não ajuda ninguém no balcão. */
+  const catsComProduto = useMemo(() => {
+    const usadas = new Set(products.map((p) => p.productCategoryId));
+    return productCats
+      .filter((c) => usadas.has(c.id))
+      .sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+  }, [productCats, products]);
+
 
   const filtered = useMemo(() => {
     const term = q.trim().toLowerCase();
@@ -827,6 +846,7 @@ export function PosClient({
           cashSessionId: session?.id ?? null,
           allowNegativeStock: allowNegativeStock || pdvConfig.allowNegativeStock,
           sellerName,
+          sellerId,
           deliveryMode,
           deliveryDate: finalDeliveryDate,
           notes,
@@ -1036,7 +1056,7 @@ export function PosClient({
             >
               Tudo
             </button>
-            {productCats.map((c) => (
+            {catsComProduto.map((c) => (
               <button
                 key={c.id}
                 onClick={() => setCatFilter(String(c.id))}
@@ -1063,7 +1083,18 @@ export function PosClient({
               {filtered.map((p) => {
                 const cat = productCats.find((c) => c.id === p.productCategoryId);
                 const inCart = cart.find((l) => l.productId === p.id);
-                const price = toNumber(p.finalPrice, 0);
+
+                /* Produto com faixa de preço é vendido por UNIDADE, e o
+                   `finalPrice` guarda o custo do LOTE — mostrar esse
+                   número no card faz todo adesivo aparecer por R$ 16,67,
+                   independente do tamanho. O que vale para o operador é
+                   o preço unitário da primeira faixa. */
+                const faixas = (p.priceTiers || [])
+                  .map((t) => ({ min: toNumber(t.minQuantity, 0), unit: toNumber(t.unitPrice, 0) }))
+                  .filter((t) => t.min > 0)
+                  .sort((a, b) => a.min - b.min);
+                const price = faixas.length ? faixas[0].unit : toNumber(p.finalPrice, 0);
+                const minFaixa = faixas.length ? faixas[0].min : 0;
                 const low = p.trackStock && toNumber(p.stock, 0) <= toNumber(p.minStock, 0);
                 return (
                   <button
@@ -1092,6 +1123,11 @@ export function PosClient({
                         )}
                       >
                         {price > 0 ? formatBRL(price) : "sem preço"}
+                        {minFaixa > 1 && (
+                          <span className="ml-1 text-[10px] font-normal text-ink-400">
+                            /un · mín {minFaixa}
+                          </span>
+                        )}
                       </span>
                       {inCart && (
                         <span className="animate-pop-in flex h-6 min-w-6 items-center justify-center rounded-full bg-ink-900 px-1.5 font-mono text-[11px] font-semibold text-white tnum">
@@ -1575,13 +1611,36 @@ export function PosClient({
                   <div className="mt-2 space-y-2 rounded-lg bg-white/[0.02] p-2.5 border border-ink-800 text-[11px]">
                     <div>
                       <label className="text-[10px] text-ink-400 block mb-1">Vendedor / Atendente:</label>
-                      <Input
-                        value={sellerName}
-                        onChange={(e) => handleSellerChange(e.target.value)}
-                        placeholder="Ex.: TIAGO SOUZA"
-                        tone="dark"
-                        className="h-7 text-[11px]"
-                      />
+                      {/* Com vendedores cadastrados, escolher da lista —
+                          é o que liga a venda ao extrato de comissão.
+                          Sem cadastro, segue o campo livre de sempre,
+                          para não travar quem ainda não cadastrou. */}
+                      {sellers.length > 0 ? (
+                        <Select
+                          value={sellerId ? String(sellerId) : ""}
+                          onChange={(e) => {
+                            const id = Number(e.target.value) || null;
+                            setSellerId(id);
+                            const v = sellers.find((s) => s.id === id);
+                            handleSellerChange(v ? v.nome : "OPERADOR");
+                          }}
+                          tone="dark"
+                          className="h-7 text-[11px]"
+                        >
+                          <option value="">— sem vendedor —</option>
+                          {sellers.map((s) => (
+                            <option key={s.id} value={String(s.id)}>{s.nome}</option>
+                          ))}
+                        </Select>
+                      ) : (
+                        <Input
+                          value={sellerName}
+                          onChange={(e) => handleSellerChange(e.target.value)}
+                          placeholder="Ex.: TIAGO SOUZA"
+                          tone="dark"
+                          className="h-7 text-[11px]"
+                        />
+                      )}
                     </div>
                     <div>
                       <label className="text-[10px] text-ink-400 block mb-1">Situação / Entrega:</label>
@@ -2419,6 +2478,10 @@ function QuickCustomerModal({
   const [street, setStreet] = useState("");
   const [number, setNumber] = useState("");
   const [complement, setComplement] = useState("");
+  const [erros, setErros] = useState<ErrosCadastro>({});
+  /* Motivo da dispensa de CPF — o escape da regra de documento
+     obrigatório. Só aparece quando o campo está vazio. */
+  const [docWaiver, setDocWaiver] = useState("");
   const [district, setDistrict] = useState("");
   const [city, setCity] = useState("");
   const [state, setState] = useState("");
@@ -2450,7 +2513,21 @@ function QuickCustomerModal({
   };
 
   const handleSave = async () => {
-    if (name.trim().length < 2) return toast.error("Informe o nome do cliente");
+    /* No balcão o operador digita rápido e com o cliente esperando.
+       Vale conferir aqui: CPF errado só reaparece na hora de emitir
+       documento, quando a venda já foi. */
+    const e = validaClienteRapido({ name, document, phone, cep, state });
+    /* CPF é obrigatório também no balcão (regra do dono). O escape de
+       boa-fé mantém a venda andando quando o cliente não tem o
+       documento na mão — mas exige o motivo por escrito. */
+    if (!document.replace(/\D/g, "") && docWaiver.trim().length < 3) {
+      e.document = "CPF é obrigatório — ou diga o motivo abaixo";
+    }
+    setErros(e);
+    if (!semErros(e)) {
+      setTimeout(focarPrimeiroErro, 0);
+      return toast.error(Object.values(e)[0] || "Confira os campos");
+    }
     setLoading(true);
     try {
       const payload = {
@@ -2470,6 +2547,7 @@ function QuickCustomerModal({
         /* Cadastro rápido no meio do atendimento: documento fica
            opcional aqui (a tela de Clientes & CRM exige). */
         quickEntry: true,
+        documentWaiverReason: docWaiver.trim() || null,
       };
 
       const res = await fetch("/api/crud/customers", {
@@ -2524,44 +2602,57 @@ function QuickCustomerModal({
       }
     >
       <div className="space-y-3 text-[12.5px]">
-        <Field label="Nome Completo / Razão Social *">
+        <Field label="Nome Completo / Razão Social *" erro={erros.name}>
           <Input
             value={name}
-            onChange={(e) => setName(e.target.value)}
+            onChange={(e) => { setName(e.target.value); setErros((x) => (x.name ? { ...x, name: "" } : x)); }}
             placeholder="Ex.: RAPHAELA PINHEIRO"
             autoFocus
           />
         </Field>
 
         <div className="grid grid-cols-2 gap-2.5">
-          <Field label="CPF / CNPJ">
+          <Field label="CPF / CNPJ" erro={erros.document}>
             <Input
               mono
               value={document}
-              onChange={(e) => setDocument(e.target.value)}
+              onChange={(e) => { setDocument(formatDocumentAuto(e.target.value)); setErros((x) => (x.document ? { ...x, document: "" } : x)); }}
               placeholder="000.000.000-00"
+              inputMode="numeric"
             />
           </Field>
-          <Field label="Telefone / WhatsApp">
+          <Field label="Telefone / WhatsApp" erro={erros.phone}>
             <Input
               mono
               value={phone}
-              onChange={(e) => setPhone(e.target.value)}
+              onChange={(e) => { setPhone(formatPhone(e.target.value)); setErros((x) => (x.phone ? { ...x, phone: "" } : x)); }}
               placeholder="(21) 99690-2449"
+              inputMode="tel"
             />
           </Field>
         </div>
 
+        {!document.replace(/\D/g, "") && (
+          <Field label="Cliente está sem o CPF agora?" hint="Escreva o motivo para concluir mesmo assim">
+            <Input
+              value={docWaiver}
+              onChange={(e) => { setDocWaiver(e.target.value); setErros((x) => (x.document ? { ...x, document: "" } : x)); }}
+              placeholder="Ex.: vai trazer depois — cliente conhecido"
+            />
+          </Field>
+        )}
+
         <div className="border-t border-paper-200 pt-2 space-y-2">
           <p className="font-semibold text-ink-800 text-[11.5px]">Endereço (impresso no cupom)</p>
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-            <Field label="CEP" hint={fetchingCep ? "buscando..." : undefined}>
+            <Field label="CEP" hint={fetchingCep ? "buscando..." : undefined} erro={erros.cep}>
               <Input
                 mono
                 value={cep}
-                onChange={(e) => setCep(e.target.value)}
+                onChange={(e) => { setCep(formatCEP(e.target.value)); setErros((x) => (x.cep ? { ...x, cep: "" } : x)); }}
                 onBlur={handleCepBlur}
                 placeholder="21863-090"
+                inputMode="numeric"
               />
             </Field>
             <div className="col-span-2">
@@ -2608,11 +2699,13 @@ function QuickCustomerModal({
                 placeholder="RIO DE JANEIRO"
               />
             </Field>
-            <Field label="UF">
+            <Field label="UF" erro={erros.state}>
               <Input
+                mono
                 value={state}
-                onChange={(e) => setState(e.target.value)}
+                onChange={(e) => { setState(e.target.value.toUpperCase().slice(0, 2)); setErros((x) => (x.state ? { ...x, state: "" } : x)); }}
                 placeholder="RJ"
+                maxLength={2}
               />
             </Field>
           </div>

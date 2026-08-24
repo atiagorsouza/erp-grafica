@@ -21,11 +21,40 @@ import "server-only";
 import { randomBytes } from "node:crypto";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { customers, registrationLinks } from "@/db/schema";
+import { customers, registrationLinks, settings } from "@/db/schema";
 
-/** Dias de validade. Curto o bastante para não virar porta aberta,
- *  longo o bastante para o cliente responder na segunda-feira. */
+/** Dias de validade — valor de reserva. Curto o bastante para não
+ *  virar porta aberta, longo o bastante para o cliente responder na
+ *  segunda-feira.
+ *
+ *  Só vale quando o painel não tem nada gravado: o número real vem de
+ *  `getValidadeDias()`. Deixado exportado porque a página pública o usa
+ *  como texto de apoio antes de consultar o banco. */
 export const VALIDADE_DIAS = 7;
+
+/** Quanto tempo o link de cadastro fica de pé, conforme o painel.
+ *
+ *  Era constante no código: mudar exigia programador. Sete dias é
+ *  pouco para quem manda orçamento na sexta e só é respondido depois
+ *  do fim de semana seguinte — e era exatamente a queixa do dono.
+ *
+ *  Limites: 1 a 90 dias. Abaixo de 1 o link nasce morto; acima de 90
+ *  deixa de ser link de cadastro e vira porta aberta. Valor inválido
+ *  ou em branco cai no padrão em vez de derrubar o cadastro. */
+export async function getValidadeDias(): Promise<number> {
+  try {
+    const [linha] = await db
+      .select({ value: settings.value })
+      .from(settings)
+      .where(eq(settings.key, "cadastro_link_validade_dias"))
+      .limit(1);
+    const n = Number(String(linha?.value ?? "").trim());
+    if (!Number.isFinite(n)) return VALIDADE_DIAS;
+    return Math.max(1, Math.min(90, Math.floor(n)));
+  } catch {
+    return VALIDADE_DIAS;
+  }
+}
 
 /* Base58: alfabeto sem 0/O/I/l. O link é lido em voz alta no telefone
    com alguma frequência — ambiguidade visual custa atendimento. */
@@ -72,7 +101,8 @@ export async function criarLinkCadastro(
         )
       );
 
-    const expiresAt = new Date(Date.now() + VALIDADE_DIAS * 24 * 60 * 60 * 1000);
+    const dias = await getValidadeDias();
+    const expiresAt = new Date(Date.now() + dias * 24 * 60 * 60 * 1000);
     const [row] = await tx
       .insert(registrationLinks)
       .values({

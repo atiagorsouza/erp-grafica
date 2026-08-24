@@ -208,6 +208,9 @@ export interface ProductCalcInput {
   format?: PrintFormatLike | null;
   colorMode: ColorMode;
   pagesPerUnit: number; // páginas/impressões por unidade de produto
+  /* Peças que saem de uma folha. Quando maior que 1, o produto é
+     fracionado e o clique se divide entre as peças. */
+  piecesPerSheet?: number | string | null;
   copies: number; // vias/copias por unidade
   /** minutos de máquina por unidade; com `printer.hourlyRate` vira custo */
   machineMinutes?: number;
@@ -256,6 +259,17 @@ export interface ProductCalcResult {
 export function computeProduct(input: ProductCalcInput): ProductCalcResult {
   const lines: BreakdownLine[] = [];
 
+  /* Quantas peças saem de uma folha.
+   *
+   * Quando o produto é fracionado — 4 panfletos numa A4, 10 cartões,
+   * 9 polaroids — a folha inteira é impressa de uma vez e o clique
+   * precisa ser dividido entre as peças. Cobrar o clique cheio em
+   * cada panfleto multiplica o custo da impressão por quatro.
+   *
+   * O modo batch já fazia isso (`computeBatchProduct`); o modo unit
+   * não fazia, e era o modo usado por panfleto, cartão e copo. */
+  const pieces = Math.max(num(input.piecesPerSheet, 1), 1);
+
   // 1) IMPRESSÃO -----------------------------------------------------
   let printing = 0;
   if (input.printer && input.category) {
@@ -270,13 +284,14 @@ export function computeProduct(input: ProductCalcInput): ProductCalcResult {
       colorMode: input.colorMode,
       printSides: 1,
     });
-    printing = perPage * num(input.pagesPerUnit) * num(input.copies);
+    printing = (perPage * num(input.pagesPerUnit) * num(input.copies)) / pieces;
     const fmt = input.format?.name ? ` · ${input.format.name}` : "";
+    const frac = pieces > 1 ? ` ÷ ${pieces} por folha` : "";
     lines.push({
       label: "Impressão",
       detail: `${num(input.copies)} via(s) × ${num(input.pagesPerUnit)} pg × ${formatMoney(
         perPage
-      )}/pg (${input.colorMode === "color" ? "colorido" : "P&B"}${fmt})`,
+      )}/pg (${input.colorMode === "color" ? "colorido" : "P&B"}${fmt})${frac}`,
       amount: printing,
     });
   } else if (input.category) {
@@ -285,12 +300,12 @@ export function computeProduct(input: ProductCalcInput): ProductCalcResult {
       input.consumables,
       input.colorMode
     );
-    printing = perPage * num(input.pagesPerUnit) * num(input.copies);
+    printing = (perPage * num(input.pagesPerUnit) * num(input.copies)) / pieces;
     lines.push({
       label: "Impressão (categoria)",
       detail: `${num(input.copies)} via(s) × ${num(input.pagesPerUnit)} pg × ${formatMoney(
         perPage
-      )}/pg`,
+      )}/pg${pieces > 1 ? ` ÷ ${pieces} por folha` : ""}`,
       amount: printing,
     });
   }

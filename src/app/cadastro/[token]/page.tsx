@@ -17,7 +17,7 @@ import {
   ipDaRequisicao,
   registrarAbertura,
   resolverToken,
-  VALIDADE_DIAS,
+  getValidadeDias,
 } from "@/lib/registration-links";
 import { CadastroPublicoForm } from "@/components/public/CadastroPublicoForm";
 
@@ -117,7 +117,7 @@ export default async function CadastroPublicoPage({
       token={link.token}
       empresa={info.nome}
       telefoneEmpresa={info.telefone}
-      validadeDias={VALIDADE_DIAS}
+      validadeDias={await getValidadeDias()}
       expiraEm={link.expiresAt.toISOString()}
       inicial={{
         type: (cliente.type as "pf" | "pj") || "pf",

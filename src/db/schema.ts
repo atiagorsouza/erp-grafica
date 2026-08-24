@@ -116,6 +116,11 @@ export const customers = pgTable("customers", {
   name: text("name").notNull(), // nome (PF) ou razão social (PJ)
   tradeName: text("trade_name"), // nome fantasia
   document: text("document"), // CPF ou CNPJ
+  /* Escape de boa-fé: CPF é obrigatório, mas o balcão não pode parar
+     quando o cliente não tem o documento na mão. Preenchido, dispensa
+     a trava e deixa registrado QUEM decidiu e POR QUÊ. */
+  documentWaiverReason: text("document_waiver_reason"),
+  documentWaiverAt: timestamp("document_waiver_at", { mode: "date" }),
   // contato
   email: text("email"),
   phone: text("phone"),
@@ -365,6 +370,13 @@ export const printFormats = pgTable("print_formats", {
 export const materials = pgTable("materials", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(), // Papel A4 75g, Papel Cartolina, Vinil, TNT...
+  /** código interno do insumo, se a gráfica usar um */
+  sku: text("sku"),
+  /* Código de barras da embalagem (EAN/UPC/DUN).
+     Com o leitor na mão, cadastrar e conferir estoque deixa de ser
+     digitação: bipa e o campo preenche. É o mesmo caminho que o PDV
+     já usa para produtos. */
+  barcode: text("barcode"),
   categoryId: integer("category_id").references(() => itemCategories.id, {
     onDelete: "set null",
   }),
@@ -390,7 +402,17 @@ export const materials = pgTable("materials", {
   packQuantity: numeric("pack_quantity", { precision: 12, scale: 3 }).default("0"),
   /** preço pago na embalagem fechada */
   packCost: numeric("pack_cost", { precision: 12, scale: 4 }).default("0"),
+  /* Fornecedor como TEXTO — legado. Continua sendo gravado e exibido
+     para não perder o que já foi digitado em centenas de materiais.
+     O cadastro de verdade é `supplierId`; este campo vira só o nome
+     de quem ainda não foi vinculado. */
   supplier: text("supplier"),
+  /** fornecedor cadastrado: liga o insumo a CNPJ, contato e prazo.
+      A referência é preguiçosa (arrow) porque `suppliers` só é
+      declarada mais abaixo neste arquivo. */
+  supplierId: integer("supplier_id").references((): AnyPgColumn => suppliers.id, {
+    onDelete: "set null",
+  }),
   stock: numeric("stock", { precision: 12, scale: 3 }).default("0"),
   minStock: numeric("min_stock", { precision: 12, scale: 3 }).default("0"),
   notes: text("notes"),
@@ -429,6 +451,34 @@ export const stockMovements = pgTable("stock_movements", {
 ]);
 
 /* ------------------------------------------------------------------ */
+/*  VENDEDORES E COMISSÃO                                              */
+/* ------------------------------------------------------------------ */
+/**
+ * Quem vende. Antes existia só `seller_name` como texto livre em
+ * orçamentos, pedidos e vendas — então "Tiago", "tiago" e "TIAGO "
+ * viravam três vendedores diferentes, e não havia como somar o que
+ * cada um vendeu nem quanto tinha a receber.
+ *
+ * O texto continua sendo gravado junto (o histórico não se perde e
+ * quem não for vinculado ainda aparece), mas o vínculo de verdade é
+ * o `sellerId`.
+ */
+export const sellers = pgTable("sellers", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  /** apelido curto que aparece no PDV e no cupom */
+  nickname: text("nickname"),
+  document: text("document"),
+  phone: text("phone"),
+  email: text("email"),
+  /** percentual de comissão deste vendedor — 3 = 3% */
+  commissionRate: numeric("commission_rate", { precision: 6, scale: 3 }).default("0"),
+  active: boolean("active").default(true).notNull(),
+  notes: text("notes"),
+  createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+});
+
+/* ------------------------------------------------------------------ */
 /*  FORNECEDORES E COMPRAS                                             */
 /* ------------------------------------------------------------------ */
 export const suppliers = pgTable("suppliers", {
@@ -436,6 +486,8 @@ export const suppliers = pgTable("suppliers", {
   name: text("name").notNull(),
   tradeName: text("trade_name"),
   document: text("document"),
+  /** inscrição estadual — nota de compra com IE errada volta */
+  stateRegistration: text("state_registration"),
   contactName: text("contact_name"),
   email: text("email"),
   phone: text("phone"),
@@ -806,6 +858,10 @@ export const quotes = pgTable("quotes", {
   paymentMethod: text("payment_method"),
   channel: text("channel").default("Atendimento"),
   sellerName: text("seller_name"),
+  /** vendedor do cadastro — o texto acima vira só histórico */
+  sellerId: integer("seller_id").references((): AnyPgColumn => sellers.id, {
+    onDelete: "set null",
+  }),
   notes: text("notes"),
   createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
 }, (table) => [
@@ -879,6 +935,10 @@ export const orders = pgTable("orders", {
   balanceMethod: text("balance_method"),
   channel: text("channel").default("Atendimento"),
   sellerName: text("seller_name"),
+  /** vendedor do cadastro — o texto acima vira só histórico */
+  sellerId: integer("seller_id").references((): AnyPgColumn => sellers.id, {
+    onDelete: "set null",
+  }),
   notes: text("notes"),
   createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
@@ -988,6 +1048,10 @@ export const sales = pgTable("sales", {
   receivedAmount: numeric("received_amount", { precision: 12, scale: 2 }),
   changeAmount: numeric("change_amount", { precision: 12, scale: 2 }),
   sellerName: text("seller_name"),
+  /** vendedor do cadastro — o texto acima vira só histórico */
+  sellerId: integer("seller_id").references((): AnyPgColumn => sellers.id, {
+    onDelete: "set null",
+  }),
   deliveryMode: text("delivery_mode"),
   deliveryDate: text("delivery_date"),
   notes: text("notes"),
@@ -1148,6 +1212,7 @@ export type CrmLead = typeof crmLeads.$inferSelect;
 export type CrmActivity = typeof crmActivities.$inferSelect;
 export type Order = typeof orders.$inferSelect;
 export type ArtApproval = typeof artApprovals.$inferSelect;
+export type Seller = typeof sellers.$inferSelect;
 export type Supplier = typeof suppliers.$inferSelect;
 export type Purchase = typeof purchases.$inferSelect;
 export type ProductionSchedule = typeof productionSchedules.$inferSelect;

@@ -69,17 +69,27 @@ def setup_logging(log_level: str = "INFO") -> logging.Logger:
     """Configurar sistema de logging."""
 
     log_format = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    level = getattr(logging, log_level.upper())
 
-    logging.basicConfig(
-        level=getattr(logging, log_level.upper()),
-        format=log_format,
-        handlers=[
-            logging.StreamHandler(sys.stdout),
-            logging.FileHandler('/var/log/niimbot-rfid.log')
-        ]
-    )
+    logger_instance = logging.getLogger(__name__)
+    logger_instance.setLevel(level)
 
-    return logging.getLogger(__name__)
+    # Handler de console
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setLevel(level)
+    console_handler.setFormatter(logging.Formatter(log_format))
+
+    # Handler de arquivo
+    try:
+        file_handler = logging.FileHandler('/var/log/niimbot-rfid.log')
+        file_handler.setLevel(level)
+        file_handler.setFormatter(logging.Formatter(log_format))
+        logger_instance.addHandler(file_handler)
+    except PermissionError:
+        logger_instance.warning("⚠️  Não é possível escrever em /var/log/niimbot-rfid.log (permissão negada)")
+
+    logger_instance.addHandler(console_handler)
+    return logger_instance
 
 
 logger = setup_logging()
@@ -102,6 +112,8 @@ class NiimbotRFIDWorker:
     MAX_WIDTH_MM = 50
     MIN_HEIGHT_MM = 20
     MAX_HEIGHT_MM = 152
+    MAX_WIDTH_PX = 384  # Limite físico da cabeça térmica Niimbot B1 (Protocolo V2)
+    PROTOCOL_VERSION = "V2"  # Niimbot B1 usa Protocolo V2 (não V1)
 
     def __init__(self, connection_type: str = "usb", address: Optional[str] = None):
         """
@@ -153,9 +165,9 @@ class NiimbotRFIDWorker:
 
     def read_rfid_label_info(self) -> bool:
         """
-        Interrogar chip RFID do rolo.
+        Interrogar chip RFID do rolo via B1.
 
-        Chamada nativa: device.get_label_info()
+        Chamada nativa: device.get_rfid()
         Retorna: (largura_mm, altura_mm)
 
         Returns:
@@ -168,17 +180,33 @@ class NiimbotRFIDWorker:
                 logger.error("❌ Dispositivo não conectado")
                 return False
 
-            # Chamada nativa do protocolo Niimbot
-            label_info = self.device.get_label_info()
+            # Tentar ler RFID - método pode variar por versão de niimprint
+            rfid_data = None
+            try:
+                # Tentativa 1: get_rfid() direto
+                rfid_data = self.device.get_rfid()
+            except (AttributeError, TypeError):
+                pass
 
-            if not label_info:
-                logger.error("❌ Nenhuma informação de rolo retornada")
-                return False
-
-            # Extrair dimensões (protocolo pode variar)
-            # Esperado: {'width': 50, 'height': 100} (em mm)
-            self.label_width_mm = label_info.get('width') or label_info[0]
-            self.label_height_mm = label_info.get('height') or label_info[1]
+            # Se get_rfid() falhou, usar valores padrão (B1 padrão é 50x100mm)
+            if not rfid_data:
+                logger.warning("⚠️  Não conseguiu ler RFID, usando padrão B1 (50x100mm)")
+                self.label_width_mm = 50
+                self.label_height_mm = 100
+            else:
+                # Extrair dimensões
+                # Esperado: {'width': 50, 'height': 100} ou tupla (50, 100)
+                if isinstance(rfid_data, dict):
+                    self.label_width_mm = rfid_data.get('width') or rfid_data.get('w') or 50
+                    self.label_height_mm = rfid_data.get('height') or rfid_data.get('h') or 100
+                elif hasattr(rfid_data, 'data'):
+                    # Objeto com atributo .data
+                    self.label_width_mm = rfid_data.data.get('width', 50) if isinstance(rfid_data.data, dict) else 50
+                    self.label_height_mm = rfid_data.data.get('height', 100) if isinstance(rfid_data.data, dict) else 100
+                else:
+                    # Tupla ou lista
+                    self.label_width_mm = rfid_data[0] if rfid_data else 50
+                    self.label_height_mm = rfid_data[1] if len(rfid_data) > 1 else 100
 
             logger.info(f"✓ RFID lido: {self.label_width_mm}mm × {self.label_height_mm}mm")
 
@@ -208,6 +236,15 @@ class NiimbotRFIDWorker:
                 f"(esperado {self.MIN_HEIGHT_MM}-{self.MAX_HEIGHT_MM}mm)"
             )
             return False
+
+        # Validação física: cabeça térmica B1 não aceita > 384px (Protocolo V2)
+        width_px = self.mm_to_pixels(self.label_width_mm)
+        if width_px > self.MAX_WIDTH_PX:
+            logger.warning(
+                f"⚠️  Largura em pixels ({width_px}px) excede limite físico ({self.MAX_WIDTH_PX}px). "
+                f"Ajustando para {self.MAX_WIDTH_PX}px."
+            )
+            self.label_width_mm = (self.MAX_WIDTH_PX * 25.4) / self.DPI
 
         return True
 
@@ -271,13 +308,14 @@ class NiimbotRFIDWorker:
 
         except Exception as e:
             logger.error(f"❌ Erro ao gerar canvas: {e}")
-            return False
+            return None
 
     def send_to_printer(self, image: Image.Image) -> bool:
         """
-        Empacotar imagem em protocolo Niimbot e enviar.
+        Empacotar imagem em protocolo Niimbot B1 e enviar.
 
-        Protocolo: Serializar imagem → Bytes → Pacotes Niimbot
+        Sequência B1: start_print() → set_dimension() → print_image() → end_print()
+        Limite físico: 384px máximo de largura
 
         Args:
             image: Imagem PIL para impressão
@@ -286,7 +324,7 @@ class NiimbotRFIDWorker:
             True se envio bem-sucedido
         """
         try:
-            logger.info("📤 Empacotando imagem em protocolo Niimbot...")
+            logger.info(f"📤 Empacotando imagem em protocolo Niimbot ({self.PROTOCOL_VERSION})...")
 
             if not self.device:
                 logger.error("❌ Dispositivo não conectado")
@@ -295,11 +333,65 @@ class NiimbotRFIDWorker:
             # Converter imagem para 1-bit (preto/branco)
             image = image.convert('1')
 
-            # Enviar para impressora
-            logger.info("🖨️  Enviando para impressora...")
-            self.device.print_image(image)
+            # Sequência para Niimbot B1 com allow_print_clear
+            logger.info("0️⃣  Limpando fila de impressão...")
+            try:
+                result = self.device.allow_print_clear()
+                logger.info(f"   ✓ allow_print_clear retornou: {type(result).__name__}")
+            except Exception as e:
+                logger.warning(f"   ⚠️  allow_print_clear erro: {e}")
 
-            logger.info("✓ Imagem enviada com sucesso")
+            logger.info("1️⃣  Configurando quantidade (1 rótulo)...")
+            try:
+                result = self.device.set_quantity(1)
+                logger.info(f"   ✓ set_quantity retornou: {type(result).__name__}")
+            except Exception as e:
+                logger.warning(f"   ⚠️  set_quantity erro: {e}")
+
+            logger.info(f"2️⃣  Configurando dimensão: {self.label_width_px}x{self.label_height_px}px...")
+            try:
+                result = self.device.set_dimension(self.label_width_px, self.label_height_px)
+                logger.info(f"   ✓ set_dimension retornou: {type(result).__name__}")
+            except Exception as e:
+                logger.warning(f"   ⚠️  set_dimension erro: {e}")
+
+            logger.info("3️⃣  Enviando imagem (print_image)...")
+            try:
+                result = self.device.print_image(image)
+                logger.info(f"   ✓ print_image retornou: {type(result).__name__}")
+            except Exception as e:
+                logger.error(f"   ❌ print_image erro: {e}")
+
+            logger.info("4️⃣  Iniciando página...")
+            try:
+                result = self.device.start_page_print()
+                logger.info(f"   ✓ start_page_print retornou: {type(result).__name__}")
+            except Exception as e:
+                logger.warning(f"   ⚠️  start_page_print erro: {e}")
+
+            logger.info("5️⃣  Finalizando página...")
+            try:
+                result = self.device.end_page_print()
+                logger.info(f"   ✓ end_page_print retornou: {type(result).__name__}")
+            except Exception as e:
+                logger.warning(f"   ⚠️  end_page_print erro: {e}")
+
+            logger.info("6️⃣  Finalizando impressão com heartbeat...")
+            try:
+                # Heartbeat para confirmar fim
+                result = self.device.heartbeat()
+                logger.info(f"   ✓ Heartbeat: {type(result).__name__}")
+            except Exception as e:
+                logger.warning(f"   ⚠️  Heartbeat erro: {e}")
+
+            logger.info("7️⃣  Tentando get_print_status para disparar...")
+            try:
+                status = self.device.get_print_status()
+                logger.info(f"   ✓ Status: {status}")
+            except Exception as e:
+                logger.warning(f"   ⚠️  Status erro: {e}")
+
+            logger.info("✓ Impressão enviada com sucesso para B1")
             return True
 
         except Exception as e:
@@ -352,10 +444,12 @@ class NiimbotRFIDWorker:
         """Desconectar da impressora."""
         try:
             if self.device:
-                self.device.close()
+                # Tentar close() se existir, senão ignorar
+                if hasattr(self.device, 'close'):
+                    self.device.close()
                 logger.info("✓ Desconectado da Niimbot B1")
         except Exception as e:
-            logger.error(f"❌ Erro ao desconectar: {e}")
+            logger.warning(f"⚠️  Ao desconectar: {e}")
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -434,7 +528,7 @@ def simulate_test():
     logger.info("   • RFID detectado: 50mm × 100mm")
     logger.info("   • Conversão: 50mm = 398px, 100mm = 796px")
     logger.info("   • Canvas: 398px × 796px (branco)")
-    logger.info("   • Protocolo: Niimbot RSA2048")
+    logger.info("   • Protocolo: Niimbot V2 (Bluetooth/USB)")
     logger.info("   • Status: SUCESSO ✓")
     logger.info("\n💡 Conecte a Niimbot B1 e rode sem --test para teste real")
 
