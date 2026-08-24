@@ -56,83 +56,107 @@ Agora:
 
 ---
 
-## 4. ⚠️ A agenda: o número que precisa da sua decisão
+## 4. A agenda — resolvida com duas correções do dono
 
-Corrigi dois erros meus no cadastro — as faces contavam duas vezes
-(186 × 2 = 372 impressões) e faltava o formato de impressão.
+Eu tinha errado duas coisas, e o dono corrigiu as duas.
 
-Com o cadastro certo, o sistema calcula **custo de R$ 47,75** para uma
-agenda que você vende a **R$ 46,90**.
+### Erro 1: A5 é meia folha A4
 
-**Isso daria prejuízo de R$ 0,85 por agenda.**
-
-### Por que isso aparece
-
-Quase todo esse custo é uma linha só:
+Cadastrei 365 páginas como se fossem 365 cliques A4. Não são:
 
 ```
-365 impressões × R$ 0,0785 = R$ 28,64
+186 folhas A5  =  93 folhas A4 físicas
+93 folhas × 2 faces  =  186 CLIQUES A4
 ```
 
-E dentro desses R$ 0,0785, **R$ 0,0575 é "custo fixo por página"** —
-73% do total. Esse número está no cadastro da Konica e vem de:
+Cada clique A4 imprime **duas** páginas A5, uma de cada lado da dobra.
+186 cliques rendem 372 páginas A5 — os ~365 que você citou.
 
-> técnico R$ 450 × 2/ano + energia, **dividido por 2.000 páginas/mês**
+**Eu tinha posto quase o dobro de cliques.**
 
-**Aí está o problema: 2.000 páginas/mês é pouco demais.** Uma única
-agenda tem 365 impressões. **Seis agendas por mês já estouram essa
-base inteira.**
+### Erro 2: cobertura de 5%, não de 50%
 
-### O que muda conforme o volume real
+Usei o formato "A4 texto 5%". Mas agenda personalizada é **arte**, não
+texto corrido. Com 50% de cobertura o corante custa 10× mais.
 
-| Páginas/mês | Custo da agenda | Margem |
-|---:|---:|---:|
-| 2.000 (o que está cadastrado) | R$ 35,23 | 25% |
-| 4.000 | R$ 28,18 | 40% |
-| 6.000 | R$ 25,83 | 45% |
-| 8.000 | R$ 24,66 | 47% |
-| 12.000 | R$ 23,48 | 50% |
+Os dois erros andavam em direções opostas e mascaravam um ao outro.
 
-*(a tabela acima já usa o formato "A4 texto 5%", correto para miolo de
-agenda; os R$ 47,75 do sistema incluem uma folga adicional de
-desperdício)*
+### Erro 3: o volume da Konica
 
-**A diferença entre 2.000 e 8.000 páginas é de 22 pontos de margem** na
-mesma agenda, pelo mesmo preço.
+O custo fixo assumia 2.000 páginas/mês. Você informou **15 mil na
+operação normal**. Ajustado:
 
-### O que eu preciso de você
+| | Custo fixo/página |
+|---|---:|
+| antes (2.000 pág/mês) | R$ 0,0575 |
+| agora (15.000 pág/mês) | **R$ 0,0050** |
 
-**Quantas páginas a Konica imprime por mês, de verdade?**
+### Resultado
 
-O número exato está na própria máquina:
-**Utilitário → Contador → Total impresso**
+| | |
+|---|---:|
+| Impressão (186 cliques × R$ 0,0918) | R$ 17,08 |
+| Materiais (papel, papelão, adesivo, wire-o, laminação) | R$ 14,11 |
+| **CUSTO** | **R$ 28,01** |
+| **VENDA** | **R$ 46,90** |
+| **MARGEM** | **40%** |
 
-Com esse número eu ajusto o custo fixo e todas as margens do sistema
-passam a ser reais. Enquanto isso não vier, o sistema está sendo
-**pessimista** — mostra margem menor do que você tem.
+Saiu de margem negativa para 40%, sem mudar o preço.
 
-> **Importante:** não mexi no custo fixo por conta própria. Chutar
-> 8.000 páginas para "melhorar" a margem seria maquiar o sistema. O
-> R$ 0,0575 continua lá, e o custo da agenda está gravado como
-> R$ 47,75 — feio, mas honesto, até você me dar o número real.
+> ⚠️ **Sobre a reforma.** Você disse que ultimamente imprime 1.000 a
+> 2.000 páginas/mês. Adotei 15.000 porque é sua operação normal — a
+> reforma é temporária, e precificar por ela deixaria o preço alto o
+> ano inteiro.
+>
+> Só saiba que **enquanto o volume estiver baixo, a margem real é
+> menor**: a 2.000 páginas/mês a mesma agenda custa R$ 37,41 (margem
+> 20%). Não é motivo para mudar preço, mas é motivo para não dar
+> desconto grande agora.
 
 ---
 
-## 5. O que fazer com a agenda enquanto isso
+## 5. Adesivos: a unidade de venda é a CARTELA
 
-Três caminhos. Não escolhi por você:
+Você corrigiu: *"eu vendo a cartela... o valor unitário tem que ter,
+mas para meu controle"*.
 
-**a) Pegar o número do contador** — resolve de vez, leva dois minutos
-na máquina.
+Estava errado — o operador tinha de digitar **40** no PDV para vender
+uma cartela de 30 mm. Agora:
 
-**b) Subir o preço.** Se 2.000 páginas/mês for a realidade, R$ 46,90
-está apertado. R$ 59,90 daria 41% de margem mesmo no cenário
-pessimista.
+| No PDV | Antes | Agora |
+|---|---|---|
+| Vender 1 cartela | digitar 40 | **digitar 1** |
+| Preço mostrado | R$ 0,3225 | **R$ 12,90** |
 
-**c) Deixar como está.** Você conhece seu bolso melhor que a planilha.
-Se as agendas saem e o caixa fecha, o problema é do número cadastrado,
-não do seu preço.
+O preço por adesivo continua registrado **na descrição de cada
+produto**, como referência de controle:
 
-**Minha leitura:** provavelmente é (a). Uma gráfica que vende agenda de
-186 folhas não imprime 2.000 páginas/mês — imprime muito mais. O custo
-fixo cadastrado é de uma operação bem menor que a sua.
+| Produto | Adesivos/cartela | Por adesivo |
+|---|---:|---:|
+| ADES-4015 | 60 | R$ 0,2150 |
+| ADES-Q30 / R30 | 40 | R$ 0,3225 |
+| ADES-Q40 / R40 | 24 | R$ 0,5375 |
+| ADES-Q50 / R50 | 15 | R$ 0,8600 |
+| ADES-Q60 / R60 | 8 | R$ 1,6125 |
+
+Degraus agora em cartelas: **1 · 2 · 5 · 10 · 25 · 50**
+→ R$ 12,90 · 23,50 · 53,00 · 95,00 · 210,00 · 365,00
+
+Margem da cartela: **77%**.
+
+---
+
+## 6. Como ficou tudo
+
+| Produto | Custo | Venda | Margem |
+|---|---:|---:|---:|
+| Cópia P&B | R$ 0,08 | R$ 1,00 | 92% |
+| Cópia colorida | R$ 0,40 | R$ 1,50 | 73% |
+| Encadernação 50 fl | R$ 0,23 | R$ 3,50 | 93% |
+| Encadernação 70 fl | R$ 0,33 | R$ 3,50 | 91% |
+| Encadernação 100 fl | R$ 0,57 | R$ 4,50 | 87% |
+| Cartela de adesivos | R$ 2,97 | R$ 12,90 | 77% |
+| Agenda A5 186 fl | R$ 28,01 | R$ 46,90 | 40% |
+
+**Auditoria acusa 0 divergências.** Nenhum preço de venda foi alterado
+em nenhum momento — só os custos passaram a ser verdade.
