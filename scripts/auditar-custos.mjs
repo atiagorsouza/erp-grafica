@@ -88,7 +88,17 @@ for (const p of prods) {
     if (rec) partes.push(`${svc.name.slice(0, 22)} ${rec.toFixed(4)}`);
     if (perda) partes.push(`+${(perda * 100).toFixed(0)}% perda`);
   } else {
-    const folhas = pgs > 1 ? pgs / 2 : Number(p.base_material_qty) || 1;
+    /* Quantas folhas físicas o produto consome.
+
+       Regra: quem manda é `base_material_qty`, que o cadastro informa.
+       A divisão por 2 só vale para miolo DOBRADO (agenda A5: uma folha
+       A4 dobrada vira 2 folhas A5), e nesse caso base_material_qty
+       fica em 1 porque o consumo é derivado das páginas.
+
+       Errei isso no kit de polaroid: 2 páginas A4 INTEIRAS viraram
+       "1 folha dobrada" e o custo saiu pela metade. */
+    const qtdBase = Number(p.base_material_qty) || 1;
+    const folhas = qtdBase > 1 ? qtdBase : (pgs > 1 ? pgs / 2 : 1);
     const bm = Number(base?.unit_cost || 0) * folhas;
     if (bm) { calc += bm; partes.push(`${base.name.slice(0, 22)} ${bm.toFixed(4)}`); }
     const ti = imp.total * pgs;
