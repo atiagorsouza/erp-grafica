@@ -1,0 +1,320 @@
+<!doctype html>
+<html lang="pt-BR"><head><meta charset="utf-8">
+<title>Tabela interna A4 — VTDIGITAL ART STUDIO</title>
+<style>
+  @page { size: A4 landscape; margin: 7mm; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: "Helvetica Neue", Arial, sans-serif;
+         font-size: 8.2px; color:#15181d; background:#fff; }
+  .folha { padding: 7mm; }
+
+  header { display:flex; align-items:flex-end; justify-content:space-between;
+           border-bottom:2.5px solid #15181d; padding-bottom:3px; margin-bottom:5px; }
+  h1 { margin:0; font-size:14px; letter-spacing:-0.3px; }
+  h1 small { font-weight:400; color:#6b7280; font-size:8.5px; margin-left:8px; letter-spacing:0; }
+  .selo { font-size:7.5px; font-weight:700; letter-spacing:1.5px;
+          background:#15181d; color:#fff; padding:2px 6px; border-radius:3px; }
+  .meta { text-align:right; font-size:7px; color:#6b7280; line-height:1.5; }
+
+  /* Duas colunas de blocos: tudo tem de caber numa folha so. */
+  .grade { column-count:2; column-gap:5mm; }
+  .bloco { break-inside:avoid; margin-bottom:4.5px; }
+  h2 { margin:0 0 2px; font-size:8.5px; text-transform:uppercase;
+       letter-spacing:1.1px; color:#0f766e; border-bottom:1px solid #99f6e4; padding-bottom:1.5px; }
+
+  table { width:100%; border-collapse:collapse; }
+  thead th { font-size:6.2px; text-transform:uppercase; letter-spacing:0.7px;
+             color:#9ca3af; font-weight:700; text-align:left; padding:1.5px 3px; }
+  thead th.num { text-align:right; }
+  td { padding:1.6px 3px; border-top:1px solid #eef0f2; vertical-align:middle; }
+  tr.prod:nth-child(even) td { background:#fafbfc; }
+
+  td.nome { font-weight:600; width:30%; line-height:1.2; }
+  .sku { display:block; font-family:ui-monospace,Menlo,monospace; font-weight:400;
+         font-size:5.8px; color:#9ca3af; letter-spacing:0.2px; }
+
+  td.faixas { width:40%; }
+  .chip { display:inline-block; background:#f1f5f9; border-radius:3px;
+          padding:0.5px 3px; margin:0.5px 2px 0.5px 0;
+          font-family:ui-monospace,Menlo,monospace; font-size:6.6px; white-space:nowrap; }
+  .chip b { color:#0f766e; margin-right:3px; font-weight:700; }
+
+  td.num { text-align:right; font-family:ui-monospace,Menlo,monospace;
+           font-size:7px; white-space:nowrap; }
+  td.custo { color:#9ca3af; }
+  td.piso  { color:#b45309; font-weight:700; }
+  td.marg  { font-weight:700; }
+  tr.linha-alerta td.marg { color:#dc2626; }
+
+  footer { margin-top:5px; border-top:1.5px solid #15181d;
+           padding-top:3px; display:flex; justify-content:space-between;
+           font-size:6.6px; color:#4b5563; }
+  .legenda b { color:#b45309; }
+  @media print { .folha { padding:0; } }
+</style></head>
+<body><div class="folha">
+  <header>
+    <div>
+      <h1>Tabela de Preços <small>VTDIGITAL ART STUDIO</small></h1>
+      <span class="selo">USO INTERNO — NÃO ENTREGAR AO CLIENTE</span>
+    </div>
+    <div class="meta">A4 deitado · 24/08/2026<br>(21) 2038-3504 · (21) 97886-9414</div>
+  </header>
+
+  <div class="grade"><section class="bloco">
+      <h2>Cópias e Impressões</h2>
+      <table>
+        <thead><tr>
+          <th class="nome">Produto</th>
+          <th class="faixas">Preço por quantidade</th>
+          <th class="num">Custo</th>
+          <th class="num">Piso</th>
+          <th class="num">Marg.</th>
+        </tr></thead>
+        <tbody><tr class="prod">
+    <td class="nome">Cópia / Impressão A4 Colorida<span class="sku">COP-COR-A4</span></td>
+    <td class="faixas"><span class="chip"><b>1</b>1,50</span><span class="chip"><b>10</b>1,35</span><span class="chip"><b>25</b>1,20</span><span class="chip"><b>50</b>1,05</span><span class="chip"><b>100</b>0,95</span><span class="chip"><b>300</b>0,85</span></td>
+    <td class="num custo">0,40</td>
+    <td class="num piso">0,85</td>
+    <td class="num marg">73%</td>
+  </tr><tr class="prod">
+    <td class="nome">Cópia / Impressão A4 Preto e Branco<span class="sku">COP-PB-A4</span></td>
+    <td class="faixas"><span class="chip"><b>1</b>1,00</span><span class="chip"><b>10</b>0,90</span><span class="chip"><b>25</b>0,80</span><span class="chip"><b>50</b>0,70</span><span class="chip"><b>100</b>0,60</span><span class="chip"><b>300</b>0,50</span></td>
+    <td class="num custo">0,08</td>
+    <td class="num piso">0,20</td>
+    <td class="num marg">92%</td>
+  </tr></tbody>
+      </table>
+    </section><section class="bloco">
+      <h2>Encadernação</h2>
+      <table>
+        <thead><tr>
+          <th class="nome">Produto</th>
+          <th class="faixas">Preço por quantidade</th>
+          <th class="num">Custo</th>
+          <th class="num">Piso</th>
+          <th class="num">Marg.</th>
+        </tr></thead>
+        <tbody><tr class="prod">
+    <td class="nome">Encadernação espiral até 50 folhas<span class="sku">ENC-050</span></td>
+    <td class="faixas"><span class="chip"><b>1</b>3,50</span></td>
+    <td class="num custo">0,23</td>
+    <td class="num piso">0,50</td>
+    <td class="num marg">93%</td>
+  </tr><tr class="prod">
+    <td class="nome">Encadernação espiral até 70 folhas<span class="sku">ENC-070</span></td>
+    <td class="faixas"><span class="chip"><b>1</b>3,50</span></td>
+    <td class="num custo">0,33</td>
+    <td class="num piso">0,70</td>
+    <td class="num marg">91%</td>
+  </tr><tr class="prod">
+    <td class="nome">Encadernação espiral até 100 folhas<span class="sku">ENC-100</span></td>
+    <td class="faixas"><span class="chip"><b>1</b>4,50</span></td>
+    <td class="num custo">0,57</td>
+    <td class="num piso">1,15</td>
+    <td class="num marg">87%</td>
+  </tr></tbody>
+      </table>
+    </section><section class="bloco">
+      <h2>Fotos</h2>
+      <table>
+        <thead><tr>
+          <th class="nome">Produto</th>
+          <th class="faixas">Preço por quantidade</th>
+          <th class="num">Custo</th>
+          <th class="num">Piso</th>
+          <th class="num">Marg.</th>
+        </tr></thead>
+        <tbody><tr class="prod">
+    <td class="nome">Foto 10x15<span class="sku">FOTO-10X15</span></td>
+    <td class="faixas"><span class="chip"><b>1</b>2,49</span><span class="chip"><b>10</b>2,19</span><span class="chip"><b>30</b>1,99</span><span class="chip"><b>50</b>1,79</span><span class="chip"><b>70</b>1,69</span><span class="chip"><b>100</b>1,59</span></td>
+    <td class="num custo">0,42</td>
+    <td class="num piso">0,85</td>
+    <td class="num marg">83%</td>
+  </tr><tr class="prod">
+    <td class="nome">Foto 10x15 com porta-retrato<span class="sku">FOTO-10X15-M</span></td>
+    <td class="faixas"><span class="chip"><b>1</b>19,90</span><span class="chip"><b>3</b>17,90</span><span class="chip"><b>10</b>15,90</span></td>
+    <td class="num custo">6,61</td>
+    <td class="num piso">13,25</td>
+    <td class="num marg">67%</td>
+  </tr><tr class="prod">
+    <td class="nome">Foto 20x30<span class="sku">FOTO-20X30</span></td>
+    <td class="faixas"><span class="chip"><b>1</b>12,90</span><span class="chip"><b>3</b>11,90</span></td>
+    <td class="num custo">1,91</td>
+    <td class="num piso">3,85</td>
+    <td class="num marg">85%</td>
+  </tr><tr class="prod">
+    <td class="nome">Foto 20x30 com moldura<span class="sku">FOTO-20X30-M</span></td>
+    <td class="faixas"><span class="chip"><b>1</b>59,90</span><span class="chip"><b>3</b>54,90</span></td>
+    <td class="num custo">17,46</td>
+    <td class="num piso">34,95</td>
+    <td class="num marg">71%</td>
+  </tr><tr class="prod">
+    <td class="nome">Foto 30x40<span class="sku">FOTO-30X40</span></td>
+    <td class="faixas"><span class="chip"><b>1</b>24,90</span><span class="chip"><b>3</b>22,90</span></td>
+    <td class="num custo">3,93</td>
+    <td class="num piso">7,90</td>
+    <td class="num marg">84%</td>
+  </tr><tr class="prod">
+    <td class="nome">Foto 30x40 com moldura<span class="sku">FOTO-30X40-M</span></td>
+    <td class="faixas"><span class="chip"><b>1</b>99,90</span><span class="chip"><b>3</b>92,90</span></td>
+    <td class="num custo">33,06</td>
+    <td class="num piso">66,15</td>
+    <td class="num marg">67%</td>
+  </tr><tr class="prod">
+    <td class="nome">Fotos Polaroid 5x8,5cm — kit com 9<span class="sku">FOTO-POLA-9</span></td>
+    <td class="faixas"><span class="chip"><b>1</b>19,90</span><span class="chip"><b>2</b>18,45</span><span class="chip"><b>4</b>17,45</span></td>
+    <td class="num custo">2,20</td>
+    <td class="num piso">4,45</td>
+    <td class="num marg">89%</td>
+  </tr></tbody>
+      </table>
+    </section><section class="bloco">
+      <h2>Cartões e Panfletos</h2>
+      <table>
+        <thead><tr>
+          <th class="nome">Produto</th>
+          <th class="faixas">Preço por quantidade</th>
+          <th class="num">Custo</th>
+          <th class="num">Piso</th>
+          <th class="num">Marg.</th>
+        </tr></thead>
+        <tbody><tr class="prod">
+    <td class="nome">Cartão de visita 9x5 cm<span class="sku">CART-9X5</span></td>
+    <td class="faixas"><span class="chip"><b>50</b>0,70</span><span class="chip"><b>100</b>0,50</span><span class="chip"><b>200</b>0,40</span></td>
+    <td class="num custo">0,13</td>
+    <td class="num piso">0,30</td>
+    <td class="num marg">81%</td>
+  </tr><tr class="prod">
+    <td class="nome">Panfleto 14x10 cm<span class="sku">PANF-14X10</span></td>
+    <td class="faixas"><span class="chip"><b>50</b>0,70</span><span class="chip"><b>100</b>0,50</span><span class="chip"><b>200</b>0,40</span></td>
+    <td class="num custo">0,26</td>
+    <td class="num piso">0,55</td>
+    <td class="num marg">63%</td>
+  </tr></tbody>
+      </table>
+    </section><section class="bloco">
+      <h2>Adesivos</h2>
+      <table>
+        <thead><tr>
+          <th class="nome">Produto</th>
+          <th class="faixas">Preço por quantidade</th>
+          <th class="num">Custo</th>
+          <th class="num">Piso</th>
+          <th class="num">Marg.</th>
+        </tr></thead>
+        <tbody><tr class="prod">
+    <td class="nome">Adesivo Personalizado 40x15mm (vinil branco)<span class="sku">ADES-4015</span></td>
+    <td class="faixas"><span class="chip"><b>1</b>12,90</span><span class="chip"><b>2</b>11,75</span><span class="chip"><b>5</b>10,60</span><span class="chip"><b>10</b>9,50</span><span class="chip"><b>25</b>8,40</span><span class="chip"><b>50</b>7,30</span></td>
+    <td class="num custo">2,97</td>
+    <td class="num piso">5,95</td>
+    <td class="num marg">77%</td>
+  </tr><tr class="prod">
+    <td class="nome">Adesivo Quadrado 30x30mm (vinil branco)<span class="sku">ADES-Q30</span></td>
+    <td class="faixas"><span class="chip"><b>1</b>12,90</span><span class="chip"><b>2</b>11,75</span><span class="chip"><b>5</b>10,60</span><span class="chip"><b>10</b>9,50</span><span class="chip"><b>25</b>8,40</span><span class="chip"><b>50</b>7,30</span></td>
+    <td class="num custo">2,97</td>
+    <td class="num piso">5,95</td>
+    <td class="num marg">77%</td>
+  </tr><tr class="prod">
+    <td class="nome">Adesivo Quadrado 40x40mm (vinil branco)<span class="sku">ADES-Q40</span></td>
+    <td class="faixas"><span class="chip"><b>1</b>12,90</span><span class="chip"><b>2</b>11,75</span><span class="chip"><b>5</b>10,60</span><span class="chip"><b>10</b>9,50</span><span class="chip"><b>25</b>8,40</span><span class="chip"><b>50</b>7,30</span></td>
+    <td class="num custo">2,97</td>
+    <td class="num piso">5,95</td>
+    <td class="num marg">77%</td>
+  </tr><tr class="prod">
+    <td class="nome">Adesivo Quadrado 50x50mm (vinil branco)<span class="sku">ADES-Q50</span></td>
+    <td class="faixas"><span class="chip"><b>1</b>12,90</span><span class="chip"><b>2</b>11,75</span><span class="chip"><b>5</b>10,60</span><span class="chip"><b>10</b>9,50</span><span class="chip"><b>25</b>8,40</span><span class="chip"><b>50</b>7,30</span></td>
+    <td class="num custo">2,97</td>
+    <td class="num piso">5,95</td>
+    <td class="num marg">77%</td>
+  </tr><tr class="prod">
+    <td class="nome">Adesivo Quadrado 60x60mm (vinil branco)<span class="sku">ADES-Q60</span></td>
+    <td class="faixas"><span class="chip"><b>1</b>12,90</span><span class="chip"><b>2</b>11,75</span><span class="chip"><b>5</b>10,60</span><span class="chip"><b>10</b>9,50</span><span class="chip"><b>25</b>8,40</span><span class="chip"><b>50</b>7,30</span></td>
+    <td class="num custo">2,97</td>
+    <td class="num piso">5,95</td>
+    <td class="num marg">77%</td>
+  </tr><tr class="prod">
+    <td class="nome">Adesivo Redondo 30mm (vinil branco)<span class="sku">ADES-R30</span></td>
+    <td class="faixas"><span class="chip"><b>1</b>12,90</span><span class="chip"><b>2</b>11,75</span><span class="chip"><b>5</b>10,60</span><span class="chip"><b>10</b>9,50</span><span class="chip"><b>25</b>8,40</span><span class="chip"><b>50</b>7,30</span></td>
+    <td class="num custo">2,97</td>
+    <td class="num piso">5,95</td>
+    <td class="num marg">77%</td>
+  </tr><tr class="prod">
+    <td class="nome">Adesivo Redondo 40mm (vinil branco)<span class="sku">ADES-R40</span></td>
+    <td class="faixas"><span class="chip"><b>1</b>12,90</span><span class="chip"><b>2</b>11,75</span><span class="chip"><b>5</b>10,60</span><span class="chip"><b>10</b>9,50</span><span class="chip"><b>25</b>8,40</span><span class="chip"><b>50</b>7,30</span></td>
+    <td class="num custo">2,97</td>
+    <td class="num piso">5,95</td>
+    <td class="num marg">77%</td>
+  </tr><tr class="prod">
+    <td class="nome">Adesivo Redondo 50mm (vinil branco)<span class="sku">ADES-R50</span></td>
+    <td class="faixas"><span class="chip"><b>1</b>12,90</span><span class="chip"><b>2</b>11,75</span><span class="chip"><b>5</b>10,60</span><span class="chip"><b>10</b>9,50</span><span class="chip"><b>25</b>8,40</span><span class="chip"><b>50</b>7,30</span></td>
+    <td class="num custo">2,97</td>
+    <td class="num piso">5,95</td>
+    <td class="num marg">77%</td>
+  </tr><tr class="prod">
+    <td class="nome">Adesivo Redondo 60mm (vinil branco)<span class="sku">ADES-R60</span></td>
+    <td class="faixas"><span class="chip"><b>1</b>12,90</span><span class="chip"><b>2</b>11,75</span><span class="chip"><b>5</b>10,60</span><span class="chip"><b>10</b>9,50</span><span class="chip"><b>25</b>8,40</span><span class="chip"><b>50</b>7,30</span></td>
+    <td class="num custo">2,97</td>
+    <td class="num piso">5,95</td>
+    <td class="num marg">77%</td>
+  </tr></tbody>
+      </table>
+    </section><section class="bloco">
+      <h2>Copos e Acrílicos</h2>
+      <table>
+        <thead><tr>
+          <th class="nome">Produto</th>
+          <th class="faixas">Preço por quantidade</th>
+          <th class="num">Custo</th>
+          <th class="num">Piso</th>
+          <th class="num">Marg.</th>
+        </tr></thead>
+        <tbody><tr class="prod">
+    <td class="nome">Copo Ecológico 400ml personalizado<span class="sku">COPO-ECO-PERS</span></td>
+    <td class="faixas"><span class="chip"><b>1</b>6,90</span><span class="chip"><b>15</b>5,90</span><span class="chip"><b>50</b>5,40</span><span class="chip"><b>100</b>4,90</span></td>
+    <td class="num custo">2,08</td>
+    <td class="num piso">4,20</td>
+    <td class="num marg">70%</td>
+  </tr><tr class="prod">
+    <td class="nome">Copo Long Drink 350ml degradê personalizado<span class="sku">COPO-LD-DEG-PERS</span></td>
+    <td class="faixas"><span class="chip"><b>1</b>11,90</span><span class="chip"><b>15</b>10,90</span><span class="chip"><b>50</b>9,90</span></td>
+    <td class="num custo">3,89</td>
+    <td class="num piso">7,80</td>
+    <td class="num marg">67%</td>
+  </tr><tr class="prod">
+    <td class="nome">Copo Long Drink 350ml liso personalizado<span class="sku">COPO-LD-LISO-PERS</span></td>
+    <td class="faixas"><span class="chip"><b>1</b>7,90</span><span class="chip"><b>15</b>6,90</span><span class="chip"><b>50</b>5,90</span><span class="chip"><b>100</b>5,40</span></td>
+    <td class="num custo">2,29</td>
+    <td class="num piso">4,60</td>
+    <td class="num marg">71%</td>
+  </tr></tbody>
+      </table>
+    </section><section class="bloco">
+      <h2>Agendas e Cadernos</h2>
+      <table>
+        <thead><tr>
+          <th class="nome">Produto</th>
+          <th class="faixas">Preço por quantidade</th>
+          <th class="num">Custo</th>
+          <th class="num">Piso</th>
+          <th class="num">Marg.</th>
+        </tr></thead>
+        <tbody><tr class="prod">
+    <td class="nome">Agenda A5 capa dura 186 folhas<span class="sku">AGE-A5-186</span></td>
+    <td class="faixas"><span class="chip"><b>1</b>46,90</span><span class="chip"><b>10</b>42,90</span><span class="chip"><b>20</b>39,90</span><span class="chip"><b>30</b>37,90</span><span class="chip"><b>40</b>35,90</span><span class="chip"><b>50</b>34,90</span><span class="chip"><b>100</b>32,90</span></td>
+    <td class="num custo">28,01</td>
+    <td class="num piso">56,05</td>
+    <td class="num marg">40%</td>
+  </tr></tbody>
+      </table>
+    </section></div>
+
+  <footer>
+    <div class="legenda">
+      <b>Piso</b> = menor preço que ainda deixa 50% de margem. Abaixo disso, só com autorização.
+      &nbsp;·&nbsp; <b>Custo</b> já inclui papel, clique, acabamento e perda.
+      &nbsp;·&nbsp; Margem em vermelho = abaixo de 40%.
+    </div>
+    <div>Gerado pelo sistema · confira antes de fechar desconto grande</div>
+  </footer>
+</div></body></html>

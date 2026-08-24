@@ -23,6 +23,7 @@ export const NAV: NavGroup[] = [
       { href: "/pedidos", label: "Pedidos & OS", icon: "orders" },
       { href: "/clientes", label: "Clientes & CRM", icon: "users" },
       { href: "/whatsapp", label: "WhatsApp", icon: "whatsapp" },
+      { href: "/consulta-preco", label: "Consulta Rápida de Preço", icon: "search" },
       { href: "/kanban", label: "Kanban Produção", icon: "kanban" },
       { href: "/calendario", label: "Calendário", icon: "calendar" },
     ],
