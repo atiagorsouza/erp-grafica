@@ -5,6 +5,32 @@ Versionamento: [SemVer](https://semver.org/lang/pt-BR/).
 
 ---
 
+## [3.68.0] — 2026-08-24
+
+Catálogo completo e ferramentas de atendimento.
+
+- **Motor**: o clique da folha passa a ser dividido pelas peças que saem
+  dela, nos dois modos de cálculo. Sem isso cada panfleto carregava o
+  custo de impressão de uma A4 inteira.
+- **Campo "Peças por folha"** também no modo unitário, que não tinha.
+- **Catálogo com 27 produtos** em 7 categorias: cópias, encadernação,
+  fotos, cartões e panfletos, adesivos, copos e agendas. A v3.67.0 foi
+  empacotada com apenas 9 (só adesivos) — ver nota abaixo.
+- **Tabela de preços interna** em A4 e A3 deitado
+  (`scripts/gerar-tabela-precos.mjs`), no formato de parede.
+- **Consulta rápida de preço** (`/consulta-preco`): busca o produto e
+  copia a resposta pronta para o WhatsApp.
+- **Formulário de produto** reorganizado em nove blocos nomeados.
+
+> **Nota sobre a v3.67.0.** A tag `v3.67.0` foi criada em 23/08, e todo o
+> trabalho de catálogo (27 produtos) veio depois dela, sem novo bump. O
+> pacote reempacotado no dia 24 manteve o mesmo nome de versão, então o
+> servidor instalou um arquivo diferente com o mesmo rótulo e ficou com 9
+> produtos. Daí esta 3.68.0: versão nova para conteúdo novo.
+
+---
+
+
 ## [3.30.0] — 2026-08-18
 
 Auditoria de **lógica** das impressoras (a anterior cobriu validação e
