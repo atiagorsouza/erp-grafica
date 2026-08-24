@@ -1,8 +1,17 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { eq } from "drizzle-orm";
+import { db } from "@/db";
+import { customers } from "@/db/schema";
 import { checkPayment, getChargeByNsu } from "@/lib/infinitepay";
+import { formatBRL, toNumber } from "@/lib/money";
 
-export const metadata: Metadata = { title: "Pagamento" };
+export const metadata: Metadata = {
+  title: "Pagamento",
+  /* Comprovante não é conteúdo público: nada de indexar. */
+  robots: { index: false, follow: false },
+};
+
 export const dynamic = "force-dynamic";
 
 type SearchParams = Promise<{
@@ -19,35 +28,65 @@ type SearchParams = Promise<{
  * A InfinitePay redireciona o cliente para cá com os parâmetros da
  * transação. Aproveitamos para confirmar o pagamento ativamente — é o
  * fallback quando o webhook atrasa ou falha.
+ *
+ * v3.68.2: antes mostrava só "confirmado!" e a descrição. O dono
+ * pediu o comprovante completo — "a compra e todos os dados
+ * confirmados, cartão, pix etc": valor pago, método, parcelas,
+ * protocolo e cliente. Tudo já vinha gravado em `payment_links`
+ * pela confirmação — só não era mostrado.
  */
+
+/* Método legível — `capture_method` chega como "pix" | "credit_card",
+   mas a InfinitePay também manda via query string em alguns fluxos. */
+function nomeMetodo(metodo: string | null | undefined): string | null {
+  if (!metodo) return null;
+  const m = metodo.trim().toLowerCase();
+  if (m === "pix") return "PIX";
+  if (m === "credit_card" || m === "credito" || m === "cartao") return "Cartão de crédito";
+  if (m === "debit_card" || m === "debito") return "Cartão de débito";
+  return metodo;
+}
+
+function Linha({ rotulo, valor }: { rotulo: string; valor: React.ReactNode }) {
+  return (
+    <div className="flex items-baseline justify-between gap-4 border-b border-paper-100 py-2.5 last:border-0">
+      <span className="shrink-0 font-mono text-[10.5px] tracking-wide text-ink-400 uppercase">{rotulo}</span>
+      <span className="text-right text-[13px] font-semibold break-words text-ink-800">{valor}</span>
+    </div>
+  );
+}
+
 export default async function RetornoPagamentoPage({ searchParams }: { searchParams: SearchParams }) {
   const params = await searchParams;
   const orderNsu = String(params.order_nsu || "").trim();
 
+  let link = orderNsu ? await getChargeByNsu(orderNsu) : null;
+  let notFound = !link;
   let paid = false;
-  let notFound = false;
-  let description = "";
-  let receipt = params.receipt_url || "";
 
-  if (orderNsu) {
-    const link = await getChargeByNsu(orderNsu);
-    if (!link) {
-      notFound = true;
-    } else {
-      description = link.description;
-      const result = await checkPayment(link.id, {
-        transactionNsu: params.transaction_nsu,
-        slug: params.slug,
-        receiptUrl: params.receipt_url,
-      });
-      if (!("error" in result)) {
-        paid = result.paid === true || result.row?.status === "pago";
-        receipt = receipt || result.row?.receiptUrl || "";
-      }
+  if (link) {
+    const result = await checkPayment(link.id, {
+      transactionNsu: params.transaction_nsu,
+      slug: params.slug,
+      receiptUrl: params.receipt_url,
+    });
+    if (!("error" in result)) {
+      paid = result.paid === true || result.row?.status === "pago";
+      /* A linha atualizada traz o que só existe DEPOIS do pagamento:
+         paidAmount, captureMethod, installments, receiptUrl. */
+      if (result.row) link = { ...link, ...result.row };
     }
-  } else {
-    notFound = true;
   }
+
+  const cliente = link?.customerId
+    ? (await db.select({ name: customers.name, tradeName: customers.tradeName }).from(customers).where(eq(customers.id, link.customerId)).limit(1))[0]
+    : undefined;
+
+  const metodo = nomeMetodo(link?.captureMethod ?? params.capture_method);
+  const parcelas = link?.installments && link.installments > 1 ? link.installments : null;
+  const valorPago = link ? toNumber(link.paidAmount ?? null) : 0;
+  const valor = valorPago > 0 ? valorPago : toNumber(link?.amount ?? null);
+  const receipt = link?.receiptUrl || params.receipt_url || "";
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-paper-100 px-4 py-10">
@@ -74,10 +113,27 @@ export default async function RetornoPagamentoPage({ searchParams }: { searchPar
               : "Seu pagamento está sendo confirmado. Isso costuma levar alguns instantes."}
         </p>
 
-        {description && (
-          <p className="mt-3 rounded-lg border border-paper-200 bg-paper-50 px-3 py-2 font-mono text-[11.5px] text-ink-600">
-            {description}
+        {paid && valor > 0 && (
+          <p className="mt-3 font-mono text-[26px] leading-none font-bold text-ink-900 tnum">{formatBRL(valor)}</p>
+        )}
+        {paid && metodo && (
+          <p className="mt-1.5 text-[12.5px] font-semibold text-emerald-700">
+            {metodo}
+            {parcelas ? ` · ${parcelas}×` : ""}
           </p>
+        )}
+
+        {link && (
+          <div className="mt-5 rounded-xl border border-paper-200 bg-paper-50 px-4 py-1 text-left">
+            <Linha rotulo="Cobrança" valor={link.description} />
+            {cliente && <Linha rotulo="Cliente" valor={cliente.tradeName || cliente.name} />}
+            {!paid && valor > 0 && <Linha rotulo="Valor" valor={formatBRL(valor)} />}
+            {metodo && !paid && <Linha rotulo="Método" valor={metodo} />}
+            <Linha rotulo="Protocolo" valor={<span className="font-mono text-[12px]">{link.orderNsu}</span>} />
+            {link.transactionNsu && (
+              <Linha rotulo="Transação" valor={<span className="font-mono text-[12px]">{link.transactionNsu}</span>} />
+            )}
+          </div>
         )}
 
         {receipt && (
