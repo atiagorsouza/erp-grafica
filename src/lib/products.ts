@@ -73,6 +73,11 @@ const productSchema = z.object({
   wastePercent: finite.min(0).max(1).default(0),
   setupSheets: z.coerce.number().int().min(0).max(100000).default(0),
   minOrderQty: finite.min(0).max(1_000_000).default(1),
+  /* Unidade de venda (PEÇA 0, v3.68.2) — "cartela", "cento", "pacote".
+     NULL/ausente = vendido por unidade: o texto da Consulta Rápida e
+     do portal não muda. Rótulo curto: ele vai pro texto do WhatsApp. */
+  saleUnitLabel: z.string().trim().max(24).nullable().optional(),
+  saleUnitPieces: finite.min(0.0001).max(1_000_000).nullable().optional(),
   operationalRate: finite.min(0).max(0.95).default(0),
   roundingStep: finite.min(0.01).max(100000).default(0.01),
   margin: finite.min(0).max(0.95).default(0.4),
@@ -317,6 +322,8 @@ function baseProductData(data: ProductPayload, calc: Awaited<ReturnType<typeof b
     wastePercent: toDecimalString(data.wastePercent, 4),
     setupSheets: data.setupSheets,
     minOrderQty: toDecimalString(data.minOrderQty, 3),
+    saleUnitLabel: nullable(data.saleUnitLabel),
+    saleUnitPieces: data.saleUnitPieces != null ? toDecimalString(data.saleUnitPieces, 3) : null,
     operationalRate: toDecimalString(data.operationalRate, 4),
     roundingStep: toDecimalString(data.roundingStep, 2),
     margin: toDecimalString(data.margin, 4),

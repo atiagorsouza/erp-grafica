@@ -79,6 +79,37 @@ const client = new pg.Client({ connectionString: process.env.DATABASE_URL });
 await client.connect();
 const q = async (sql, p = []) => (await client.query(sql, p)).rows;
 
+/* ── SEED de unidade de venda (PEÇA 0 do PLANO-PORTAL-CLIENTE) ──
+   A família de adesivos (ADES-%) vende por CARTELA — o próprio dono
+   escreveu na descrição de cada produto: "Vendido por CARTELA com
+   60 adesivos". A cartela desses produtos É a folha A4, por isso o
+   seed copia pieces_per_sheet. Só preenche NULL: editou no
+   formulário, este script nunca mais toca no valor.
+
+   Chamada nos DOIS caminhos: banco em dia (coluna já existia) e
+   coluna recém-criada acima — por isso virou função, não bloco. */
+async function semearUnidadeVenda() {
+  const temColuna =
+    (
+      await q(
+        `SELECT 1 FROM information_schema.columns
+          WHERE table_name='products' AND column_name='sale_unit_label'`
+      )
+    ).length > 0;
+  if (!temColuna) {
+    console.log("   ⚠ seed de cartela adiado: coluna sale_unit_label não existe no banco");
+    return;
+  }
+  const seed = await client.query(
+    `UPDATE products SET sale_unit_label='cartela', sale_unit_pieces=pieces_per_sheet
+      WHERE sku LIKE 'ADES-%' AND calculation_mode='batch'
+        AND sale_unit_label IS NULL AND pieces_per_sheet > 0`
+  );
+  if (seed.rowCount > 0) {
+    console.log(`   ~ seed    ${seed.rowCount} adesivo(s): venda por cartela`);
+  }
+}
+
 try {
   let esperado;
   try {
@@ -139,7 +170,16 @@ try {
   );
 
   if (!faltaTabela.length && !faltaColuna.length && !faltaEnum.length) {
-    console.log("\n  ✔ Banco em dia — nada a fazer.\n");
+    console.log("\n  ✔ Banco em dia — nada a criar.");
+    /* Nada faltando no schema não significa nada a fazer: o seed de
+       unidade de venda roda mesmo com banco em dia (é dado, não é
+       coluna). Sem isso, um banco que já tem as colunas por outro
+       caminho nunca recebia o seed. */
+    if (APLICAR) await semearUnidadeVenda();
+    else {
+      console.log("\n→ Nada foi alterado.");
+      console.log("→ Para aplicar: node scripts/migrar-banco.mjs --aplicar\n");
+    }
     process.exit(0);
   }
 
@@ -237,6 +277,14 @@ try {
       console.log(`       preencha os valores e rode: ALTER TABLE ${id(tab)} ALTER COLUMN ${id(c.nome)} SET NOT NULL;`);
     }
   }
+
+  /* ── SEED de unidade de venda (PEÇA 0 do PLANO-PORTAL-CLIENTE) ──
+     A família de adesivos (ADES-%) vende por CARTELA — o próprio dono
+     escreveu na descrição de cada produto: "Vendido por CARTELA com
+     60 adesivos". A cartela desses produtos É a folha A4, por isso o
+     seed copia pieces_per_sheet. Só preenche NULL: editou no
+     formulário, este script nunca mais toca no valor. */
+  await semearUnidadeVenda();
 
   /* ── 3. Reconferir ────────────────────────────────────────────
      Dizer "pronto" sem verificar foi exatamente o erro que nos

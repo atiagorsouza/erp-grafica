@@ -968,6 +968,8 @@ create table if not exists public.products (
   "waste_percent" numeric(6, 4) default '0'::numeric,
   "setup_sheets" integer default 0,
   "min_order_qty" numeric(12, 3) default '1'::numeric,
+  "sale_unit_label" text,
+  "sale_unit_pieces" numeric(12, 3),
   "operational_rate" numeric(6, 4) default '0'::numeric,
   "rounding_step" numeric(10, 2) default 0.01,
   "margin" numeric(6, 4) default 0.4,
@@ -1015,6 +1017,8 @@ alter table public.products add column if not exists "lead_time_serial" boolean 
 alter table public.products add column if not exists "waste_percent" numeric(6, 4) default '0'::numeric;
 alter table public.products add column if not exists "setup_sheets" integer default 0;
 alter table public.products add column if not exists "min_order_qty" numeric(12, 3) default '1'::numeric;
+alter table public.products add column if not exists "sale_unit_label" text;
+alter table public.products add column if not exists "sale_unit_pieces" numeric(12, 3);
 alter table public.products add column if not exists "operational_rate" numeric(6, 4) default '0'::numeric;
 alter table public.products add column if not exists "rounding_step" numeric(10, 2) default 0.01;
 alter table public.products add column if not exists "margin" numeric(6, 4) default 0.4;

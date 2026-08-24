@@ -896,6 +896,25 @@ async function main() {
   const sem2 = await prodPost({ ...base, name: "SMOKE PROD Sem Codigo 2" });
   assert(sem1.status === 200 && sem2.status === 200, "produtos sem SKU/código convivem");
 
+  /* 11k) Unidade de venda (PEÇA 0 do PLANO-PORTAL-CLIENTE, v3.68.2).
+     "R$ 12,90" sozinho no adesivo vendido por cartela de 60 fazia o
+     cliente do WhatsApp ler "1 adesivo por 12,90". A unidade precisa
+     chegar até o texto copiado. */
+  const prodUnid = await prodPost({
+    ...base,
+    name: "SMOKE PROD Cartela",
+    sku: `SMK-UNID-${stamp}`,
+    saleUnitLabel: "cartela",
+    saleUnitPieces: 24,
+  });
+  assert(prodUnid.status === 200, "produto com unidade de venda é criado");
+  assert(prodUnid.body.row.saleUnitLabel === "cartela", "unidade de venda volta na resposta da API");
+
+  const consultaHtml = await fetch(`${BASE_URL}/consulta-preco`).then((r) => r.text());
+  assert(consultaHtml.includes("SMOKE PROD Cartela"), "consulta rápida lista o produto de teste");
+  assert(consultaHtml.includes("por cartela"), "consulta rápida mostra a unidade junto ao preço");
+  assert(consultaHtml.includes("24 un"), "consulta rápida mostra quantas frações vêm na unidade");
+
   await sql("delete from products where name like 'SMOKE PROD%'");
 
   /* arredondamento comercial sem lixo de ponto flutuante */

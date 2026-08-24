@@ -735,6 +735,17 @@ export const products = pgTable("products", {
   wastePercent: numeric("waste_percent", { precision: 6, scale: 4 }).default("0"),
   setupSheets: integer("setup_sheets").default(0),
   minOrderQty: numeric("min_order_qty", { precision: 12, scale: 3 }).default("1"),
+  /* UNIDADE DE VENDA (PEÇA 0 do PLANO-PORTAL-CLIENTE, v3.68.2) —
+     "cartela", "cento", "pacote", "par"… NULL = vendido por unidade.
+
+     Conceito de VENDA, distinto de piecesPerSheet (produção: quantas
+     peças saem da folha). Na foto 10x15 a folha rende várias peças e o
+     cliente leva por unidade — por isso o campo é próprio. Sem ele, a
+     Consulta Rápida copiava "1 un — R$ 12,90" no adesivo que vende por
+     cartela de 60, e o cliente do WhatsApp lia 1 adesivo. */
+  saleUnitLabel: text("sale_unit_label"),
+  /* Quantas frações vêm dentro da unidade (60 adesivos por cartela). */
+  saleUnitPieces: numeric("sale_unit_pieces", { precision: 12, scale: 3 }),
   operationalRate: numeric("operational_rate", { precision: 6, scale: 4 }).default("0"),
   roundingStep: numeric("rounding_step", { precision: 10, scale: 2 }).default("0.01"),
   // precificacao — em batch, margin representa lucro alvo no divisor de markup

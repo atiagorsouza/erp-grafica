@@ -17,6 +17,8 @@ export default async function ConsultaPrecoPage() {
         categoria: itemCategories.name,
         venda: products.finalPrice,
         custo: products.costSnapshot,
+        unidade: products.saleUnitLabel,
+        unidadeQtd: products.saleUnitPieces,
       })
       .from(products)
       .leftJoin(itemCategories, eq(itemCategories.id, products.productCategoryId))
@@ -41,6 +43,8 @@ export default async function ConsultaPrecoPage() {
     categoria: l.categoria ?? "Outros",
     venda: Number(l.venda ?? 0),
     custo: Number(l.custo ?? 0),
+    unidade: l.unidade ?? null,
+    unidadeQtd: l.unidadeQtd != null ? Number(l.unidadeQtd) : null,
     faixas: porProduto.get(l.id) ?? [],
   }));
 

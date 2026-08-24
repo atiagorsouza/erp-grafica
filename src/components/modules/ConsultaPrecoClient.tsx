@@ -20,11 +20,27 @@ export type ProdutoConsulta = {
   categoria: string;
   venda: number;
   custo: number;
+  /* Unidade de venda (PEÇA 0 do PLANO-PORTAL-CLIENTE): "cartela",
+     "cento", "pacote"… null = vendido por unidade. Sem isso o texto
+     copiado dizia "1 un — R$ 12,90" no adesivo vendido por cartela
+     de 60 — e o cliente do WhatsApp lia "1 adesivo por 12,90". */
+  unidade: string | null;
+  unidadeQtd: number | null;
   faixas: { qtd: number; preco: number }[];
 };
 
 const brl = (n: number) =>
   n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+
+/* 60 → "60" · 12.5 → "12,5" — sem moeda, é quantidade de peça. */
+const qtdFmt = new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 3 });
+const qtd = (n: number) => qtdFmt.format(n);
+
+/** "por cartela (com 60 un)" ou "por cartela" — null se venda por unidade. */
+function sufixoUnidade(p: ProdutoConsulta): string | null {
+  if (!p.unidade) return null;
+  return p.unidadeQtd ? `por ${p.unidade} (com ${qtd(p.unidadeQtd)} un)` : `por ${p.unidade}`;
+}
 
 /* Sem acento e sem caixa: "cartao", "CARTÃO" e "Cartao" acham a mesma coisa. */
 const normalizar = (s: string) =>
@@ -36,20 +52,28 @@ const normalizar = (s: string) =>
 
 /** Monta o texto que o atendente cola na conversa. */
 function textoWhatsApp(p: ProdutoConsulta) {
+  const sufixo = sufixoUnidade(p);
   const linhas: string[] = [`*${p.nome}*`];
 
   if (p.faixas.length > 1) {
+    /* Com unidade de venda, o cabeçalho já diz "por cartela" — repetir
+       "un" em cada linha devolveria a ambiguidade que a PEÇA 0 tirou. */
+    if (sufixo) linhas.push(`${sufixo.charAt(0).toUpperCase()}${sufixo.slice(1)}:`);
     for (const f of p.faixas) {
       const total = f.preco * f.qtd;
       // Em faixa de quantidade, o cliente quer saber o total do pacote.
-      linhas.push(
-        f.qtd === 1
-          ? `1 un — ${brl(f.preco)}`
-          : `${f.qtd} un — ${brl(f.preco)} cada  (${brl(total)})`
-      );
+      if (f.qtd === 1) {
+        linhas.push(sufixo ? `1 — ${brl(f.preco)}` : `1 un — ${brl(f.preco)}`);
+      } else {
+        linhas.push(
+          sufixo
+            ? `${qtd(f.qtd)} — ${brl(f.preco)} cada  (${brl(total)})`
+            : `${qtd(f.qtd)} un — ${brl(f.preco)} cada  (${brl(total)})`
+        );
+      }
     }
   } else {
-    linhas.push(brl(p.venda));
+    linhas.push(sufixo ? `${brl(p.venda)} ${sufixo}` : brl(p.venda));
   }
 
   return linhas.join("\n");
@@ -218,6 +242,13 @@ export function ConsultaPrecoClient({ produtos }: { produtos: ProdutoConsulta[] 
                         <span className="font-mono text-[19px] leading-none font-semibold text-ink-900 tnum">
                           {brl(p.faixas.length ? p.faixas[0].preco : p.venda)}
                         </span>
+                        {/* "R$ 12,90" sozinho já fez cliente ler "por
+                            adesivo" no produto vendido por cartela. */}
+                        {p.unidade && (
+                          <span className="font-mono text-[10px] leading-tight whitespace-nowrap text-ink-400">
+                            {`por ${p.unidade}${p.unidadeQtd ? ` · ${qtd(p.unidadeQtd)} un` : ""}`}
+                          </span>
+                        )}
                         <button
                           type="button"
                           onClick={() => copiar(p)}

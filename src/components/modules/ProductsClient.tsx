@@ -243,7 +243,7 @@ export function ProductsClient({
     setTiers([]);
     setSimQty("");
     setForm({ margin: "40", pagesPerUnit: "1", copies: "1", baseMaterialQty: "1", defaultQuantity: "100", piecesPerSheet: "1", printSides: "1", wastePercent: "5", setupSheets: "0", minOrderQty: "1", operationalRate: "15", roundingStep: "0.01",
-      leadTimeCreation: "0", leadTimeProduction: "1", leadTimeFinishing: "0", leadTimeSerial: "false" });
+      leadTimeCreation: "0", leadTimeProduction: "1", leadTimeFinishing: "0", leadTimeSerial: "false", saleUnitLabel: "", saleUnitPieces: "" });
     setEditorOpen(true);
   }
 
@@ -285,6 +285,8 @@ export function ProductsClient({
       wastePercent: String(num(p.wastePercent) * 100),
       setupSheets: String(p.setupSheets ?? 0),
       minOrderQty: String(p.minOrderQty ?? 1),
+      saleUnitLabel: String(p.saleUnitLabel || ""),
+      saleUnitPieces: p.saleUnitPieces ? String(num(p.saleUnitPieces)) : "",
       leadTimeCreation: String(p.leadTimeCreation ?? 0),
       leadTimeProduction: String(p.leadTimeProduction ?? 1),
       leadTimeFinishing: String(p.leadTimeFinishing ?? 0),
@@ -326,6 +328,8 @@ export function ProductsClient({
         wastePercent: String(num(form.wastePercent, 0) / 100),
         setupSheets: Number(form.setupSheets || 0),
         minOrderQty: form.minOrderQty || 1,
+        saleUnitLabel: (form.saleUnitLabel || "").trim() || null,
+        saleUnitPieces: form.saleUnitPieces ? num(form.saleUnitPieces, 0) : null,
         leadTimeCreation: num(form.leadTimeCreation, 0),
         leadTimeProduction: num(form.leadTimeProduction, 1),
         leadTimeFinishing: num(form.leadTimeFinishing, 0),
@@ -938,6 +942,31 @@ export function ProductsClient({
                 <Button size="xs" variant="outline" icon="plus" onClick={() => setTiers((arr) => [...arr, { minQuantity: "", unitPrice: "", label: "" }])}>
                   Faixa de quantidade
                 </Button>
+              </div>
+            </Bloco>
+
+            {/* Unidade de venda — PEÇA 0 do portal do cliente. Sem isto,
+                a Consulta Rápida copia "1 un — R$ 12,90" no adesivo que
+                vende por cartela de 60, e o cliente do WhatsApp lê
+                "1 adesivo por 12,90". */}
+            <Bloco
+              titulo="Unidade de venda"
+              icone="boxes"
+              descricao={
+                <>
+                  Como o cliente LEVA o produto: <strong>cartela</strong>, cento, pacote, par… Em branco
+                  = vendido por unidade. É só comunicação — não muda o cálculo, muda o texto que vai
+                  pro WhatsApp e pro site.
+                </>
+              }
+            >
+              <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
+                <Field label="Unidade" hint="ex.: cartela, cento, pacote">
+                  <Input value={form.saleUnitLabel || ""} onChange={set("saleUnitLabel")} placeholder="em branco = unidade" />
+                </Field>
+                <Field label="Qtd. dentro da unidade" hint="ex.: 60 adesivos por cartela">
+                  <Input mono value={form.saleUnitPieces || ""} onChange={set("saleUnitPieces")} placeholder="ex.: 60" />
+                </Field>
               </div>
             </Bloco>
 
