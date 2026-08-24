@@ -110,6 +110,25 @@ async function semearUnidadeVenda() {
   }
 }
 
+/* ── CONFIG: URL pública do app (v3.68.2) ──────────────────────────
+   O dono já tem o túnel no ar (app.vtdigital.site). Sem este valor,
+   o checkout da InfinitePay não envia redirect_url/webhook_url e o
+   cliente fica preso na tela de pagamento após pagar.
+
+   Só preenche VAZIO — valor definido a mão no Painel nunca é
+   sobrescrito. A InfiniteTag (handle) NÃO é tocada: é credencial do
+   dono, configurada no Painel de Controle. */
+async function preencherUrlPublica() {
+  const r = await client.query(
+    `UPDATE settings SET value='https://app.vtdigital.site'
+      WHERE key='app_base_url'
+        AND (value IS NULL OR btrim(value) = '')`
+  );
+  if (r.rowCount > 0) {
+    console.log("   ~ config   app_base_url preenchido: https://app.vtdigital.site");
+  }
+}
+
 try {
   let esperado;
   try {
@@ -175,7 +194,10 @@ try {
        unidade de venda roda mesmo com banco em dia (é dado, não é
        coluna). Sem isso, um banco que já tem as colunas por outro
        caminho nunca recebia o seed. */
-    if (APLICAR) await semearUnidadeVenda();
+    if (APLICAR) {
+      await semearUnidadeVenda();
+      await preencherUrlPublica();
+    }
     else {
       console.log("\n→ Nada foi alterado.");
       console.log("→ Para aplicar: node scripts/migrar-banco.mjs --aplicar\n");
@@ -285,6 +307,7 @@ try {
      seed copia pieces_per_sheet. Só preenche NULL: editou no
      formulário, este script nunca mais toca no valor. */
   await semearUnidadeVenda();
+  await preencherUrlPublica();
 
   /* ── 3. Reconferir ────────────────────────────────────────────
      Dizer "pronto" sem verificar foi exatamente o erro que nos

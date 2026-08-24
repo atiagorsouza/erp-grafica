@@ -4,7 +4,7 @@
 > aqui. Se você quiser saber em que pé está sem reler a conversa, é este
 > o arquivo.
 
-**Última atualização:** 19/08/2026
+**Última atualização:** 24/08/2026
 
 ---
 
@@ -24,11 +24,58 @@ instalar. Acabei de gerar, está em `release/`.
 
 | | |
 |---|---|
-| **Versão no ar** | **3.59.2** — "VTDIGITAL" |
-| Rodando em | `localhost:3000` (sandbox), banco `up` |
-| Testes | `e2e:smoke` **245 ✔** · bot 20 ✔ · campanhas 14 ✔ · auditorias 14+14 ✔ · build ✔ |
-| Lint | 11 problemas (mesmo baseline de antes, nada novo) |
-| Pacote | `update-3.59.2/` · bundle único `VTDIGITAL-3.59.2-COMPLETO.tar.gz` — `bash deploy-auto.sh` · socorro: `bash scripts/socorro.sh --consertar` · schema: `node scripts/migrar-banco.mjs --aplicar` |
+| **Versão no ar** | **3.68.2** — cartela, incidente do update e comprovante de pagamento |
+| Rodando em | servidor da gráfica (túnel `app.vtdigital.site`) · banco recuperado do incidente |
+| Testes | `e2e:smoke` **308 ✔** (303 + 5 da unidade de venda) · build ✔ · typecheck ✔ |
+| Lint | 11 problemas (baseline de sempre, nada novo) |
+| Pacote | `update-3.68.2/` · `printflow-erp-v3.68.2.tar.gz` — `bash scripts/deploy-auto.sh <caminho-do-pacote>` (SEMPRE com caminho) |
+
+### O que a 3.68.2 entregou — cartela, incidente e pagamento
+
+**PEÇA 0 · Unidade de venda.** A Consulta Rápida copiava `1 un —
+R$ 12,90` para o adesivo vendido **por cartela de 60** — o cliente do
+WhatsApp lia "1 adesivo". O dado já existia (`pieces_per_sheet` +
+descrição escrita pelo dono) e não chegava à tela. Agora: colunas
+`sale_unit_label`/`sale_unit_pieces` (aditivas), seed da família
+`ADES-%`, bloco "Unidade de venda" no cadastro e — no formato pedido
+pelo dono — o texto copiado mostra as unidades por faixa:
+
+```
+*Adesivo Personalizado 40x15mm (vinil branco)*
+1 — R$ 12,90  (60 unidades)
+2 — R$ 11,75 cada  (R$ 23,50) (120 unidades)
+```
+
+**Incidente 2026-08-24 — e as duas regras que nasceram dele.** Update
+com `pg_dump` falho seguiu sem backup; depois a reinstalação da base
+curada apagou produção; recuperação veio do `backup-antes-base-curada`.
+Agora: **update sem backup restaurável ABORTA** (`update.sh`) e **o
+instalador não apaga banco sem backup conferido** (`instalar-base-curada.sh`).
+Histórico completo: `docs/INCIDENTE-2026-08-24.md`.
+
+**Pagamento volta a ser uma experiência.** O cliente que pagava ficava
+preso na tela da InfinitePay (com `app_base_url` vazio o ERP nem enviava
+`redirect_url`). Agora `/pagamento/retorno` é comprovante completo:
+valor pago, PIX/cartão, parcelas, cliente, protocolo e comprovante. A
+URL pública (`https://app.vtdigital.site`, túnel que o dono já tem) é
+preenchida sozinha pela migração **se estiver vazia** — InfiniteTag
+nunca é tocada. Guias: `docs/SETUP-INFINITEPAY.md` e
+`docs/SETUP-CLOUDFLARE-TUNNEL.md` (com a regra do Access e os bypass
+públicos).
+
+**Fios que ficaram anotados:** `check-version.mjs` engole falha de
+`psql` em silêncio (corrigir: banco inalcançável = erro barulhento);
+re-exportar `base-curada.sql` com `app_version` em dia; branch do
+servidor (`catalogo-v3.68.1`) internamente é 3.68.0.
+
+### 3.68.1 e 3.68.0 (entradas que faltavam)
+
+**3.68.1** — instalação do zero quebrava na primeira compra:
+`document_counters` não vinha no export da base curada → CMP-2026-0001
+duplicado → 500. Corrigido no exportador e na base.
+
+**3.68.0** — catálogo completo no pacote + limpeza do resíduo de e2e.
+
 
 **Versão do servidor: consulte `/api/version`** — até a 3.53.2 o banco nunca era carimbado, então eu não tinha como saber. O pacote 3.53.2 cobre o pulo
 inteiro. Traz **mudança de banco** (tabela `registration_links`), mas o
