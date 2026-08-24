@@ -134,17 +134,18 @@ Depois abra **Produtos** no navegador e conte: sete categorias, 27 itens.
 
 ---
 
-## Sobre os clientes do servidor
+## Sobre os clientes do servidor — RESOLVIDO
 
-A parte B, passo 4, **apaga os clientes que estiverem lá** e põe 4 de
-exemplo no lugar.
+Perguntei três vezes se os clientes do servidor eram reais. **Resposta do
+dono em 24/08: não são.** Ele ainda não subiu a base de clientes, está
+em fase de testes.
 
-Já perguntei três vezes e nunca tive resposta: **os clientes que estão
-no servidor hoje são reais?** Se forem, **não rode o passo 4** — me
-avise que eu gero uma versão do instalador que não toca em `customers`.
+Ou seja: **pode rodar o passo 4 sem medo.** Não há nada a preservar. Os
+4 clientes de exemplo entram no lugar do que estiver lá.
 
-O backup do script salva tudo, então dá para recuperar. Mas é bem mais
-simples não apagar.
+Quando ele for subir os 200 clientes reais, aí sim a regra muda — a
+partir desse momento `instalar-base-curada.sh` não pode mais ser rodado
+sem uma versão que preserve `customers`.
 
 ---
 
