@@ -111,9 +111,18 @@ for (const p of prods) {
        Errei isso no kit de polaroid: 2 páginas A4 INTEIRAS viraram
        "1 folha dobrada" e o custo saiu pela metade. */
     const qtdBase = Number(p.base_material_qty) || 1;
-    const folhas = qtdBase > 1 ? qtdBase : (pgs > 1 ? pgs / 2 : 1);
+    /* Quantas folhas o produto consome:
+         qtdBase diferente de 1  -> vale ele, inclusive fração.
+           2   = kit que usa duas folhas inteiras
+           0,5 = meia folha (dois copos saem de uma folha de transfer)
+         qtdBase = 1 e várias páginas -> miolo DOBRADO (agenda A5:
+           uma folha A4 dobrada vira duas folhas A5). */
+    const folhas = qtdBase !== 1 ? qtdBase : (pgs > 1 ? pgs / 2 : 1);
+    /* Meia folha também custa meia impressão: quando dois copos saem
+       da mesma folha, cada um leva metade do clique. */
+    const fatorImp = qtdBase < 1 ? qtdBase : 1;
     calc += Number(base?.unit_cost || 0) * folhas;
-    calc += porPagina * pgs;
+    calc += porPagina * pgs * fatorImp;
     for (const m of mats) calc += Number(m.unit_cost) * Number(m.quantity);
     for (const f of fins) calc += Number(f.unit_cost) * Number(f.quantity);
     if (svc) calc += Number(svc.base_cost);
