@@ -119,6 +119,94 @@ canal "Portal do Site"). Isso é o comportamento correto e fica assim.
 
 ---
 
+## 2b · PEÇA 0 — Unidade de venda (v3.68.2 · independente do portal)
+
+> Relato do dono (2026-08-24): na **Consulta Rápida de Preço**, o texto
+> copiado pro WhatsApp dizia `1 un — R$ 12,90` no *Adesivo Personalizado
+> 40x15mm* — mas **R$ 12,90 é o preço da CARTELA, que vem com 60
+> adesivos**. Cliente lê "1 un" como 1 adesivo. "Essa parte é de suma
+> importância para o cliente."
+>
+> O dado já existe no banco, só não chega à tela: a descrição do
+> produto (id 355) diz, escrita pelo dono: *"Vendido por CARTELA com 60
+> adesivos. Equivale a R$ 0.2150 por adesivo"*, e `pieces_per_sheet`
+> guarda 60 (30mm→40, 40mm→24, 50mm→15, 60mm→8 — varia por tamanho).
+> A família inteira são os 9 SKUs `ADES-%`, todos `calculation_mode:
+> batch`. Nenhum outro produto do catálogo menciona cartela/cento/pacote
+> na descrição.
+
+### O erro hoje
+
+`ProdutoConsulta` (em `ConsultaPrecoClient.tsx`) só carrega
+`nome, sku, categoria, venda, custo, faixas` — sem noção de unidade de
+venda. O texto copiado:
+
+```
+*Adesivo Personalizado 40x15mm (vinil branco)*
+1 un — R$ 12,90        ← cliente lê: 1 adesivo
+2 un — R$ 11,75 cada (R$ 23,50)
+```
+
+### O conserto
+
+**Banco — 2 colunas aditivas em `products`** (idempotente em
+`migrar-banco.mjs` + `schema-update.sql`; nada renomeado/removido):
+
+- `sale_unit_label` text NULL — "cartela", "cento", "pacote", "par",
+  "jogo"… **NULL = venda por unidade** (comportamento de hoje).
+- `sale_unit_pieces` numeric(12,3) NULL — quantas frações vêm dentro
+  (60 adesivos por cartela). NULL = não se aplica.
+
+Não reaproveitamos `pieces_per_sheet` de propósito: aquele é conceito
+de **produção** (folha rende X peças); este é conceito de **venda**
+(quanto o cliente leva). Na família de adesivos coincidem (a cartela É
+a folha), mas "Foto 10x15" também rende N por folha e é vendida por
+unidade — conceitos diferentes não podem morar no mesmo campo.
+
+**Seed único na migração** (uma vez, idempotente):
+```sql
+UPDATE products SET sale_unit_label = 'cartela',
+                    sale_unit_pieces = pieces_per_sheet
+ WHERE sku LIKE 'ADES-%' AND sale_unit_label IS NULL
+   AND calculation_mode = 'batch';
+```
+Só a família `ADES-%`, porque a cartela delas é a própria folha — e a
+descrição escrita pelo dono confirma. Os demais produtos, se algum dia
+vendem por cento/pacote, o dono preenche no formulário.
+
+**Formulário de produto** (`ProductsClient`): 2 campos na área
+comercial, junto de "Min. por pedido":
+- "Unidade de venda" (placeholder: `cartela, cento, pacote…`)
+- "Qtd. dentro da unidade" (hint: `ex.: 60 adesivos por cartela`)
+
+**Lib** (`src/lib/products.ts`): os 2 campos entram no parse de
+create/update (opcionais; label ≤ 24 chars; pieces > 0).
+
+**Consulta Rápida** — o texto copiado passa a ser:
+
+```
+*Adesivo Personalizado 40x15mm (vinil branco)*
+Por cartela (com 60 adesivos):
+1 — R$ 12,90
+2 — R$ 11,75 cada (R$ 23,50)
+5 — R$ 10,60 cada (R$ 53,00)
+```
+
+- Sem faixas + com unidade: `R$ 12,90 por cartela (com 60 adesivos)`
+- **Sem unidade: texto de hoje, idêntico** — não se mexe no que está certo
+- No card da tela, embaixo do preço grande: `por cartela · 60 adesivos`
+
+**Portal (já conecta no §3.1)**: o produto do catálogo ganha
+`"saleUnit": { "label": "cartela", "pieces": 60 }` (ou `null`) e a
+vitrine mostra **"a partir de R$ 12,90 por cartela (60 adesivos)"** —
+sem isso, o portal repetiria o mesmo erro em público.
+
+**Smoke**: +2~3 checks (cria produto de teste com unidade →
+`/consulta-preco` responde 200 e contém "por cartela"; limpeza no fim).
+Contagem registrada no fechamento da versão. 4 gates de sempre.
+
+---
+
 ## 3 · Lado ERP — o que exatamente muda (v3.69.0)
 
 ### 3.1 `GET /api/portal` — enriquecer o retorno
@@ -144,7 +232,8 @@ pra vitrine (27 produtos — payload minúsculo, sem paginação):
     {
       "id": 7, "name": "Cartão de visita 4x4", "sku": "CV44",
       "categoryId": 11, "description": "…",
-      "fromPrice": 25.0
+      "fromPrice": 25.0,
+      "saleUnit": { "label": "cartela", "pieces": 60 }   // ou null (§2b)
     }
   ]
 }
@@ -381,7 +470,8 @@ Detalhes de comportamento:
 
 | Versão | O que entrega | Depende de |
 |---|---|---|
-| **v3.69.0** | Tudo deste documento: GET enriquecido, POST real + idempotência, `portal-sync.mjs`, site `portal-cliente/`, smoke, docs, deploy | — |
+| **v3.68.2** | **PEÇA 0 (§2b)**: unidade de venda — colunas + seed, formulário, Consulta Rápida corrigida (texto do WhatsApp diz "por cartela") | — |
+| **v3.69.0** | Tudo deste documento: GET enriquecido, POST real + idempotência, `portal-sync.mjs`, site `portal-cliente/`, smoke, docs, deploy | v3.68.2 |
 | **v3.70.0** | WhatsApp automático: "recebemos seu pedido, orçamento ORC-2026-0123" pro cliente + aviso pro dono (usa `mensagens.ts`, gateway que já existe) | v3.69.0 |
 | **v3.71.0** | **Orçamento público**: link mágico por orçamento, botões Aprovar / Pedir ajuste (pendência antiga do `ONDE-ESTAMOS`) | v3.69.0 |
 | **v3.72.0** | **Acompanhamento de OS**: link mágico por cliente (padrão `/cadastro/[token]`), etapa/prazo/saldo | v3.71.0 |
@@ -420,7 +510,9 @@ Detalhes de comportamento:
 
 ## 9 · Ordem de ataque (quando o dono disser "vai")
 
-1. `GET /api/portal` enriquecido (+ `catalogHash`)
+0. **PEÇA 0 (§2b)** como v3.68.2 separada: unidade de venda + Consulta
+   Rápida corrigida (4 gates + release própria)
+1. `GET /api/portal` enriquecido (+ `catalogHash` + `saleUnit`)
 2. `POST /api/portal` real + tabela `portal_orders` + migração
 3. Seção nova no smoke
 4. `portal-cliente/` completo (site)
