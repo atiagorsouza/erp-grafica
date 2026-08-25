@@ -129,6 +129,20 @@ async function preencherUrlPublica() {
   }
 }
 
+/* E-mail comercial da empresa — remetente dos e-mails do sistema.
+   O dono definiu contato.vt@ em 25/08. Só preenche vazio; se ele um
+   dia trocar no Painel, este script nunca mais toca no valor. */
+async function preencherEmailEmpresa() {
+  const r = await client.query(
+    `UPDATE settings SET value='contato.vt@vtdigital.com.br'
+      WHERE key='company_email'
+        AND (value IS NULL OR btrim(value) = '')`
+  );
+  if (r.rowCount > 0) {
+    console.log("   ~ config   company_email preenchido: contato.vt@vtdigital.com.br");
+  }
+}
+
 /* ── 3D: filamento é MATERIAL, não consumível de impressora ────────
    O motor parou de cobrar consumíveis na categoria "grama" (o filamento
    entra pela linha "Material" do produto). Produtos 3D antigos podem ter
@@ -253,6 +267,7 @@ try {
     if (APLICAR) {
       await semearUnidadeVenda();
       await preencherUrlPublica();
+      await preencherEmailEmpresa();
       await corrigirProdutos3D();
     }
     else {
@@ -365,6 +380,7 @@ try {
      formulário, este script nunca mais toca no valor. */
   await semearUnidadeVenda();
   await preencherUrlPublica();
+  await preencherEmailEmpresa();
   await corrigirProdutos3D();
 
   /* ── 3. Reconferir ────────────────────────────────────────────

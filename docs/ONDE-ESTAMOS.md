@@ -24,9 +24,10 @@ instalar. Acabei de gerar, está em `release/`.
 
 | | |
 |---|---|
-| **Versão no ar** | **3.68.4** — deploy acha o banco sozinho (incidente do smoke 4/179 fechado) |
-| Rodando em | servidor da gráfica (túnel `app.vtdigital.site`) · em 3.68.2 até a 3.68.4 subir |
-| Testes | `e2e:smoke` completo ✔ (cenário com `.env` e shell limpo) · falha-rápido sem banco ✔ · `bash -n` ✔ |
+| **Versão no ar** | **3.68.5** — PDV cobra por link na hora + WhatsApp sabe o número do cliente |
+| Rodando em | servidor da gráfica (túnel `app.vtdigital.site`) · em 3.68.4 até a 3.68.5 subir |
+| Testes | `e2e:smoke` completo ✔ · typecheck ✔ · lint 11 (base) · migração do e-mail testada ao vivo |
+| Observado | `company_email` ganha padrão `contato.vt@` (só se vazio) · `labor_hourly_rate` ficou 0 por escolha do dono · aviso de "password sem suporte visual" = falso alarme da ferramenta do servidor (Painel desenha os 3 segredos com máscara) |
 | Lint | 11 problemas (baseline de sempre, nada novo) |
 | Pacote | `update-3.68.2/` · `printflow-erp-v3.68.2.tar.gz` — `bash scripts/deploy-auto.sh <caminho-do-pacote>` (SEMPRE com caminho) |
 

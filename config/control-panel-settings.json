@@ -41,7 +41,7 @@
         {
           "key": "company_email",
           "label": "E-mail comercial",
-          "defaultValue": ""
+          "defaultValue": "contato.vt@vtdigital.com.br"
         },
         {
           "key": "company_phone",

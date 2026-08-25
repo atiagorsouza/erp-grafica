@@ -205,6 +205,8 @@ type RecentSale = {
 
 type ReceiptData = {
   number: string;
+  /** id da venda gravada — alimenta a cobrança por link (InfinitePay) */
+  saleId: number | null;
   soldAt: Date;
   items: CartLine[];
   subtotal: number;
@@ -300,6 +302,69 @@ export function PosClient({
 
   const [charging, setCharging] = useState(false);
   const [receipt, setReceipt] = useState<ReceiptData | null>(null);
+
+  /* ── COBRANÇA POR LINK NA HORA (InfinitePay) ──────────────────────
+     Cliente na loja sem maquininha em mãos: o operador gera o link da
+     venda, mostra o QR ou manda no WhatsApp, e o pagamento quita a
+     venda sozinho — webhook reconfere, receita e tarifa caem no
+     financeiro (mesmo caminho das Cobranças). */
+  const [linkCharge, setLinkCharge] = useState<{ id: number; url: string } | null>(null);
+  const [linkQr, setLinkQr] = useState("");
+  const [linkBusy, setLinkBusy] = useState(false);
+  const [linkPaid, setLinkPaid] = useState<"none" | "paid" | "pending">("none");
+
+  const cobrarPorLink = useCallback(async () => {
+    if (!receipt?.saleId) {
+      toast.error("Cobrança por link", "Esta venda não tem id para cobrar.");
+      return;
+    }
+    setLinkBusy(true);
+    setLinkPaid("none");
+    try {
+      const res = await fetch("/api/payments", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ op: "create", saleId: receipt.saleId }),
+      });
+      const json = await res.json();
+      if (!res.ok || json.error) throw new Error(String(json.error || "falha ao gerar link"));
+      setLinkCharge({ id: Number(json.row.id), url: String(json.row.checkoutUrl) });
+      try {
+        const QR = (await import("qrcode")).default;
+        setLinkQr(await QR.toDataURL(String(json.row.checkoutUrl), { width: 224, margin: 1 }));
+      } catch {
+        setLinkQr("");
+      }
+    } catch (e) {
+      toast.error("Cobrança por link", e instanceof Error ? e.message : undefined);
+    } finally {
+      setLinkBusy(false);
+    }
+  }, [receipt]);
+
+  const conferirLinkPago = useCallback(async () => {
+    if (!linkCharge) return;
+    setLinkBusy(true);
+    try {
+      const res = await fetch("/api/payments", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ op: "check", id: linkCharge.id }),
+      });
+      const json = await res.json();
+      if (!res.ok || json.error) throw new Error(String(json.error || "falha ao conferir"));
+      if (json.paid || json.row?.status === "pago") {
+        setLinkPaid("paid");
+        toast.success("Pagamento confirmado", "Venda quitada — receita e tarifa lançadas no financeiro.");
+      } else {
+        setLinkPaid("pending");
+      }
+    } catch (e) {
+      toast.error("Conferir pagamento", e instanceof Error ? e.message : undefined);
+    } finally {
+      setLinkBusy(false);
+    }
+  }, [linkCharge]);
   const [confirmOversell, setConfirmOversell] = useState<string | null>(null);
   const [freeItemOpen, setFreeItemOpen] = useState(false);
   const [cashOpen, setCashOpen] = useState(false);
@@ -686,6 +751,7 @@ export function PosClient({
 
       setReceipt({
         number: s.number,
+        saleId: s.id,
         soldAt: new Date(s.createdAt),
         items,
         subtotal: toNumber(s.subtotal, 0),
@@ -869,6 +935,7 @@ export function PosClient({
 
       const newReceipt: ReceiptData = {
         number: String(row.number),
+        saleId: row.id ?? null,
         soldAt: row.createdAt ? new Date(row.createdAt) : now,
         items: cartSnapshot,
         subtotal: totalsSnapshot.subtotal,
@@ -1950,6 +2017,17 @@ export function PosClient({
               <Button
                 variant="outline"
                 size="sm"
+                icon="external"
+                loading={linkBusy}
+                disabled={!receipt?.saleId}
+                onClick={() => void cobrarPorLink()}
+              >
+                Cobrar por link
+              </Button>
+
+              <Button
+                variant="outline"
+                size="sm"
                 icon="printer"
                 title="Imprime em texto puro: máxima nitidez na bobina térmica"
                 onClick={() => {
@@ -1980,6 +2058,92 @@ export function PosClient({
           </div>
         )}
       </Drawer>
+
+      {/* COBRANÇA POR LINK (InfinitePay) — QR + WhatsApp + conferência */}
+      <Modal
+        open={!!linkCharge}
+        onClose={() => setLinkCharge(null)}
+        title="Cobrança por link"
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setLinkCharge(null)}>Fechar</Button>
+            <Button loading={linkBusy} icon="check" onClick={() => void conferirLinkPago()}>
+              Já pagou? Conferir
+            </Button>
+          </>
+        }
+      >
+        <div className="flex flex-col items-center gap-3">
+          {linkQr ? (
+            /* QR é data-URL gerado na hora (224px já comprimidos) —
+               next/image não otimiza data-URL; otimizador aqui é custo
+               sem ganho. */
+            /* eslint-disable-next-line @next/next/no-img-element */
+            <img
+              src={linkQr}
+              alt="QR de pagamento"
+              className="rounded-lg border border-paper-300 bg-white p-2"
+              width={224}
+              height={224}
+            />
+          ) : (
+            <p className="text-[12px] text-ink-400">Gerando QR…</p>
+          )}
+          <p className="text-center text-[12.5px] leading-relaxed text-ink-600">
+            O cliente escaneia o QR ou abre o link e paga por <strong>PIX</strong> ou{" "}
+            <strong>cartão</strong>. A venda quita sozinha: receita e tarifa caem no financeiro.
+          </p>
+          {linkPaid === "paid" && (
+            <p className="rounded-lg bg-emerald-50 px-3 py-1.5 text-[12.5px] font-semibold text-emerald-700">
+              ✔ Pagamento confirmado
+            </p>
+          )}
+          {linkPaid === "pending" && (
+            <p className="rounded-lg bg-amber-50 px-3 py-1.5 text-[12.5px] text-amber-700">
+              Ainda não confirmado na InfinitePay — confira de novo em instantes
+            </p>
+          )}
+          <div className="flex flex-wrap justify-center gap-2">
+            <Button
+              size="sm"
+              icon="copy"
+              onClick={() => {
+                void navigator.clipboard?.writeText(linkCharge?.url || "");
+                toast.success("Link copiado");
+              }}
+            >
+              Copiar link
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              icon="whatsapp"
+              onClick={() => {
+                let d = whatsappNumber(receipt?.customer || null);
+                if (d.startsWith("55") && d.length >= 12) d = d.slice(2);
+                const msg = `Pagamento da venda ${receipt?.number}: ${linkCharge?.url}`;
+                window.open(
+                  d
+                    ? `https://wa.me/55${d}?text=${encodeURIComponent(msg)}`
+                    : `https://wa.me/?text=${encodeURIComponent(msg)}`,
+                  "_blank",
+                  "noopener"
+                );
+              }}
+            >
+              WhatsApp
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              icon="external"
+              onClick={() => window.open(String(linkCharge?.url || ""), "_blank", "noopener")}
+            >
+              Abrir
+            </Button>
+          </div>
+        </div>
+      </Modal>
 
       {/* CONTAINER EXCLUSIVO DE IMPRESSÃO TÉRMICA (ESCONDIDO NA TELA, REVELADO NO PRINT)
           `--receipt-weight` é lido pelo @media print em globals.css: permite

@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { whatsappNumber, type WhatsAppTarget } from "@/lib/validators";
 import {
   Badge,
   Button,
@@ -509,15 +510,27 @@ export function PaymentsClient({
             size="sm"
             variant="outline"
             icon="whatsapp"
-            onClick={() =>
+            onClick={() => {
+              /* Cliente conhecido → wa.me já com o número dele (a cobrança
+                 sabe quem é). Sem cliente → abre em branco, como antes. */
+              let d = whatsappNumber(
+                created?.customerId
+                  ? (customerById.get(Number(created.customerId)) as WhatsAppTarget | undefined)
+                  : null
+              );
+              if (d.startsWith("55") && d.length >= 12) d = d.slice(2);
+              const valor = created?.amount
+                ? ` de R$ ${Number(created.amount).toFixed(2).replace(".", ",")}`
+                : "";
+              const msg = `Segue o link para pagamento${valor}: ${created?.checkoutUrl}`;
               window.open(
-                `https://wa.me/?text=${encodeURIComponent(
-                  `Segue o link para pagamento: ${created?.checkoutUrl}`
-                )}`,
+                d
+                  ? `https://wa.me/55${d}?text=${encodeURIComponent(msg)}`
+                  : `https://wa.me/?text=${encodeURIComponent(msg)}`,
                 "_blank",
                 "noopener"
-              )
-            }
+              );
+            }}
           >
             WhatsApp
           </Button>
