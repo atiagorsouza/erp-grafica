@@ -1,6 +1,7 @@
 import {
   pgTable,
   serial,
+  bigserial,
   text,
   timestamp,
   numeric,
@@ -11,6 +12,7 @@ import {
   date,
   uniqueIndex,
   index,
+  primaryKey,
 } from "drizzle-orm/pg-core";
 /* Tipo só para a auto-referência de item_categories.parent_id: sem
    ele o TypeScript entra em recursão infinita ao inferir a tabela. */
@@ -1625,3 +1627,76 @@ export const campaignTargets = pgTable("campaign_targets", {
 
 export type Campaign = typeof campaigns.$inferSelect;
 export type CampaignTarget = typeof campaignTargets.$inferSelect;
+
+/* ------------------------------------------------------------------ */
+/*  WHATSAPP — tabelas do serviço (blindagem v3.68.9)                  */
+/* ------------------------------------------------------------------ */
+
+/* ──────────────────────────────────────────────────────────────────
+   Estas três tabelas nasceram FORA do schema: o serviço do WhatsApp
+   (services/whatsapp) as cria sozinho com CREATE TABLE IF NOT EXISTS.
+   Por isso o `drizzle-kit push` do deploy as enxergava como "sobra"
+   de um banco antigo — pronto para DROP. No incidente de 25/08 as
+   conversas de produção sumiram exatamente por um push desses.
+
+   Agora o schema as declara IGUAIS ao DDL do serviço (pre-cadastro.mjs
+   e auth-state.mjs): o push passa a GERENCIAR em vez de propor exclusão.
+
+   REGRA DE OURO: mudou o DDL no serviço? Muda aqui junto. As duas
+   pontas escrevem no mesmo banco — e nenhuma das duas pode divergir.
+   ────────────────────────────────────────────────────────────────── */
+
+export const whatsappConversas = pgTable("whatsapp_conversas", {
+  phoneE164: text("phone_e164").primaryKey(),
+  customerId: integer("customer_id"),
+  etapa: text("etapa").notNull().default("pedir_nome"),
+  ultimaMsg: timestamp("ultima_msg", { mode: "date", withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  primeiraMsg: timestamp("primeira_msg", { mode: "date", withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  recebidas: integer("recebidas").notNull().default(0),
+  saudou: boolean("saudou").notNull().default(false),
+  avisouAusencia: boolean("avisou_ausencia").notNull().default(false),
+  assumidaPor: text("assumida_por"),
+  assumidaEm: timestamp("assumida_em", { mode: "date", withTimezone: true }),
+});
+
+export const whatsappMensagens = pgTable(
+  "whatsapp_mensagens",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    phoneE164: text("phone_e164").notNull(),
+    direcao: text("direcao").notNull(),
+    texto: text("texto"),
+    waId: text("wa_id"),
+    criadoEm: timestamp("criado_em", { mode: "date", withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    /* Mesmo índice que o serviço cria: busca o histórico de um número
+       do mais novo para o mais antigo (é o coração do painel de chat). */
+    index("whatsapp_mensagens_fone_idx").on(table.phoneE164, table.criadoEm.desc()),
+  ],
+);
+
+export const whatsappAuth = pgTable(
+  "whatsapp_auth",
+  {
+    /* Sessão do Baileys em postgres — ver services/whatsapp/src/auth-state.mjs.
+       Colunas com nome em português de propósito: é o DDL exato do serviço,
+       renomear aqui seria propor ALTER numa tabela de sessão viva. */
+    sessionId: text("session_id").notNull(),
+    chave: text("chave").notNull(),
+    valor: jsonb("valor").notNull(),
+    updatedAt: timestamp("updated_at", { mode: "date", withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [primaryKey({ columns: [table.sessionId, table.chave] })],
+);
+
+export type WhatsappConversa = typeof whatsappConversas.$inferSelect;
+export type WhatsappMensagem = typeof whatsappMensagens.$inferSelect;

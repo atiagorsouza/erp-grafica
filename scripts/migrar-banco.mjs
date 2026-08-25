@@ -129,6 +129,76 @@ async function preencherUrlPublica() {
   }
 }
 
+/* E-mail comercial da empresa — remetente dos e-mails do sistema.
+   O dono definiu contato.vt@ em 25/08. Só preenche vazio; se ele um
+   dia trocar no Painel, este script nunca mais toca no valor. */
+async function preencherEmailEmpresa() {
+  const r = await client.query(
+    `UPDATE settings SET value='contato.vt@vtdigital.com.br'
+      WHERE key='company_email'
+        AND (value IS NULL OR btrim(value) = '')`
+  );
+  if (r.rowCount > 0) {
+    console.log("   ~ config   company_email preenchido: contato.vt@vtdigital.com.br");
+  }
+}
+
+/* ── 3D: filamento é MATERIAL, não consumível de impressora ────────
+   O motor parou de cobrar consumíveis na categoria "grama" (o filamento
+   entra pela linha "Material" do produto). Produtos 3D antigos podem ter
+   ficado sem material base — estes ganham o link automático para o
+   filamento cadastrado em Materiais, com as GRAMAS que já estavam no
+   campo de quantidade por unidade. Nunca sobrescreve link existente e
+   nunca chuta quando há mais de um filamento: avisa. */
+async function corrigirProdutos3D() {
+  const gramCats = await q(`SELECT id FROM printer_categories WHERE measure_mode='grama'`);
+  if (!gramCats.length) return;
+  const catIds = gramCats.map((c) => c.id).join(",");
+  const prods = await q(
+    `SELECT id, sku, name, pages_per_unit::float8 AS gramas
+       FROM products
+      WHERE base_material_id IS NULL
+        AND pages_per_unit > 0
+        AND printer_id IN (SELECT id FROM printers WHERE category_id IN (${catIds}))`
+  );
+  if (!prods.length) return;
+  const fils = await q(
+    `SELECT id, name, unit FROM materials WHERE name ILIKE '%filamento%' ORDER BY id`
+  );
+  if (fils.length !== 1) {
+    const motivo =
+      fils.length === 0
+        ? "nenhum filamento em Materiais — cadastre o rolo no Estoque"
+        : `há ${fils.length} filamentos — escolha o certo na ficha de cada produto`;
+    console.log(
+      `   ⚠ 3D       ${prods.length} produto(s) sem material base; ${motivo}`
+    );
+    return;
+  }
+  const fil = fils[0];
+  /* A quantidade do link é em GRAMAS. Se o material foi cadastrado em
+     kg (rolo de 1 kg), converte; em "rolo" não dá para chutar — avisa. */
+  const un = String(fil.unit || "").toLowerCase();
+  const emKg = un === "kg" || un === "kilo" || un === "kilograma";
+  const emGrama = !emKg && (un === "" || un.includes("gram"));
+  if (!emKg && !emGrama) {
+    console.log(
+      `   ⚠ 3D       material "${fil.name}" está em "${fil.unit}" — ligue manualmente na ficha de cada produto 3D`
+    );
+    return;
+  }
+  for (const p of prods) {
+    const qty = emKg ? p.gramas / 1000 : p.gramas;
+    await client.query(
+      `UPDATE products SET base_material_id=$1, base_material_qty=$2 WHERE id=$3`,
+      [fil.id, qty, p.id]
+    );
+  }
+  console.log(
+    `   ~ 3D       ${prods.length} produto(s) ligado(s) ao material "${fil.name}" (gramas = quantidade por unidade${emKg ? ", convertida para kg" : ""})`
+  );
+}
+
 try {
   let esperado;
   try {
@@ -197,6 +267,8 @@ try {
     if (APLICAR) {
       await semearUnidadeVenda();
       await preencherUrlPublica();
+      await preencherEmailEmpresa();
+      await corrigirProdutos3D();
     }
     else {
       console.log("\n→ Nada foi alterado.");
@@ -308,6 +380,8 @@ try {
      formulário, este script nunca mais toca no valor. */
   await semearUnidadeVenda();
   await preencherUrlPublica();
+  await preencherEmailEmpresa();
+  await corrigirProdutos3D();
 
   /* ── 3. Reconferir ────────────────────────────────────────────
      Dizer "pronto" sem verificar foi exatamente o erro que nos

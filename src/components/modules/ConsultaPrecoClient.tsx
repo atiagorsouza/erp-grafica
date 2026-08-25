@@ -90,7 +90,15 @@ function textoWhatsApp(p: ProdutoConsulta) {
   return linhas.join("\n");
 }
 
-export function ConsultaPrecoClient({ produtos }: { produtos: ProdutoConsulta[] }) {
+export function ConsultaPrecoClient({
+  produtos,
+  moldura,
+}: {
+  produtos: ProdutoConsulta[];
+  /* Saudação e assinatura do Painel → Mensagens (grupo "Consulta de
+     preço"). Vazia = desligada lá: o copiar sai puro como antes. */
+  moldura?: { cabecalho: string; assinatura: string };
+}) {
   const [busca, setBusca] = useState("");
   const [mostrarCusto, setMostrarCusto] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -132,8 +140,18 @@ export function ConsultaPrecoClient({ produtos }: { produtos: ProdutoConsulta[] 
     return [...mapa.entries()];
   }, [resultados]);
 
+  /* O texto que sai com a moldura: saudação em cima, tabela no meio,
+     assinatura embaixo. O que estiver vazio simplesmente não entra —
+     sem linha em branco fantasma. */
+  function textoComMoldura(p: ProdutoConsulta) {
+    return [moldura?.cabecalho, textoWhatsApp(p), moldura?.assinatura]
+      .map((s) => (s || "").trim())
+      .filter(Boolean)
+      .join("\n\n");
+  }
+
   async function copiar(p: ProdutoConsulta) {
-    const texto = textoWhatsApp(p);
+    const texto = textoComMoldura(p);
     try {
       await navigator.clipboard.writeText(texto);
       toast.success(`${p.nome} copiado`);

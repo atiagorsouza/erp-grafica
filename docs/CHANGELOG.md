@@ -1,3 +1,51 @@
+## [3.68.14] — 2026-08-25
+
+- Precos acompanham o custo do material: recalculo em cascata, guarda da embalagem, faixas com aviso e reajuste
+
+## [3.68.13] — 2026-08-25
+
+- PDV: teto de desconto 50%, vendedor sempre visivel, catalogo paginado
+
+## [3.68.12] — 2026-08-25
+
+- Ficha lateral fixa no chat — tres colunas em telas largas, estilo Waplus
+
+## [3.68.11] — 2026-08-25
+
+- Lembrete de cobranca por WhatsApp — sininho nas cobrancas pendentes
+
+## [3.68.10] — 2026-08-25
+
+- Moldura na Consulta Rapida (textos da grafica) + fim dos orcamentos fantasma
+
+## [3.68.9] — 2026-08-25
+
+- Blindagem: tabelas do WhatsApp sob gestao do schema do ERP — nenhum deploy apaga mais conversas
+
+## [3.68.8] — 2026-08-25
+
+- Ficha 360º no chat do WhatsApp: balcão, orçamentos e cobranças na conversa; cadastro de cliente sem sair do chat
+
+## [3.68.7] — 2026-08-25
+
+- Receita do InfinitePay identifica quem pagou; avulsa com cliente
+
+## [3.68.6] — 2026-08-25
+
+- Volta do pagamento cai no comprovante certo; cliente nao ve o sistema
+
+## [3.68.5] — 2026-08-25
+
+- PDV cobra por link na hora; WhatsApp com numero do cliente
+
+## [3.68.4] — 2026-08-25
+
+- Deploy acha o banco sozinho; sem banco para alto
+
+## [3.68.3] — 2026-08-24
+
+- 3D: filamento e material do estoque, impressora cobra so horas
+
 # Changelog — PrintFlow ERP
 
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).  

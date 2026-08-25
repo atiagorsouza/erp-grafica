@@ -4,7 +4,7 @@
 > aqui. Se você quiser saber em que pé está sem reler a conversa, é este
 > o arquivo.
 
-**Última atualização:** 24/08/2026
+**Última atualização:** 25/08/2026 (4ª)
 
 ---
 
@@ -24,11 +24,36 @@ instalar. Acabei de gerar, está em `release/`.
 
 | | |
 |---|---|
-| **Versão no ar** | **3.68.2** — cartela, incidente do update e comprovante de pagamento |
-| Rodando em | servidor da gráfica (túnel `app.vtdigital.site`) · banco recuperado do incidente |
-| Testes | `e2e:smoke` **308 ✔** (303 + 5 da unidade de venda) · build ✔ · typecheck ✔ |
+| **Versão no ar** | **3.68.14** — material caro não congela mais preço de produto: recálculo em cascata + guarda da embalagem + faixas com aviso |
+| Rodando em | servidor da gráfica (túnel `app.vtdigital.site`) · produção em 3.68.11 ✔ — este deploy é o 3.68.14 |
+| Testes | `e2e:smoke` completo ✔ · typecheck ✔ · lint 11 (base) · API testada: custo divergente da embalagem → 422 com a conta na mensagem; embalagem +40% → produto recalculado na hora (custo 1,13→1,53; preço 2,98→4,03); faixas preservadas |
+| Observado | `company_email` ganha padrão `contato.vt@` (só se vazio) · `labor_hourly_rate` ficou 0 por escolha do dono · aviso de "password sem suporte visual" = falso alarme da ferramenta do servidor (Painel desenha os 3 segredos com máscara) |
 | Lint | 11 problemas (baseline de sempre, nada novo) |
 | Pacote | `update-3.68.2/` · `printflow-erp-v3.68.2.tar.gz` — `bash scripts/deploy-auto.sh <caminho-do-pacote>` (SEMPRE com caminho) |
+
+### O que a 3.68.8 entregou — ficha 360º no chat do WhatsApp
+
+**QUEM É QUEM.** A ficha que abria sobre a conversa só olhava pedidos.
+Agora responde "o que esse cliente já fez?" sem sair do WhatsApp:
+
+- **Últimas compras no balcão** (vendas do PDV, com forma de pagamento e data)
+- **Últimos pedidos** (como antes, clicáveis)
+- **Últimos orçamentos** — antes só uma contagem de abertos; agora
+  número, valor e status de cada um (Rascunho/Enviado/Aprovado/…)
+- **Últimas cobranças** — descrição, valor e situação (Aguardando/Pago/…)
+- **LTV correto** — "Já comprou" soma pedidos E vendas de balcão
+  (cancelados de fora). Cliente fiel do balcão deixava de parecer
+  "nunca comprou".
+
+**CADASTRO SEM SAIR DA CONVERSA.** Conversa com selo "sem cadastro"
+ganhou botão **Cadastrar cliente**: telefone já vem travado no número
+da conversa (o E164 que a identifica), o operador só digita o nome.
+Se o telefone já pertence a um cliente, nada é duplicado — a conversa
+só é vinculada a ele. Depois de salvar, a ficha 360º abre sozinha.
+
+Detalhe técnico: `customer_id` em `whatsapp_conversas` continua sem
+writer no código do bot — o ERP agora escreve esse campo só no fluxo
+de cadastro do chat, que é decisão do operador.
 
 ### O que a 3.68.2 entregou — cartela, incidente e pagamento
 
@@ -835,3 +860,61 @@ typecheck limpo.
 
 **Produção ainda na 3.65.0** — a 3.66.0 chegou a ser empacotada mas não
 foi aplicada. A 3.67.0 substitui as duas.
+
+## 2026-08-25 — v3.68.13 fechada
+
+**PDV com as 3 correções do balcão** (pedidas pelo dono em 25/08):
+
+- **Teto de desconto de 50%.** O balcão aceitava desconto de até 100%
+  (dava para vender de graça por engano). Agora o servidor recusa
+  (422 "Desconto máximo é 50% do subtotal") e o campo na tela trava o
+  percentual em 50 com dica "máx 50%". O desconto à vista do PIX
+  continua sendo somado por cima — o teto real é 50% + desconto PIX.
+- **Vendedor sempre visível.** O seletor de vendedor existia mas estava
+  escondido num bloco recolhido — o cupom saía "OPERADOR" na mão.
+  Subiu para a área principal do pagamento; usa o cadastro de
+  vendedores que já existia (comissão por margem). Sem vendedor
+  cadastrado, vira campo livre.
+- **Catálogo com freio.** A lista lateral de produtos mostrava tudo de
+  uma vez (29 no sandbox, milhares em produção). Agora: 24 por vez +
+  botão "Mostrar mais". Busca e troca de categoria voltam a 24.
+
+Bloco recolhido renomeado para "⚙️ Observações do Cupom" (só o que
+sobrou nele, de fato).
+
+Testado na API: 60% → 422 com a mensagem nova; 45% → venda criada,
+cancelada e estoque restaurado. Smoke completo, typecheck, lint 11
+(baseline).
+
+## 2026-08-25 — v3.68.14 fechada (auditoria de Produtos & Custos)
+
+O dono reportou: "mudo algo em Materiais e insumos ou qq outra coisa e o
+preço e quantidade permanecem o valor anterior". Auditoria com
+reprodução achou **2 bugs reais + 1 armadilha de UX** — os três
+corrigidos:
+
+- **Preço congelado (o grave).** Produto guarda custo/preço como
+  fotografia do dia em que foi salvo; editar material não recalculava
+  NADA (reproduzido: papel 0,0558→0,40 e produto intacto — 27 dos 29
+  produtos dependem de material). Agora **salvar material recalcula na
+  hora todos os produtos que o usam** (base e insumo extra), com
+  toast informando "N produto(s) com preço recalculado".
+- **Custo descartado em silêncio.** Com embalagem preenchida (ex. resma
+  R$ 278,99 ÷ 5000), o custo unitário digitado era ignorado pela API
+  com resposta 200 OK (reproduzido: custo dobrado mandado, valor velho
+  mantido). Agora divergência → **422 com a conta na mensagem**; a
+  tela do Estoque manda o custo derivado da embalagem.
+- **Faixas de preço não acompanham.** Faixa é preço digitado à mão;
+  mudar material/margem mudava só o preço calculado e o balcão
+  (PDV/Consulta) seguia na faixa velha. Agora o editor avisa ("Preço
+  calculado mudou de X para Y e as faixas continuam no preço antigo")
+  e oferece **Reajustar faixas (+N%)** na mesma proporção.
+
+Também verificado na auditoria (sem alteração): editor recalcula ao
+vivo corretamente (motor testado direto); cancelamento/sangria/troco
+do PDV sólidos; estoque de material editado no modal não deixa
+movimentação (fica anotado para decisão futura).
+
+Nota técnica: recálculo em cascata só repriceia (custo/preço/breakdown);
+composição, faixas e estoque do produto continuam sendo da tela dele.
+Falha num produto não derruba o salvamento do material.

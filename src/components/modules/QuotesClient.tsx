@@ -103,7 +103,7 @@ export function QuotesClient({
         ...Object.fromEntries(Object.entries(mudancas).map(([k, v]) => [k, String(v)])),
       };
       if (mudancas.q !== undefined || mudancas.filtro !== undefined) base.pagina = "1";
-      for (const [k, v] of Object.entries(base)) if (v && v !== "0" && v !== "all") p.set(k, v);
+      for (const [k, v] of Object.entries(base)) if (v && v !== "0") p.set(k, v);
       router.push(`/orcamentos${p.toString() ? `?${p}` : ""}`);
     },
     [router, paginacao]
@@ -281,7 +281,12 @@ export function QuotesClient({
         qItems.some((i) => String(i.description || "").toLowerCase().includes(term));
 
       if (!matchTerm) return false;
-      return filter === "all" || quote.status === filter;
+      return (
+        filter === "all" ||
+        (filter === "ativos"
+          ? quote.status === "enviado" || quote.status === "aprovado"
+          : quote.status === filter)
+      );
     });
   }, [quotes, paginacao.busca, filter, custName, items]);
 
@@ -541,6 +546,20 @@ export function QuotesClient({
       {/* ── BARRA DE FILTROS & BUSCA ── */}
       <div className="reveal mb-4 flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap gap-2">
+          {/* "Ativos" primeiro e é o padrão (v3.68.10): rascunho de
+              teste e orçamento expirado são fantasma — o balcão quer
+              o que está na rua. */}
+          <button
+            onClick={() => setFilter("ativos")}
+            className={cn(
+              "focus-ring cursor-pointer rounded-lg border px-3 py-1.5 font-mono text-[11px] font-semibold uppercase transition-colors",
+              filter === "ativos"
+                ? "border-ink-900 bg-ink-900 text-white"
+                : "border-paper-300 bg-paper-50 text-ink-500 hover:border-ink-400"
+            )}
+          >
+            Ativos · {paginacao.contadores.ativos ?? 0}
+          </button>
           <button
             onClick={() => setFilter("all")}
             className={cn(

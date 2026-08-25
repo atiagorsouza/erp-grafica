@@ -85,6 +85,39 @@ ok()   { echo "  ${VERDE}✔${FIM} $*"; }
 er()   { echo "  ${VERM}✖${FIM} $*"; }
 warn() { echo "  ${AMAR}!${FIM} $*"; }
 
+# ── DATABASE_URL: achar ou PARAR (v3.68.4) ──────────────────────────
+# Incidente 24/08 (deploy da 3.68.3): a variável vivia no ambiente do
+# pm2, não no SSH nem num .env. Sem ela o deploy "pulava o banco"
+# CALADO — nenhuma migração rodou e o smoke caiu em 4/179, com
+# rollback. Agora a ordem é: shell → .env da raiz → pm2 (e anota no
+# .env para o futuro). Não achou? Para ANTES de encostar em qualquer
+# coisa — melhor não deployar que deployar sem banco.
+resolve_database_url() {
+  [ -n "${DATABASE_URL:-}" ] && return 0
+  if [ -f .env ] && grep -q '^DATABASE_URL=' .env 2>/dev/null; then
+    DATABASE_URL="$(grep '^DATABASE_URL=' .env | head -1 | cut -d= -f2- | tr -d '"\r')"
+    export DATABASE_URL
+    ok "DATABASE_URL veio do .env da raiz"
+    return 0
+  fi
+  if command -v pm2 >/dev/null 2>&1; then
+    achado="$(pm2 jlist 2>/dev/null | tr ',' '\n' | grep '"DATABASE_URL"' | head -1 | sed 's/.*:[[:space:]]*"//; s/"[[:space:]]*$//')"
+    if [ -n "$achado" ]; then
+      DATABASE_URL="$achado"
+      export DATABASE_URL
+      grep -q '^DATABASE_URL=' .env 2>/dev/null || echo "DATABASE_URL=$achado" >> .env
+      ok "DATABASE_URL veio do pm2 (anotado no .env para o futuro)"
+      return 0
+    fi
+  fi
+  er "DATABASE_URL não achado: nem no shell, nem no .env, nem no pm2."
+  er "Exporte e rode de novo:"
+  er '  export DATABASE_URL="postgresql://usuario:senha@127.0.0.1:5432/banco"'
+  er "Deploy sem banco não roda — sem migração e sem teste é o incidente de novo."
+  exit 1
+}
+resolve_database_url
+
 BACKUP_DIR=""
 FALHOU=""
 
@@ -537,7 +570,7 @@ if [ -f scripts/e2e-smoke.mjs ]; then
   if [ "${n:-0}" -ge 150 ]; then
     ok "testes de fumaça: $n checagens"
   else
-    FALHOU="e2e:smoke passou só $n checagens (esperado ~179)"
+    FALHOU="e2e:smoke passou só $n checagens (mínimo 150)"
     er "$FALHOU"; exit 1
   fi
 fi

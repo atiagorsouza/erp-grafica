@@ -271,8 +271,11 @@ export function computeProduct(input: ProductCalcInput): ProductCalcResult {
   const pieces = Math.max(num(input.piecesPerSheet, 1), 1);
 
   // 1) IMPRESSÃO -----------------------------------------------------
+  /* 3D (grama): sem linha de impressão — o filamento entra pela linha
+     "Material" e a máquina pela linha "Tempo de máquina". */
+  const grama = input.category?.measureMode === "grama";
   let printing = 0;
-  if (input.printer && input.category) {
+  if (input.printer && input.category && !grama) {
     /* Mesmo motor do modo batch: respeita cobertura do formato, fator
        de área e `printCostOverride`. `printSides` fica em 1 porque no
        modo unit as faces já são contadas em `pagesPerUnit`. */
@@ -294,7 +297,7 @@ export function computeProduct(input: ProductCalcInput): ProductCalcResult {
       )}/pg (${input.colorMode === "color" ? "colorido" : "P&B"}${fmt})${frac}`,
       amount: printing,
     });
-  } else if (input.category) {
+  } else if (input.category && !grama) {
     const perPage = categoryCostPerPage(
       input.category,
       input.consumables,
@@ -603,6 +606,12 @@ export function computePrintSheetCost({
   printSides?: number;
 }): number {
   if (!category) return 0;
+  /* 3D (modo "grama") não tem custo por "página": o filamento é
+     MATERIAL do estoque (entra pela linha "Material" do produto) e a
+     máquina se paga pelas horas (linha "Tempo de máquina"). Sem este
+     zero, o filamento cadastrado como consumível era cobrado aqui E
+     de novo na linha do material — preço em dobro. */
+  if (category.measureMode === "grama") return 0;
   const sides = Math.max(1, num(printSides, 1));
   const override = num(format?.printCostOverride);
   if (override > 0) return override * sides * num(printer?.costMultiplier, 1);
@@ -695,7 +704,8 @@ export function computeBatchProduct(input: BatchCalcInput): BatchCalcResult {
     printSides: input.printSides,
   });
   const printing = finalSheets * printCostPerSheet;
-  if (printing > 0 || finalSheets > 0) {
+  /* 3D: sem "folhas × R$ 0,00" no detalhamento (material + tempo only). */
+  if ((printing > 0 || finalSheets > 0) && input.category?.measureMode !== "grama") {
     lines.push({
       label: "Impressão da tiragem",
       detail: `${finalSheets} folha(s) × ${formatMoney(printCostPerSheet)}/folha${input.printSides > 1 ? ` × ${input.printSides} faces` : ""}`,

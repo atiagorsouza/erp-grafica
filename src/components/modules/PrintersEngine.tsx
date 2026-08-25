@@ -456,7 +456,26 @@ export function PrintersEngine({ categories, consumables, printers, formats }: {
               {isOpen && (
                 <div className="animate-fade-up border-t border-paper-200 bg-paper-100/40 px-5 py-5">
                   <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1.25fr_1fr]">
-                    {/* Consumíveis */}
+                    {/* Consumíveis — 3D não usa: filamento é material do estoque */}
+                    {mode === "grama" ? (
+                      <section>
+                        <div className="mb-2.5 flex items-center justify-between">
+                          <h3 className="flex items-center gap-2 font-mono text-[10.5px] font-semibold tracking-[0.16em] text-ink-500 uppercase">
+                            <Icon name="droplet" size={13} />
+                            Filamento & manutenção
+                          </h3>
+                        </div>
+                        <div className="rounded-lg border border-dashed border-amber-300 bg-amber-50/70 px-4 py-5 text-[12.5px] leading-relaxed text-ink-600">
+                          <p className="font-semibold text-ink-800">Impressão 3D não usa consumíveis de impressora.</p>
+                          <p className="mt-1.5">
+                            O filamento é <strong>Material</strong> — cadastre e reponha no <strong>Estoque</strong>; ele entra no custo do produto pela linha <em>“Material”</em> (gramas × preço do rolo).
+                          </p>
+                          <p className="mt-1.5">
+                            A máquina cobra pelas horas: configure o <strong>valor-hora</strong> na impressora e os <strong>minutos por peça</strong> no produto (linha <em>“Tempo de máquina”</em>). Bico e manutenção ficam embutidos no valor-hora.
+                          </p>
+                        </div>
+                      </section>
+                    ) : (
                     <section>
                       <div className="mb-2.5 flex items-center justify-between">
                         <h3 className="flex items-center gap-2 font-mono text-[10.5px] font-semibold tracking-[0.16em] text-ink-500 uppercase">
@@ -503,6 +522,7 @@ export function PrintersEngine({ categories, consumables, printers, formats }: {
                         <span className="ml-3 mr-2 inline-block h-1.5 w-1.5 rounded-full bg-ink-400 align-middle" />mecânica (custo fixo por folha)
                       </p>
                     </section>
+                    )}
 
                     <div className="space-y-5">
                       {/* Impressoras */}

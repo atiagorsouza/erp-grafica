@@ -35,7 +35,7 @@ export interface DefinicaoMensagem {
   /** Variáveis aceitas, com explicação para a tela. */
   variaveis: { nome: string; descricao: string }[];
   /** Agrupamento na tela. */
-  grupo: "bot" | "cadastro" | "orcamento" | "pedido" | "rapidas" | "campanha";
+  grupo: "bot" | "cadastro" | "orcamento" | "pedido" | "rapidas" | "campanha" | "consulta" | "cobranca";
   /** false = mensagem essencial, não pode ser desligada. */
   desligavel?: boolean;
 }
@@ -319,6 +319,58 @@ export const CATALOGO: DefinicaoMensagem[] = [
     variaveis: [],
     padrao:
       "Recebi sua mensagem! Só um minutinho que já te respondo direitinho 🙂",
+  },
+
+  /* ── Consulta de preço ───────────────────────────────────────────
+     A moldura da Consulta Rápida. O atendente copia o preço e o texto
+     sai com começo e fim — não uma tabela nua colada na conversa.
+     Desligar uma das pontas devolve o copiar sem aquela parte. */
+  {
+    slug: "consulta.cabecalho",
+    titulo: "Saudação da consulta",
+    quando: "Você copia um preço na Consulta Rápida.",
+    grupo: "consulta",
+    desligavel: true,
+    variaveis: [],
+    padrao: "Olá! 🙂\n\nSegue a tabela que você pediu:",
+  },
+  {
+    slug: "consulta.assinatura",
+    titulo: "Assinatura da consulta",
+    quando: "Você copia um preço na Consulta Rápida.",
+    grupo: "consulta",
+    desligavel: true,
+    variaveis: [VAR_EMPRESA],
+    padrao:
+      "Gostou de algum valor? É só responder aqui que eu fecho seu pedido 🙂\n\n" +
+      "— {empresa}",
+  },
+
+  /* ── Lembrete de cobrança ────────────────────────────────────────
+     Cobrança pendente há dias sem resposta: o dinheiro para de correr
+     porque ninguém lembra de cobrar. O botão nas Cobranças monta este
+     texto e envia pelo número da gráfica — cobrança de gráfico, amigável,
+     não de banco. */
+  {
+    slug: "cobranca.lembrete",
+    titulo: "Lembrete de cobrança",
+    quando: "Você clica no sininho de uma cobrança Aguardando, na tela de Cobranças.",
+    grupo: "cobranca",
+    variaveis: [
+      VAR_NOME,
+      VAR_EMPRESA,
+      { nome: "descricao", descricao: "Descrição da cobrança (ex.: Pedido 123 · Maria Silva)" },
+      { nome: "valor", descricao: "Valor da cobrança (ex.: R$ 300,00)" },
+      { nome: "link", descricao: "Link de pagamento da InfinitePay" },
+      { nome: "validade", descricao: "Até quando o link fica ativo" },
+    ],
+    padrao:
+      "Oi, {nome}! 🙂\n\n" +
+      "Lembrete carinhoso: a cobrança *{descricao}* — *{valor}* — ainda está em aberto.\n\n" +
+      "Se quiser resolver agora, o link segue valendo até {validade}:\n" +
+      "{link}\n\n" +
+      "Qualquer dúvida, ou para combinar de outro jeito, é só me chamar!\n\n" +
+      "— {empresa}",
   },
 ];
 
