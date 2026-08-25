@@ -1,3 +1,7 @@
+## [3.68.10] — 2026-08-25
+
+- Moldura na Consulta Rapida (textos da grafica) + fim dos orcamentos fantasma
+
 ## [3.68.9] — 2026-08-25
 
 - Blindagem: tabelas do WhatsApp sob gestao do schema do ERP — nenhum deploy apaga mais conversas
