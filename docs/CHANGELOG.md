@@ -1,3 +1,7 @@
+## [3.68.4] — 2026-08-25
+
+- Deploy acha o banco sozinho; sem banco para alto
+
 ## [3.68.3] — 2026-08-24
 
 - 3D: filamento e material do estoque, impressora cobra so horas

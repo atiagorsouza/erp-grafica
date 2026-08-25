@@ -5,6 +5,15 @@ import "dotenv/config";
 
 const { Pool } = pg;
 const BASE_URL = process.env.BASE_URL || `http://127.0.0.1:${process.env.PORT || 3000}`;
+/* Falta de banco não é "4/179 checagens": é erro de ambiente. O
+   incidente do deploy 3.68.3 (24/08) perdeu 15 minutos porque a falha
+   aparecia como dezenas de checks vermelhos em vez de uma linha
+   clara. */
+if (!process.env.DATABASE_URL) {
+  console.error("✖ DATABASE_URL ausente — o smoke precisa do banco.");
+  console.error("  Exporte a variável ou garanta um .env com ela na raiz do projeto.");
+  process.exit(1);
+}
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const stamp = Date.now();
 
