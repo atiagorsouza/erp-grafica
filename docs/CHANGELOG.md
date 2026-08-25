@@ -1,3 +1,7 @@
+## [3.68.6] — 2026-08-25
+
+- Volta do pagamento cai no comprovante certo; cliente nao ve o sistema
+
 ## [3.68.5] — 2026-08-25
 
 - PDV cobra por link na hora; WhatsApp com numero do cliente
