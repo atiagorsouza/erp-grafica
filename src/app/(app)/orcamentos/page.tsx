@@ -18,7 +18,7 @@ export default async function OrcamentosPage({
 }) {
   const sp = await searchParams;
   const busca = sp.q || "";
-  const filtro = sp.filtro || "all";
+  const filtro = sp.filtro || "ativos";
   const paginaAtual = Number(sp.pagina) || 1;
   const porPagina = Number(sp.por) || TAMANHO_PAGINA_PADRAO;
   /* Propostas vencidas passam a "expirado" antes da leitura: sem isto,

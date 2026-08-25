@@ -35,7 +35,7 @@ export interface DefinicaoMensagem {
   /** Variáveis aceitas, com explicação para a tela. */
   variaveis: { nome: string; descricao: string }[];
   /** Agrupamento na tela. */
-  grupo: "bot" | "cadastro" | "orcamento" | "pedido" | "rapidas" | "campanha";
+  grupo: "bot" | "cadastro" | "orcamento" | "pedido" | "rapidas" | "campanha" | "consulta";
   /** false = mensagem essencial, não pode ser desligada. */
   desligavel?: boolean;
 }
@@ -319,6 +319,31 @@ export const CATALOGO: DefinicaoMensagem[] = [
     variaveis: [],
     padrao:
       "Recebi sua mensagem! Só um minutinho que já te respondo direitinho 🙂",
+  },
+
+  /* ── Consulta de preço ───────────────────────────────────────────
+     A moldura da Consulta Rápida. O atendente copia o preço e o texto
+     sai com começo e fim — não uma tabela nua colada na conversa.
+     Desligar uma das pontas devolve o copiar sem aquela parte. */
+  {
+    slug: "consulta.cabecalho",
+    titulo: "Saudação da consulta",
+    quando: "Você copia um preço na Consulta Rápida.",
+    grupo: "consulta",
+    desligavel: true,
+    variaveis: [],
+    padrao: "Olá! 🙂\n\nSegue a tabela que você pediu:",
+  },
+  {
+    slug: "consulta.assinatura",
+    titulo: "Assinatura da consulta",
+    quando: "Você copia um preço na Consulta Rápida.",
+    grupo: "consulta",
+    desligavel: true,
+    variaveis: [VAR_EMPRESA],
+    padrao:
+      "Gostou de algum valor? É só responder aqui que eu fecho seu pedido 🙂\n\n" +
+      "— {empresa}",
   },
 ];
 

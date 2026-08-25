@@ -252,7 +252,7 @@ export async function fichaDoCliente(customerId: number): Promise<FichaChat | nu
       `),
       db.execute<{ n: string }>(sql`
         SELECT count(*) AS n FROM quotes
-         WHERE customer_id = ${id} AND status IN ('rascunho','enviado')
+         WHERE customer_id = ${id} AND status = 'enviado'
       `),
       db.execute<{
         id: number; number: string; total: string; payment_method: string | null; created_at: Date;
@@ -267,8 +267,9 @@ export async function fichaDoCliente(customerId: number): Promise<FichaChat | nu
       `),
       db.execute<{ id: number; number: string; total: string; status: string; created_at: Date }>(sql`
         SELECT id, number, total, status, created_at
-          FROM quotes WHERE customer_id = ${id}
-         ORDER BY created_at DESC LIMIT 5
+          FROM quotes
+         WHERE customer_id = ${id} AND status IN ('enviado','aprovado')
+         ORDER BY created_at DESC LIMIT 4
       `),
       db.execute<{ id: number; description: string; amount: string; status: string; created_at: Date }>(sql`
         SELECT id, description, amount, status, created_at
