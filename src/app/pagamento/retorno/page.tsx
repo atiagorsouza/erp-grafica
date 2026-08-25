@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import Link from "next/link";
+import { AcoesComprovante } from "./AcoesComprovante";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { customers } from "@/db/schema";
@@ -136,21 +136,23 @@ export default async function RetornoPagamentoPage({ searchParams }: { searchPar
           </div>
         )}
 
+        {paid && <AcoesComprovante />}
+
         {receipt && (
           <a
             href={receipt}
             target="_blank"
             rel="noopener noreferrer"
-            className="mt-4 inline-flex items-center justify-center rounded-lg bg-ink-900 px-4 py-2.5 text-[13px] font-semibold text-paper-50 transition hover:bg-ink-800"
+            className="mt-2 inline-flex items-center justify-center rounded-lg border border-paper-300 px-4 py-2 text-[12px] font-medium text-ink-500 transition hover:border-ink-400 hover:text-ink-700"
           >
-            Ver comprovante
+            Recibo no site da InfinitePay
           </a>
         )}
 
         <div className="mt-5 border-t border-paper-200 pt-4">
-          <Link href="/" className="font-mono text-[11px] tracking-wide text-ink-400 uppercase transition hover:text-ink-700">
-            Voltar ao início
-          </Link>
+          <p className="text-[11.5px] leading-relaxed text-ink-400">
+            Pode fechar esta aba. A gráfica recebeu o pagamento automaticamente.
+          </p>
         </div>
       </div>
     </main>

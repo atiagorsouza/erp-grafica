@@ -374,7 +374,13 @@ export async function createCharge(raw: unknown) {
     order_nsu: orderNsu,
     items,
   };
-  if (cfg.redirectUrl) body.redirect_url = cfg.redirectUrl;
+  /* A volta do checkout cai DIRETO no comprovante desta cobrança.
+     Sem o order_nsu a volta ficava solta — e qualquer caminho que
+     levasse o cliente para a home do ERP era risco (incidente 25/08). */
+  if (cfg.redirectUrl) {
+    const sep = cfg.redirectUrl.includes("?") ? "&" : "?";
+    body.redirect_url = `${cfg.redirectUrl}${sep}order_nsu=${encodeURIComponent(orderNsu)}`;
+  }
   if (cfg.webhookUrl) body.webhook_url = cfg.webhookUrl;
   if (customer) {
     body.customer = {
