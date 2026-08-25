@@ -554,6 +554,21 @@ export async function settleDocuments(link: typeof paymentLinks.$inferSelect) {
   const value = toNumber(link.paidAmount ?? link.amount, 0);
   if (value <= 0) return;
 
+  /* QUEM PAGOU (25/08) — a receita precisa se identificar sozinha no
+     Financeiro: "Pedido 123 — InfinitePay" não dizia de quem era o
+     dinheiro. O nome entra na DESCRIÇÃO porque é o que a lista, a
+     busca e a exportação do Financeiro mostram. */
+  let customerName: string | null = null;
+  if (link.customerId) {
+    const [cust] = await db
+      .select({ name: customers.name, tradeName: customers.tradeName })
+      .from(customers)
+      .where(eq(customers.id, link.customerId))
+      .limit(1);
+    customerName = String(cust?.tradeName || cust?.name || "") || null;
+  }
+  const quem = customerName ? ` · ${customerName}` : "";
+
   /* ----------------------------------------------------------------
    * TARIFA DO CHECKOUT (v3.13.1)
    *
@@ -580,8 +595,8 @@ export async function settleDocuments(link: typeof paymentLinks.$inferSelect) {
       type: "receita",
       category: link.orderId ? "pedido" : "venda",
       description: link.orderId
-        ? `${link.description} — InfinitePay`
-        : `${link.description} · InfinitePay`,
+        ? `${link.description}${quem} — InfinitePay`
+        : `${link.description}${quem} · InfinitePay`,
       amount: value,
       dueDate: todayISO(),
       paidDate: todayISO(),

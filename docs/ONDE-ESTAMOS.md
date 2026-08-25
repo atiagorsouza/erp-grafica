@@ -24,9 +24,9 @@ instalar. Acabei de gerar, está em `release/`.
 
 | | |
 |---|---|
-| **Versão no ar** | **3.68.6** — volta do pagamento não leva cliente ao sistema; comprovante do sistema é o oficial |
-| Rodando em | servidor da gráfica (túnel `app.vtdigital.site`) · em 3.68.5 até a 3.68.6 subir |
-| Testes | `e2e:smoke` completo ✔ · typecheck ✔ · lint 11 (base) · retorno renderizado sem "Voltar ao início" ✔ |
+| **Versão no ar** | **3.68.7** — receita do InfinitePay diz QUEM pagou; cobrança avulsa ganha cliente |
+| Rodando em | servidor da gráfica (túnel `app.vtdigital.site`) · em 3.68.5 até a 3.68.7 subir (leva junto a 3.68.6 do retorno) |
+| Testes | `e2e:smoke` completo ✔ · typecheck ✔ · lint 11 (base) · /cobrancas com campo novo a 200 ✔ |
 | Observado | `company_email` ganha padrão `contato.vt@` (só se vazio) · `labor_hourly_rate` ficou 0 por escolha do dono · aviso de "password sem suporte visual" = falso alarme da ferramenta do servidor (Painel desenha os 3 segredos com máscara) |
 | Lint | 11 problemas (baseline de sempre, nada novo) |
 | Pacote | `update-3.68.2/` · `printflow-erp-v3.68.2.tar.gz` — `bash scripts/deploy-auto.sh <caminho-do-pacote>` (SEMPRE com caminho) |

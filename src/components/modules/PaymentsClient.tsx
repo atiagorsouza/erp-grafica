@@ -89,6 +89,7 @@ export function PaymentsClient({
   const [orderId, setOrderId] = useState("");
   const [amount, setAmount] = useState("");
   const [description, setDescription] = useState("");
+  const [customerId, setCustomerId] = useState("");
   const [creating, setCreating] = useState(false);
 
   const customerById = useMemo(() => new Map(customers.map((c) => [Number(c.id), c])), [customers]);
@@ -129,13 +130,20 @@ export function PaymentsClient({
         op: "create",
         ...(mode === "order"
           ? { orderId: Number(orderId) }
-          : { amount: amount.replace(",", "."), description: description || undefined }),
+          : {
+              amount: amount.replace(",", "."),
+              description: description || undefined,
+              /* Quem pagou: cobrança avulsa sem cliente virava receita
+                 impossível de identificar no Financeiro (25/08). */
+              ...(customerId ? { customerId: Number(customerId) } : {}),
+            }),
       });
       setNewModal(false);
       setCreated(json.row);
       setOrderId("");
       setAmount("");
       setDescription("");
+      setCustomerId("");
       toast.success("Link de pagamento criado");
       refresh();
     } catch (e) {
@@ -466,6 +474,16 @@ export function PaymentsClient({
               </Field>
               <Field label="Descrição">
                 <Input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Ex.: Sinal do serviço" />
+              </Field>
+              <Field label="Cliente" hint="Identifica a receita no Financeiro">
+                <Select value={customerId} onChange={(e) => setCustomerId(e.target.value)}>
+                  <option value="">Consumidor final (sem cliente)</option>
+                  {customers.map((c) => (
+                    <option key={String(c.id)} value={String(c.id)}>
+                      {String(c.tradeName || c.name)}
+                    </option>
+                  ))}
+                </Select>
               </Field>
             </>
           )}
