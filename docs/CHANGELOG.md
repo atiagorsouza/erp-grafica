@@ -1,3 +1,7 @@
+## [3.68.7] — 2026-08-25
+
+- Receita do InfinitePay identifica quem pagou; avulsa com cliente
+
 ## [3.68.6] — 2026-08-25
 
 - Volta do pagamento cai no comprovante certo; cliente nao ve o sistema
