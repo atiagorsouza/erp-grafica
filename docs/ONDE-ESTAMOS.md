@@ -4,7 +4,7 @@
 > aqui. Se você quiser saber em que pé está sem reler a conversa, é este
 > o arquivo.
 
-**Última atualização:** 25/08/2026
+**Última atualização:** 25/08/2026 (2ª)
 
 ---
 
@@ -24,9 +24,9 @@ instalar. Acabei de gerar, está em `release/`.
 
 | | |
 |---|---|
-| **Versão no ar** | **3.68.8** — ficha 360º do cliente dentro do chat do WhatsApp |
-| Rodando em | servidor da gráfica (túnel `app.vtdigital.site`) · em 3.68.5 até a 3.68.8 subir (leva junto a 3.68.6 do retorno, a 3.68.7 do InfinitePay e a 3.68.8 da ficha) |
-| Testes | `e2e:smoke` completo ✔ · typecheck ✔ · lint 11 (base) · cadastro via chat testado ponta a ponta (cria, vincula, não duplica, recusa nome curto) ✔ · ficha 360º validada com venda PDV + pedido + orçamento (LTV soma os dois) |
+| **Versão no ar** | **3.68.9** — blindagem: tabelas do WhatsApp ficam sob gestão do schema (fim do risco de DROP) |
+| Rodando em | servidor da gráfica (túnel `app.vtdigital.site`) · código em 3.68.8, banco carimbado 3.68.2 — este deploy carimba e aplica migrações faltantes |
+| Testes | `e2e:smoke` completo ✔ · typecheck ✔ · lint 11 (base) · drizzle push validado no clone: cria só `whatsapp_auth`, NÃO toca em conversas/mensagens/índice ✔ |
 | Observado | `company_email` ganha padrão `contato.vt@` (só se vazio) · `labor_hourly_rate` ficou 0 por escolha do dono · aviso de "password sem suporte visual" = falso alarme da ferramenta do servidor (Painel desenha os 3 segredos com máscara) |
 | Lint | 11 problemas (baseline de sempre, nada novo) |
 | Pacote | `update-3.68.2/` · `printflow-erp-v3.68.2.tar.gz` — `bash scripts/deploy-auto.sh <caminho-do-pacote>` (SEMPRE com caminho) |
