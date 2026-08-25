@@ -1,3 +1,7 @@
+## [3.68.13] — 2026-08-25
+
+- PDV: teto de desconto 50%, vendedor sempre visivel, catalogo paginado
+
 ## [3.68.12] — 2026-08-25
 
 - Ficha lateral fixa no chat — tres colunas em telas largas, estilo Waplus
