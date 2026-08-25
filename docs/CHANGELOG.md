@@ -1,3 +1,7 @@
+## [3.68.11] — 2026-08-25
+
+- Lembrete de cobranca por WhatsApp — sininho nas cobrancas pendentes
+
 ## [3.68.10] — 2026-08-25
 
 - Moldura na Consulta Rapida (textos da grafica) + fim dos orcamentos fantasma
