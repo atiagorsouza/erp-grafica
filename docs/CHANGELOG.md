@@ -1,3 +1,7 @@
+## [3.68.14] — 2026-08-25
+
+- Precos acompanham o custo do material: recalculo em cascata, guarda da embalagem, faixas com aviso e reajuste
+
 ## [3.68.13] — 2026-08-25
 
 - PDV: teto de desconto 50%, vendedor sempre visivel, catalogo paginado
