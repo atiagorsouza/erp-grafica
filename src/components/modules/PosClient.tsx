@@ -275,6 +275,10 @@ export function PosClient({
   const [customersList, setCustomersList] = useState<PosCustomer[]>(initialCustomers);
   const [q, setQ] = useState("");
   const [catFilter, setCatFilter] = useState("all");
+  /* Catálogo com freio (auditoria 25/08): a grade desenhava TODOS os
+     produtos de uma vez — com catálogo cheio a página virava um rolo
+     sem fim. Mostra um lote e cresce a pedido. */
+  const [catalogoVer, setCatalogoVer] = useState(24);
   const [cart, setCart] = useState<CartLine[]>([]);
   const [customerId, setCustomerId] = useState("");
   const [discountInput, setDiscountInput] = useState("0");
@@ -1062,7 +1066,7 @@ export function PosClient({
               <Input
                 ref={searchRef}
                 value={q}
-                onChange={(e) => setQ(e.target.value)}
+                onChange={(e) => { setQ(e.target.value); setCatalogoVer(24); }}
                 onKeyDown={onSearchKey}
                 placeholder="Bipe o código ou busque produto/SKU… (F2)"
                 className="h-11 pl-9.5 text-[14px]"
@@ -1113,7 +1117,7 @@ export function PosClient({
 
           <div className="reveal mb-4 flex flex-wrap gap-1.5">
             <button
-              onClick={() => setCatFilter("all")}
+              onClick={() => { setCatFilter("all"); setCatalogoVer(24); }}
               className={cn(
                 "focus-ring cursor-pointer rounded-lg border px-3 py-1.5 text-[11.5px] font-semibold transition-colors",
                 catFilter === "all"
@@ -1126,7 +1130,7 @@ export function PosClient({
             {catsComProduto.map((c) => (
               <button
                 key={c.id}
-                onClick={() => setCatFilter(String(c.id))}
+                onClick={() => { setCatFilter(String(c.id)); setCatalogoVer(24); }}
                 className={cn(
                   "focus-ring cursor-pointer rounded-lg border px-3 py-1.5 text-[11.5px] font-semibold transition-colors",
                   catFilter === String(c.id)
@@ -1147,7 +1151,7 @@ export function PosClient({
             />
           ) : (
             <div className="reveal reveal-1 grid grid-cols-2 gap-2.5 sm:grid-cols-3 xl:grid-cols-4">
-              {filtered.map((p) => {
+              {filtered.slice(0, catalogoVer).map((p) => {
                 const cat = productCats.find((c) => c.id === p.productCategoryId);
                 const inCart = cart.find((l) => l.productId === p.id);
 
@@ -1215,6 +1219,21 @@ export function PosClient({
                   </button>
                 );
               })}
+            </div>
+          )}
+
+          {/* Continha do freio: mostra onde a lista para e deixa
+              continuar — em vez do rolo sem fim de antes. */}
+          {filtered.length > catalogoVer && (
+            <div className="mt-3 text-center">
+              <Button
+                variant="outline"
+                size="sm"
+                icon="chevron-down"
+                onClick={() => setCatalogoVer((n) => n + 24)}
+              >
+                Mostrar mais ({filtered.length - catalogoVer} de {filtered.length} restantes)
+              </Button>
             </div>
           )}
         </div>
@@ -1401,11 +1420,27 @@ export function PosClient({
                   <Input
                     mono
                     value={discountInput}
-                    onChange={(e) => setDiscountInput(e.target.value)}
+                    onChange={(e) => {
+                      /* Teto de 50% na porcentagem (regra do dono,
+                          25/08): digitar 100 ou 200 cai para 50 na
+                          hora, sem deixar a venda sair errada. Em R$ o
+                          servidor barra no finalizar com mensagem clara. */
+                      const v = e.target.value;
+                      if (discountMode === "percent") {
+                        const n = parseFloat(v.replace(",", "."));
+                        setDiscountInput(Number.isFinite(n) && n > 50 ? "50" : v);
+                      } else {
+                        setDiscountInput(v);
+                      }
+                    }}
                     onFocus={(e) => e.target.select()}
                     tone="dark"
                     className="h-8 w-20 text-right"
+                    title={discountMode === "percent" ? "Máximo de 50%" : undefined}
                   />
+                  {discountMode === "percent" && (
+                    <span className="font-mono text-[9px] text-ink-500">máx 50%</span>
+                  )}
                   {discount > 0 && (
                     <span className="ml-auto font-mono text-[10.5px] text-emerald-300 tnum">
                       −{formatBRL(discount)}
@@ -1670,45 +1705,47 @@ export function PosClient({
                   onClick={() => setShowExtraFields(!showExtraFields)}
                   className="flex items-center justify-between w-full text-left font-mono text-[10.5px] text-ink-400 hover:text-cyan-300 py-1"
                 >
-                  <span>⚙️ Vendedor &amp; Observações do Cupom</span>
+                  <span>⚙️ Observações do Cupom</span>
                   <span>{showExtraFields ? "▲" : "▼"}</span>
                 </button>
 
+                {/* Vendedor SEMPRE visível (auditoria 25/08): o select
+                    estava escondido aqui dentro e o cupom saía como
+                    "OPERADOR" digitado na mão. Com vendedores cadastrados
+                    é escolha da lista — é o que liga a venda à comissão.
+                    Sem cadastro, campo livre de sempre. */}
+                <div className="mt-2">
+                  <label className="text-[10px] text-ink-400 block mb-1">Vendedor / Atendente:</label>
+                  {sellers.length > 0 ? (
+                    <Select
+                      value={sellerId ? String(sellerId) : ""}
+                      onChange={(e) => {
+                        const id = Number(e.target.value) || null;
+                        setSellerId(id);
+                        const v = sellers.find((s) => s.id === id);
+                        handleSellerChange(v ? v.nome : "OPERADOR");
+                      }}
+                      tone="dark"
+                      className="h-7 text-[11px]"
+                    >
+                      <option value="">— sem vendedor —</option>
+                      {sellers.map((s) => (
+                        <option key={s.id} value={String(s.id)}>{s.nome}</option>
+                      ))}
+                    </Select>
+                  ) : (
+                    <Input
+                      value={sellerName}
+                      onChange={(e) => handleSellerChange(e.target.value)}
+                      placeholder="Ex.: TIAGO SOUZA"
+                      tone="dark"
+                      className="h-7 text-[11px]"
+                    />
+                  )}
+                </div>
+
                 {showExtraFields && (
                   <div className="mt-2 space-y-2 rounded-lg bg-white/[0.02] p-2.5 border border-ink-800 text-[11px]">
-                    <div>
-                      <label className="text-[10px] text-ink-400 block mb-1">Vendedor / Atendente:</label>
-                      {/* Com vendedores cadastrados, escolher da lista —
-                          é o que liga a venda ao extrato de comissão.
-                          Sem cadastro, segue o campo livre de sempre,
-                          para não travar quem ainda não cadastrou. */}
-                      {sellers.length > 0 ? (
-                        <Select
-                          value={sellerId ? String(sellerId) : ""}
-                          onChange={(e) => {
-                            const id = Number(e.target.value) || null;
-                            setSellerId(id);
-                            const v = sellers.find((s) => s.id === id);
-                            handleSellerChange(v ? v.nome : "OPERADOR");
-                          }}
-                          tone="dark"
-                          className="h-7 text-[11px]"
-                        >
-                          <option value="">— sem vendedor —</option>
-                          {sellers.map((s) => (
-                            <option key={s.id} value={String(s.id)}>{s.nome}</option>
-                          ))}
-                        </Select>
-                      ) : (
-                        <Input
-                          value={sellerName}
-                          onChange={(e) => handleSellerChange(e.target.value)}
-                          placeholder="Ex.: TIAGO SOUZA"
-                          tone="dark"
-                          className="h-7 text-[11px]"
-                        />
-                      )}
-                    </div>
                     <div>
                       <label className="text-[10px] text-ink-400 block mb-1">Situação / Entrega:</label>
                       <Select

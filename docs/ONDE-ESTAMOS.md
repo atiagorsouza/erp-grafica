@@ -4,7 +4,7 @@
 > aqui. Se você quiser saber em que pé está sem reler a conversa, é este
 > o arquivo.
 
-**Última atualização:** 25/08/2026 (2ª)
+**Última atualização:** 25/08/2026 (3ª)
 
 ---
 
@@ -24,9 +24,9 @@ instalar. Acabei de gerar, está em `release/`.
 
 | | |
 |---|---|
-| **Versão no ar** | **3.68.12** — ficha lateral fixa no chat (3 colunas em telas largas, estilo Waplus) |
-| Rodando em | servidor da gráfica (túnel `app.vtdigital.site`) · produção em 3.68.11 ✔ — este deploy é o 3.68.12 |
-| Testes | `e2e:smoke` completo ✔ · typecheck ✔ · lint 11 (base) · /whatsapp 200 ✔ · ficha passa a carregar junto com a conversa (lateral sempre pronta em telas largas) |
+| **Versão no ar** | **3.68.13** — PDV: teto de desconto 50%, vendedor sempre visível, catálogo com "Mostrar mais" |
+| Rodando em | servidor da gráfica (túnel `app.vtdigital.site`) · produção em 3.68.11 ✔ — este deploy é o 3.68.13 |
+| Testes | `e2e:smoke` completo ✔ · typecheck ✔ · lint 11 (base) · /pdv 200 ✔ · guarda dos 50% testada na API (60% → 422; 45% → venda ok, cancelada e estoque restaurado) |
 | Observado | `company_email` ganha padrão `contato.vt@` (só se vazio) · `labor_hourly_rate` ficou 0 por escolha do dono · aviso de "password sem suporte visual" = falso alarme da ferramenta do servidor (Painel desenha os 3 segredos com máscara) |
 | Lint | 11 problemas (baseline de sempre, nada novo) |
 | Pacote | `update-3.68.2/` · `printflow-erp-v3.68.2.tar.gz` — `bash scripts/deploy-auto.sh <caminho-do-pacote>` (SEMPRE com caminho) |
@@ -860,3 +860,28 @@ typecheck limpo.
 
 **Produção ainda na 3.65.0** — a 3.66.0 chegou a ser empacotada mas não
 foi aplicada. A 3.67.0 substitui as duas.
+
+## 2026-08-25 — v3.68.13 fechada
+
+**PDV com as 3 correções do balcão** (pedidas pelo dono em 25/08):
+
+- **Teto de desconto de 50%.** O balcão aceitava desconto de até 100%
+  (dava para vender de graça por engano). Agora o servidor recusa
+  (422 "Desconto máximo é 50% do subtotal") e o campo na tela trava o
+  percentual em 50 com dica "máx 50%". O desconto à vista do PIX
+  continua sendo somado por cima — o teto real é 50% + desconto PIX.
+- **Vendedor sempre visível.** O seletor de vendedor existia mas estava
+  escondido num bloco recolhido — o cupom saía "OPERADOR" na mão.
+  Subiu para a área principal do pagamento; usa o cadastro de
+  vendedores que já existia (comissão por margem). Sem vendedor
+  cadastrado, vira campo livre.
+- **Catálogo com freio.** A lista lateral de produtos mostrava tudo de
+  uma vez (29 no sandbox, milhares em produção). Agora: 24 por vez +
+  botão "Mostrar mais". Busca e troca de categoria voltam a 24.
+
+Bloco recolhido renomeado para "⚙️ Observações do Cupom" (só o que
+sobrou nele, de fato).
+
+Testado na API: 60% → 422 com a mensagem nova; 45% → venda criada,
+cancelada e estoque restaurado. Smoke completo, typecheck, lint 11
+(baseline).
