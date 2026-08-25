@@ -1,3 +1,7 @@
+## [3.68.12] — 2026-08-25
+
+- Ficha lateral fixa no chat — tres colunas em telas largas, estilo Waplus
+
 ## [3.68.11] — 2026-08-25
 
 - Lembrete de cobranca por WhatsApp — sininho nas cobrancas pendentes
