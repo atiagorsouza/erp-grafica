@@ -1,3 +1,7 @@
+## [3.68.5] — 2026-08-25
+
+- PDV cobra por link na hora; WhatsApp com numero do cliente
+
 ## [3.68.4] — 2026-08-25
 
 - Deploy acha o banco sozinho; sem banco para alto
