@@ -1,4 +1,5 @@
 import { createOrder, updateOrder, cancelOrder } from "@/lib/orders";
+import { idValido } from "@/lib/api-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -29,14 +30,14 @@ export async function POST(req: Request) {
     }
 
     if (op === "update") {
-      if (!Number.isFinite(id)) return Response.json({ error: "id obrigatório" }, { status: 400 });
+      if (!idValido(id)) return Response.json({ error: "id obrigatório" }, { status: 400 });
       const result = await updateOrder(id, data);
       if ("error" in result) return Response.json(result, { status: result.status });
       return Response.json(result);
     }
 
     if (op === "cancel" || op === "delete") {
-      if (!Number.isFinite(id)) return Response.json({ error: "id obrigatório" }, { status: 400 });
+      if (!idValido(id)) return Response.json({ error: "id obrigatório" }, { status: 400 });
       const reason = String(body.reason || data.reason || "Cancelamento solicitado");
       const result = await cancelOrder(id, reason);
       if ("error" in result) return Response.json(result, { status: result.status });
@@ -45,9 +46,10 @@ export async function POST(req: Request) {
 
     return Response.json({ error: "op inválido" }, { status: 400 });
   } catch (e) {
+    /* Mensagem genérica: o detalhe (inclusive SQL) fica no log. */
     console.error("[orders]", e);
     return Response.json(
-      { error: e instanceof Error ? e.message : "erro interno" },
+      { error: "Não foi possível concluir a operação no pedido." },
       { status: 500 }
     );
   }

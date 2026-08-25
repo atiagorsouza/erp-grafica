@@ -52,6 +52,8 @@ const printerSchema = z.object({
   model: z.string().trim().max(120).nullable().optional(),
   status: z.enum(printerStatuses).default("ativa"),
   costMultiplier: finite.min(0.01).max(100).optional().default(1),
+  /** valor da hora de máquina — 3D/recorte (v3.39.0) */
+  hourlyRate: finite.min(0).max(100000).optional().default(0),
   maxFormat: z.string().trim().max(60).nullable().optional(),
   buildVolume: z.string().trim().max(100).nullable().optional(),
   notes: z.string().trim().max(500).nullable().optional(),
@@ -66,6 +68,9 @@ const formatSchema = z.object({
   inkCoverage: finite.min(0).max(1).optional().default(0.05),
   printCostOverride: finite.min(0).max(999999999).optional().default(0),
   isPhoto: z.boolean().optional().default(false),
+  /* térmica: avanço por linha (altura + gap) e colunas do rolo (v3.36.0) */
+  feedMm: finite.min(0).max(100000).optional().default(0),
+  columns: z.coerce.number().int().min(1).max(50).optional().default(1),
 });
 
 function slugify(s: string) {
@@ -182,6 +187,7 @@ export async function savePrinter(raw: unknown, id?: number) {
     model: d.model || null,
     status: d.status,
     costMultiplier: dec(d.costMultiplier, 4),
+    hourlyRate: dec(d.hourlyRate, 4),
     maxFormat: isGram ? null : d.maxFormat || null,
     buildVolume: isGram ? d.buildVolume || null : null,
     notes: d.notes || null,
@@ -219,6 +225,8 @@ export async function savePrintFormat(raw: unknown, id?: number) {
     inkCoverage: dec(d.inkCoverage, 4),
     printCostOverride: dec(d.printCostOverride, 4),
     isPhoto: d.isPhoto,
+    feedMm: dec(d.feedMm, 2),
+    columns: d.columns,
   };
   if (id) {
     const [row] = await db.update(printFormats).set(data).where(eq(printFormats.id, id)).returning();
@@ -248,5 +256,18 @@ export async function getPrinterEngineHealth() {
     inactivePrinters: printerRows.filter((p) => p.status !== "ativa").length,
     categoriesWithoutPrinter: catRows.filter((c) => !printerRows.some((p) => p.categoryId === c.id)).length,
     categoriesWithoutFormat: catRows.filter((c) => !formatRows.some((f) => f.categoryId === c.id)).length,
+
+    /* Consumíveis que parecem peça de desgaste (cilindro, fusor, cabeça,
+       correia, lâmina) mas estão marcados como colorante.
+       `costRole` tem default "colorant": quem cadastra sem escolher acaba
+       fazendo o cilindro escalar com a cobertura de tinta, o que não
+       acontece na máquina — ele se desgasta por passagem de papel.
+       O erro é invisível na cobertura de referência e só aparece em
+       trabalho com muita ou pouca tinta. */
+    consumablesMaybeMechanical: consRows.filter(
+      (c) =>
+        (c.costRole || "colorant") === "colorant" &&
+        /cilindro|fusor|fus[oó]ra|cabe[çc]a|correia|belt|drum|l[âa]mina|rolo/i.test(c.name || "")
+    ).length,
   };
 }

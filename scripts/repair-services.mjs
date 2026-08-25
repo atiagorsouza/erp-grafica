@@ -40,8 +40,22 @@ async function main() {
              charge_mode = CASE WHEN charge_mode IS NULL OR charge_mode = '' THEN 'per_piece' ELSE charge_mode END
        WHERE quantity IS NULL OR quantity::numeric < 0 OR batch_size IS NULL OR batch_size::numeric <= 0 OR charge_mode IS NULL OR charge_mode = ''
     `);
+    /* v3.46.1 — migra o arquivamento antigo para a coluna própria.
+       Até a v3.46.0 "arquivado" era a palavra ARQUIVADO: escrita dentro
+       de `description`, e nada filtrava por ela. Quem já tem registros
+       assim precisa que virem `archived_at`, senão continuam aparecendo
+       nas listas de seleção. */
+    const arqServ = await client.query(`
+      UPDATE services SET archived_at = COALESCE(archived_at, now())
+       WHERE description LIKE '%ARQUIVADO:%' AND archived_at IS NULL
+    `);
+    const arqFin = await client.query(`
+      UPDATE finishing_items SET archived_at = COALESCE(archived_at, now())
+       WHERE description LIKE '%ARQUIVADO:%' AND archived_at IS NULL
+    `);
+
     await client.query("COMMIT");
-    console.log(`✅ Serviços & Acabamentos reparado: ${serviceFix.rowCount} serviços, ${finishingFix.rowCount} acabamentos, ${pfFix.rowCount} vínculos.`);
+    console.log(`✅ Serviços & Acabamentos reparado: ${serviceFix.rowCount} serviços, ${finishingFix.rowCount} acabamentos, ${pfFix.rowCount} vínculos, ${arqServ.rowCount + arqFin.rowCount} arquivamentos migrados.`);
   } catch (e) {
     await client.query("ROLLBACK");
     throw e;

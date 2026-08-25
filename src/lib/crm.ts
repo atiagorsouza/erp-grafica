@@ -14,14 +14,18 @@ import {
   isValidEmail,
   onlyDigits,
 } from "@/lib/validators";
+import { phoneKey } from "@/lib/phone";
+import { todayISO } from "@/lib/period";
 
-export type CrmError = { error: string; status: number; details?: unknown };
+export type CrmError = { error: string; status: number; details?: unknown; campo?: string };
 
 const customerSchema = z.object({
   type: z.enum(["pf", "pj"]).default("pf"),
   name: z.string().trim().min(2, "Nome obrigatório").max(180),
   tradeName: z.string().trim().max(180).nullable().optional(),
   document: z.string().trim().max(32).nullable().optional(),
+  /* Motivo da dispensa de CPF/CNPJ — o escape de boa-fé da regra. */
+  documentWaiverReason: z.string().trim().max(180).nullable().optional(),
   email: z.string().trim().max(180).nullable().optional(),
   phone: z.string().trim().max(40).nullable().optional(),
   whatsapp: z.string().trim().max(40).nullable().optional(),
@@ -37,16 +41,30 @@ const customerSchema = z.object({
   city: z.string().trim().max(120).nullable().optional(),
   state: z.string().trim().max(2).nullable().optional(),
   rg: z.string().trim().max(40).nullable().optional(),
+  rgIssuer: z.string().trim().max(40).nullable().optional(),
   birthDate: z.string().trim().nullable().optional(),
   gender: z.string().trim().max(40).nullable().optional(),
+  maritalStatus: z.string().trim().max(40).nullable().optional(),
   stateRegistration: z.string().trim().max(60).nullable().optional(),
   municipalRegistration: z.string().trim().max(60).nullable().optional(),
   legalNature: z.string().trim().max(100).nullable().optional(),
   taxRegime: z.string().trim().max(100).nullable().optional(),
+  companySize: z.string().trim().max(40).nullable().optional(),
+  foundedAt: z.string().trim().nullable().optional(),
+  origin: z.string().trim().max(60).nullable().optional(),
+  whatsappOptOut: z.coerce.boolean().optional(),
+  /* Marketing tem consentimento próprio (v3.54.0): quem aceita receber
+     "seu pedido está pronto" não aceitou receber promoção. */
+  marketingOptIn: z.coerce.boolean().optional(),
   status: z.enum(["lead", "ativo", "inativo", "bloqueado"]).default("lead"),
   creditLimit: z.coerce.number().finite().min(0).max(999999999).optional(),
   tags: z.string().trim().max(300).nullable().optional(),
   notes: z.string().trim().max(1500).nullable().optional(),
+  /* Cadastro rápido do PDV (F8) grava só nome e telefone no meio da
+     venda: exigir documento ali travaria a fila do balcão. A tela de
+     Clientes & CRM não envia esta flag, então lá o documento é
+     obrigatório. */
+  quickEntry: z.coerce.boolean().optional(),
 });
 
 const leadSchema = z.object({
@@ -103,10 +121,19 @@ function normalizeCustomer(data: z.infer<typeof customerSchema>) {
     name: data.name.trim(),
     tradeName: nullable(data.tradeName),
     document: docDigits ? (data.type === "pj" ? formatCNPJ(docDigits) : formatCPF(docDigits)) : null,
+    /* Documento preenchido apaga a dispensa: ela existia justamente
+       porque faltava o número. Manter as duas coisas confunde. */
+    documentWaiverReason: docDigits ? null : (data.documentWaiverReason?.trim() || null),
+    documentWaiverAt: !docDigits && data.documentWaiverReason?.trim() ? new Date() : null,
     email: data.email ? data.email.trim().toLowerCase() : null,
     phone,
     whatsapp,
     secondaryPhone,
+    /* Chave canônica para o WhatsApp encontrar este cliente. O campo
+       whatsapp tem prioridade — é o número que a pessoa realmente usa.
+       Se não der para reconhecer, fica null: melhor sem chave do que
+       com chave errada apontando para outra pessoa. */
+    phoneE164: phoneKey(data.whatsapp || data.phone || data.secondaryPhone || ""),
     website: nullable(data.website),
     contactName: nullable(data.contactName),
     contactRole: nullable(data.contactRole),
@@ -118,12 +145,23 @@ function normalizeCustomer(data: z.infer<typeof customerSchema>) {
     city: nullable(data.city),
     state: data.state ? data.state.trim().toUpperCase().slice(0, 2) : null,
     rg: nullable(data.rg),
+    rgIssuer: nullable(data.rgIssuer),
     birthDate: nullable(data.birthDate),
     gender: nullable(data.gender),
+    maritalStatus: nullable(data.maritalStatus),
     stateRegistration: nullable(data.stateRegistration),
     municipalRegistration: nullable(data.municipalRegistration),
     legalNature: nullable(data.legalNature),
     taxRegime: nullable(data.taxRegime),
+    companySize: nullable(data.companySize),
+    foundedAt: nullable(data.foundedAt),
+    origin: nullable(data.origin),
+    whatsappOptOut: data.whatsappOptOut ?? false,
+    marketingOptIn: data.marketingOptIn ?? false,
+    /* Carimba quando o consentimento é dado, não a cada salvamento. */
+    ...(data.marketingOptIn
+      ? { marketingOptInAt: new Date(), marketingOptInSource: "cadastro" }
+      : { marketingOptInAt: null, marketingOptInSource: null }),
     status: data.status,
     creditLimit: String(data.creditLimit ?? 0),
     tags: nullable(data.tags),
@@ -133,11 +171,57 @@ function normalizeCustomer(data: z.infer<typeof customerSchema>) {
 }
 
 async function validateCustomer(data: z.infer<typeof customerSchema>, ignoreId?: number) {
+  /* O tipo (pf/pj) tem default "pf". Um CNPJ correto enviado sem marcar
+     PJ era validado como CPF e recusado com "CPF inválido" — mensagem
+     que não ajuda quem digitou o documento certo. A contagem de dígitos
+     é uma evidência melhor que o seletor: 14 = CNPJ, 11 = CPF. */
+  if (data.document) {
+    const len = onlyDigits(data.document).length;
+    if (len === 14 && data.type !== "pj") data.type = "pj";
+    else if (len === 11 && data.type !== "pf") data.type = "pf";
+  }
+
+  /* Documento obrigatório — inclusive no cadastro rápido do PDV, que
+     antes passava livre. Sem CPF não se emite documento, e o balcão é
+     justamente onde o cadastro nasce.
+
+     A trava tem escape de boa-fé: quem não tem o documento na mão
+     escreve o motivo e a venda segue. Fica registrado na ficha, e o
+     alerta de "cadastros pela metade" cobra depois. Trava sem saída
+     vira operador digitando "000.000.000-00". */
+  const temDispensa = String(data.documentWaiverReason || "").trim().length >= 3;
+  if (!onlyDigits(data.document || "") && !temDispensa) {
+    return {
+      error:
+        data.type === "pj"
+          ? "CNPJ é obrigatório — ou registre o motivo da dispensa"
+          : "CPF é obrigatório — ou registre o motivo da dispensa",
+      status: 422,
+      campo: "document",
+    } satisfies CrmError;
+  }
+
   if (data.document && !isValidDocument(data.document, data.type)) {
     return { error: data.type === "pj" ? "CNPJ inválido" : "CPF inválido", status: 422 } satisfies CrmError;
   }
   if (data.email && !isValidEmail(data.email)) {
     return { error: "E-mail inválido", status: 422 } satisfies CrmError;
+  }
+  /* Datas em branco chegam como "" e o Postgres recusa: normalizamos
+     para null. Também barramos nascimento/fundação no futuro. */
+  for (const [campo, rotulo] of [
+    ["birthDate", "Data de nascimento"],
+    ["foundedAt", "Data de fundação"],
+  ] as const) {
+    const v = (data as Record<string, unknown>)[campo];
+    if (typeof v === "string" && v.trim()) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(v.trim())) {
+        return { error: `${rotulo} inválida`, status: 422 } satisfies CrmError;
+      }
+      if (v.trim() > todayISO()) {
+        return { error: `${rotulo} não pode ser no futuro`, status: 422 } satisfies CrmError;
+      }
+    }
   }
   if (data.cep && onlyDigits(data.cep).length > 0 && !isValidCEP(data.cep)) {
     return { error: "CEP inválido", status: 422 } satisfies CrmError;
@@ -166,6 +250,23 @@ async function validateCustomer(data: z.infer<typeof customerSchema>, ignoreId?:
     }
   }
 
+  /* Telefone duplicado: compara pela forma canônica, então
+     "(21) 98888-7777", "21988887777" e "+5521988887777" colidem entre
+     si. Diz QUEM já tem o número — quem está no balcão precisa saber
+     se é o mesmo cliente voltando ou um homônimo. O índice único cobre
+     a corrida; isto aqui cobre a clareza. */
+  const chave = phoneKey(data.whatsapp || data.phone || data.secondaryPhone || "");
+  if (chave) {
+    const [dupe] = await db
+      .select({ id: customers.id, name: customers.name })
+      .from(customers)
+      .where(eq(customers.phoneE164, chave))
+      .limit(1);
+    if (dupe && dupe.id !== ignoreId) {
+      return { error: `Telefone já cadastrado para ${dupe.name}`, status: 409 } satisfies CrmError;
+    }
+  }
+
   return null;
 }
 
@@ -174,8 +275,37 @@ export async function createCustomer(raw: unknown) {
   if ("error" in parsed) return parsed;
   const validation = await validateCustomer(parsed.data);
   if (validation) return validation;
-  const [row] = await db.insert(customers).values(normalizeCustomer(parsed.data)).returning();
-  return { ok: true as const, row };
+  try {
+    const [row] = await db.insert(customers).values(normalizeCustomer(parsed.data)).returning();
+    return { ok: true as const, row };
+  } catch (e) {
+    return duplicataOuErro(e);
+  }
+}
+
+/* Os índices únicos são a última linha de defesa contra duplicata: a
+   validação anterior é SELECT-depois-INSERT, e duas requisições
+   simultâneas passam as duas. Quando o banco recusa, devolvemos 409
+   com uma frase que o operador entende — sem isso vira 500 e parece
+   que o sistema quebrou. */
+function duplicataOuErro(e: unknown): CrmError {
+  const err = e as { code?: string; constraint?: string };
+  if (err?.code === "23505") {
+    if (err.constraint === "customers_phone_e164_unique_idx") {
+      return {
+        error: "Já existe um cliente com este telefone.",
+        status: 409,
+      } satisfies CrmError;
+    }
+    if (err.constraint === "customers_document_unique_idx") {
+      return {
+        error: "Já existe um cliente com este CPF/CNPJ.",
+        status: 409,
+      } satisfies CrmError;
+    }
+    return { error: "Registro duplicado.", status: 409 } satisfies CrmError;
+  }
+  throw e;
 }
 
 export async function updateCustomer(id: number, raw: unknown) {
@@ -188,12 +318,16 @@ export async function updateCustomer(id: number, raw: unknown) {
   const validation = await validateCustomer(parsed.data, id);
   if (validation) return validation;
 
-  const [row] = await db
-    .update(customers)
-    .set(normalizeCustomer(parsed.data))
-    .where(eq(customers.id, id))
-    .returning();
-  return { ok: true as const, row };
+  try {
+    const [row] = await db
+      .update(customers)
+      .set(normalizeCustomer(parsed.data))
+      .where(eq(customers.id, id))
+      .returning();
+    return { ok: true as const, row };
+  } catch (e) {
+    return duplicataOuErro(e);
+  }
 }
 
 export async function archiveCustomer(id: number, reason = "Arquivado pelo CRM") {

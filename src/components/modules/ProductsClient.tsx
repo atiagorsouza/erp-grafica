@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { mutate } from "@/lib/mutate";
 import {
@@ -35,11 +35,49 @@ import {
   Toggle,
   toast,
 } from "@/components/ui";
-import { Icon } from "@/components/icons";
+import { Icon, type IconName } from "@/components/icons";
+import { CategoriasManager } from "@/components/modules/CategoriasManager";
 import { cn } from "@/lib/format";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Row = Record<string, any>;
+
+/* Bloco de formulário com título e explicação.
+   Antes cada seção do modal se apresentava de um jeito: umas tinham
+   caixa cinza e título, outras eram uma grade solta sem nome nenhum
+   ("Comercial" e a identificação do produto), e a de logística usava
+   <p> com tamanho diferente das outras. Quem abria o cadastro não
+   sabia onde uma coisa terminava e a outra começava. Agora todas
+   passam por aqui. */
+function Bloco({
+  titulo,
+  icone,
+  descricao,
+  acao,
+  children,
+}: {
+  titulo: string;
+  icone: IconName;
+  descricao?: ReactNode;
+  acao?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <section className="rounded-xl border border-paper-200 bg-paper-100/50 p-4">
+      <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+        <h4 className="flex items-center gap-2 font-mono text-[10.5px] font-semibold tracking-[0.16em] text-ink-600 uppercase">
+          <Icon name={icone} size={13} />
+          {titulo}
+        </h4>
+        {acao}
+      </div>
+      {descricao && (
+        <p className="mb-3.5 text-[12px] leading-relaxed text-ink-500">{descricao}</p>
+      )}
+      <div className={descricao ? "" : "mt-3.5"}>{children}</div>
+    </section>
+  );
+}
 
 const num = (v: unknown, fallback = 0): number => {
   if (v === null || v === undefined || v === "") return fallback;
@@ -52,8 +90,10 @@ export function ProductsClient({
   products,
   finishings,
   materials,
+  priceTiers = [],
   taxRate,
   cardFeeRate,
+  laborHourlyRate,
 }: {
   catalog: {
     categories: Row[];
@@ -69,8 +109,10 @@ export function ProductsClient({
   products: Row[];
   finishings: Row[];
   materials: Row[];
+  priceTiers?: Row[];
   taxRate: number;
   cardFeeRate: number;
+  laborHourlyRate: number;
 }) {
   const router = useRouter();
   const refresh = () => router.refresh();
@@ -86,6 +128,7 @@ export function ProductsClient({
   const [colorMode, setColorMode] = useState<ColorMode>("color");
   const [compFinishings, setCompFinishings] = useState<{ id: string; quantity: string; chargeMode: string; batchSize: string }[]>([]);
   const [compMaterials, setCompMaterials] = useState<{ id: string; quantity: string }[]>([]);
+  const [tiers, setTiers] = useState<{ minQuantity: string; unitPrice: string; label: string }[]>([]);
   const [simQty, setSimQty] = useState<string>("");
 
   const set = (k: string) => (e: { target: { value: string } }) => setForm((f) => ({ ...f, [k]: e.target.value }));
@@ -99,6 +142,7 @@ export function ProductsClient({
   const format = catalog.formats.find((f) => String(f.id) === form.printFormatId);
   const baseMaterial = asLike<MaterialLike>(catalog.materials.find((m) => String(m.id) === form.baseMaterialId));
   const service = asLike<ServiceLike>(catalog.services.find((s) => String(s.id) === form.baseServiceId));
+  const pricingTableRow = catalog.pricingTables.find((t) => String(t.id) === form.basePricingTableId);
   const finLines = compFinishings
     .map((f) => ({ finishing: asLike<FinishingLike>(catalog.finishings.find((x) => String(x.id) === f.id)), quantity: num(f.quantity, 1), chargeMode: f.chargeMode, batchSize: num(f.batchSize, 1) }));
   const matLines = compMaterials
@@ -125,6 +169,7 @@ export function ProductsClient({
         finishings: finLines,
         service,
         operationalRate: num(form.operationalRate, 0) / 100,
+        laborHourlyRate,
         taxRate,
         paymentRate: cardFeeRate,
         profitRate: num(form.margin, 40) / 100,
@@ -151,15 +196,24 @@ export function ProductsClient({
       category: printerCat,
       consumables,
       printer,
+      format,
       colorMode,
       pagesPerUnit: num(form.pagesPerUnit, 1),
+      /* Produto fracionado: o clique da folha se divide entre as
+         peças que ela rende (4 panfletos numa A4, 10 cartões...). */
+      piecesPerSheet: num(form.piecesPerSheet, 1),
       copies: num(form.copies, 1),
+      machineMinutes: num(form.machineMinutes, 0),
       baseMaterial,
       baseMaterialQty: num(form.baseMaterialQty, 1),
+      basePricingTable: pricingTableRow as never,
+      basePricingTableQty: num(form.basePricingTableQty, 1),
+      basePricingTablePieces: num(form.basePricingTablePieces, 0),
       finishings: finLines,
       extraMaterials: matLines,
       service,
       margin: num(form.margin, 40) / 100,
+      laborHourlyRate,
       taxRate,
       cardFeeRate,
     });
@@ -177,7 +231,7 @@ export function ProductsClient({
       feeAmount: r.cardFeeAmount,
       opAmount: 0,
     };
-  }, [printer, printerCat, consumables, format, baseMaterial, service, finLines, matLines, calcMode, colorMode, form, simQty, taxRate, cardFeeRate]);
+  }, [printer, printerCat, consumables, format, baseMaterial, service, pricingTableRow, finLines, matLines, calcMode, colorMode, form, simQty, taxRate, cardFeeRate, laborHourlyRate]);
 
   /* ── abrir editor ── */
   function openNew() {
@@ -186,8 +240,10 @@ export function ProductsClient({
     setColorMode("color");
     setCompFinishings([]);
     setCompMaterials([]);
+    setTiers([]);
     setSimQty("");
-    setForm({ margin: "40", pagesPerUnit: "1", copies: "1", baseMaterialQty: "1", defaultQuantity: "100", piecesPerSheet: "1", printSides: "1", wastePercent: "5", setupSheets: "0", minOrderQty: "1", operationalRate: "15", roundingStep: "0.01" });
+    setForm({ margin: "40", pagesPerUnit: "1", copies: "1", baseMaterialQty: "1", defaultQuantity: "100", piecesPerSheet: "1", printSides: "1", wastePercent: "5", setupSheets: "0", minOrderQty: "1", operationalRate: "15", roundingStep: "0.01",
+      leadTimeCreation: "0", leadTimeProduction: "1", leadTimeFinishing: "0", leadTimeSerial: "false", saleUnitLabel: "", saleUnitPieces: "" });
     setEditorOpen(true);
   }
 
@@ -202,6 +258,12 @@ export function ProductsClient({
     setCompMaterials(
       materials.filter((m) => Number(m.productId) === Number(p.id)).map((m) => ({ id: String(m.materialId), quantity: String(m.quantity) }))
     );
+    setTiers(
+      priceTiers
+        .filter((t) => Number(t.productId) === Number(p.id))
+        .sort((a, b) => num(a.minQuantity) - num(b.minQuantity))
+        .map((t) => ({ minQuantity: String(num(t.minQuantity)), unitPrice: String(num(t.unitPrice)), label: String(t.label || "") }))
+    );
     setForm({
       name: String(p.name || ""),
       description: String(p.description || ""),
@@ -213,17 +275,31 @@ export function ProductsClient({
       baseMaterialId: p.baseMaterialId ? String(p.baseMaterialId) : "",
       baseMaterialQty: String(p.baseMaterialQty ?? 1),
       baseServiceId: p.baseServiceId ? String(p.baseServiceId) : "",
+      basePricingTableId: p.basePricingTableId ? String(p.basePricingTableId) : "",
+      basePricingTableQty: String(p.basePricingTableQty ?? 1),
+      basePricingTablePieces: String(p.basePricingTablePieces ?? 0),
       defaultQuantity: String(p.defaultQuantity ?? 1),
       piecesPerSheet: String(p.piecesPerSheet ?? 1),
       printSides: String(p.printSides ?? 1),
+      machineMinutes: String(p.machineMinutes ?? 0),
       wastePercent: String(num(p.wastePercent) * 100),
       setupSheets: String(p.setupSheets ?? 0),
       minOrderQty: String(p.minOrderQty ?? 1),
+      saleUnitLabel: String(p.saleUnitLabel || ""),
+      saleUnitPieces: p.saleUnitPieces ? String(num(p.saleUnitPieces)) : "",
+      leadTimeCreation: String(p.leadTimeCreation ?? 0),
+      leadTimeProduction: String(p.leadTimeProduction ?? 1),
+      leadTimeFinishing: String(p.leadTimeFinishing ?? 0),
+      leadTimeSerial: p.leadTimeSerial ? "true" : "false",
       operationalRate: String(num(p.operationalRate) * 100),
       roundingStep: String(p.roundingStep ?? 0.01),
       margin: String(num(p.margin, 0.4) * 100),
       stock: String(p.stock ?? 0),
       minStock: String(p.minStock ?? 0),
+      shipWeight: String(p.shipWeight ?? 0),
+      shipHeight: String(p.shipHeight ?? 0),
+      shipWidth: String(p.shipWidth ?? 0),
+      shipLength: String(p.shipLength ?? 0),
       active: String(p.active ?? true),
       trackStock: String(p.trackStock ?? false),
     });
@@ -248,14 +324,24 @@ export function ProductsClient({
         defaultQuantity: form.defaultQuantity || 1,
         piecesPerSheet: form.piecesPerSheet || 1,
         printSides: Number(form.printSides || 1),
+        machineMinutes: num(form.machineMinutes, 0),
         wastePercent: String(num(form.wastePercent, 0) / 100),
         setupSheets: Number(form.setupSheets || 0),
         minOrderQty: form.minOrderQty || 1,
+        saleUnitLabel: (form.saleUnitLabel || "").trim() || null,
+        saleUnitPieces: form.saleUnitPieces ? num(form.saleUnitPieces, 0) : null,
+        leadTimeCreation: num(form.leadTimeCreation, 0),
+        leadTimeProduction: num(form.leadTimeProduction, 1),
+        leadTimeFinishing: num(form.leadTimeFinishing, 0),
+        leadTimeSerial: form.leadTimeSerial === "true",
         operationalRate: String(num(form.operationalRate, 0) / 100),
         roundingStep: form.roundingStep || 0.01,
         baseMaterialId: form.baseMaterialId || null,
         baseMaterialQty: form.baseMaterialQty || 1,
         baseServiceId: form.baseServiceId || null,
+        basePricingTableId: form.basePricingTableId || null,
+        basePricingTableQty: num(form.basePricingTableQty, 1),
+        basePricingTablePieces: num(form.basePricingTablePieces, 0),
         margin: String(num(form.margin, 40) / 100),
         costSnapshot: String(liveCalc?.baseCost ?? 0),
         sellPrice: String(liveCalc?.sellPrice ?? 0),
@@ -265,8 +351,15 @@ export function ProductsClient({
         trackStock: form.trackStock === "true",
         stock: form.stock || 0,
         minStock: form.minStock || 0,
+        shipWeight: form.shipWeight || 0,
+        shipHeight: form.shipHeight || 0,
+        shipWidth: form.shipWidth || 0,
+        shipLength: form.shipLength || 0,
         finishings: compFinishings.filter((f) => f.id).map((f) => ({ id: Number(f.id), quantity: num(f.quantity, 1), chargeMode: f.chargeMode, batchSize: num(f.batchSize, 1) })),
         materials: compMaterials.filter((m) => m.id).map((m) => ({ id: Number(m.id), quantity: num(m.quantity, 1) })),
+        priceTiers: tiers
+          .filter((t) => num(t.minQuantity) > 0)
+          .map((t) => ({ minQuantity: num(t.minQuantity), unitPrice: num(t.unitPrice), label: t.label?.trim() || null })),
       };
       if (editId) await mutate("products", "update", data, editId);
       else await mutate("products", "create", data);
@@ -288,12 +381,53 @@ export function ProductsClient({
   }
 
   const filtered = products.filter((p) => {
-    const matchQ = !q || String(p.name).toLowerCase().includes(q.toLowerCase()) || String(p.sku || "").toLowerCase().includes(q.toLowerCase());
-    const matchC = catFilter === "all" || String(p.productCategoryId) === catFilter;
+    /* Busca também pelo código de barras: quem tem o leitor na mão
+       espera bipar e achar o produto, do mesmo jeito que no PDV. */
+    const termo = q.toLowerCase();
+    const matchQ =
+      !q ||
+      String(p.name).toLowerCase().includes(termo) ||
+      String(p.sku || "").toLowerCase().includes(termo) ||
+      String(p.barcode || "").includes(q.trim());
+    /* Filtrar por uma mestre traz tudo que está abaixo dela — é o que
+       o operador espera ao escolher "Brindes & Estamparia". */
+    const filhosDoFiltro = productCats
+      .filter((c) => String(c.parentId) === catFilter)
+      .map((c) => String(c.id));
+    const matchC =
+      catFilter === "all" ||
+      String(p.productCategoryId) === catFilter ||
+      filhosDoFiltro.includes(String(p.productCategoryId));
     return matchQ && matchC;
   });
 
   const catName = (id: unknown) => productCats.find((c) => Number(c.id) === Number(id))?.name;
+  const [gerirCats, setGerirCats] = useState(false);
+
+  /* ── Árvore de duas camadas (v3.58.0) ─────────────────────────
+     As categorias viraram Mestre → Subcategoria. Os selects listavam
+     tudo achatado, então "Impressos Comerciais" aparecia solto, sem
+     dizer que é de "Gráfica Rápida".
+
+     `<optgroup>` resolve com HTML puro: agrupa visualmente e o
+     usuário não pode escolher o grupo por engano. */
+  const arvoreCats = (() => {
+    const mestres = productCats
+      .filter((c) => c.parentId == null)
+      .sort((a, b) => Number(a.order ?? 0) - Number(b.order ?? 0));
+    return mestres.map((m) => ({
+      mestre: m,
+      filhos: productCats
+        .filter((c) => Number(c.parentId) === Number(m.id))
+        .sort((a, b) => Number(a.order ?? 0) - Number(b.order ?? 0)),
+    }));
+  })();
+
+  /* Categorias sem pai e sem filhos: sobrou de alguma classificação
+     antiga. Aparecem no fim para serem reorganizadas, não somem. */
+  const catsSoltas = productCats.filter(
+    (c) => c.parentId == null && !productCats.some((f) => Number(f.parentId) === Number(c.id))
+  );
 
   return (
     <div>
@@ -313,16 +447,54 @@ export function ProductsClient({
         </div>
         <Select value={catFilter} onChange={(e) => setCatFilter(e.target.value)} className="w-auto">
           <option value="all">Todas as categorias</option>
-          {productCats.map((c) => (
-            <option key={String(c.id)} value={String(c.id)}>
-              {String(c.icon)} {String(c.name)}
-            </option>
+          {arvoreCats.map(({ mestre, filhos }) => (
+            <optgroup key={String(mestre.id)} label={`${String(mestre.icon)} ${String(mestre.name)}`}>
+              {/* A própria mestre é selecionável: pega ela e os filhos. */}
+              <option value={String(mestre.id)}>Todos de {String(mestre.name)}</option>
+              {filhos.map((c) => (
+                <option key={String(c.id)} value={String(c.id)}>
+                  {String(c.icon)} {String(c.name)}
+                </option>
+              ))}
+            </optgroup>
           ))}
+          {catsSoltas.length > 0 && (
+            <optgroup label="Sem grupo">
+              {catsSoltas.map((c) => (
+                <option key={String(c.id)} value={String(c.id)}>
+                  {String(c.icon)} {String(c.name)}
+                </option>
+              ))}
+            </optgroup>
+          )}
         </Select>
         <span className="ml-auto font-mono text-[11px] text-ink-400 tnum">
           {filtered.length} de {products.length} produtos
         </span>
+        {/* Gerir categorias é tarefa rara: fica atrás de um botão, não
+            ocupando espaço permanente. */}
+        <Button
+          size="sm"
+          variant="ghost"
+          icon={gerirCats ? "x" : "gear"}
+          onClick={() => setGerirCats((v) => !v)}
+        >
+          Categorias
+        </Button>
       </div>
+
+      {gerirCats && (
+        <CategoriasManager
+          categorias={productCats}
+          module="product"
+          titulo="Categorias de produto"
+          contagem={products.reduce<Record<string, number>>((acc, p) => {
+            const k = String(p.productCategoryId ?? "");
+            if (k) acc[k] = (acc[k] || 0) + 1;
+            return acc;
+          }, {})}
+        />
+      )}
 
       {filtered.length === 0 ? (
         <EmptyState
@@ -423,9 +595,23 @@ export function ProductsClient({
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_340px]">
           {/* Coluna de configuração */}
           <div className="space-y-5">
-            <section className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <Bloco
+              titulo="Identificação"
+              icone="tag"
+              descricao="Como o produto aparece no PDV, no orçamento e na busca."
+            >
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <Field label="Nome" required className="sm:col-span-2">
                 <Input value={form.name || ""} onChange={set("name")} placeholder="Ex.: Cartão de Visita 4x4 (100un)" />
+              </Field>
+              {/* O PDV já lia o código de barras, mas não havia onde
+                  cadastrá-lo: só entrava por importação. Com o leitor,
+                  basta clicar no campo e bipar. */}
+              <Field label="Código de barras" hint="Clique aqui e bipe com o leitor">
+                <Input mono value={form.barcode || ""} onChange={set("barcode")} placeholder="7891234567890" />
+              </Field>
+              <Field label="Código interno (SKU)" hint="Em branco, o sistema gera um">
+                <Input mono value={form.sku || ""} onChange={set("sku")} placeholder="CAR-4X4-100" />
               </Field>
               <Field label="Descrição" className="sm:col-span-2">
                 <Textarea value={form.description || ""} onChange={set("description")} placeholder="Detalhes comerciais do produto…" className="min-h-[60px]" />
@@ -433,13 +619,39 @@ export function ProductsClient({
               <Field label="Categoria comercial">
                 <Select value={form.productCategoryId || ""} onChange={set("productCategoryId")}>
                   <option value="">Sem categoria</option>
-                  {productCats.map((c) => (
+                  {/* No cadastro só a subcategoria é escolhível: um
+                      produto pertence à folha, não ao galho. Se
+                      pudesse ficar na mestre, metade acabaria solta
+                      em "Brindes & Estamparia" sem dizer qual. */}
+                  {arvoreCats.map(({ mestre, filhos }) => (
+                    <optgroup key={String(mestre.id)} label={`${String(mestre.icon)} ${String(mestre.name)}`}>
+                      {filhos.map((c) => (
+                        <option key={String(c.id)} value={String(c.id)}>
+                          {String(c.icon)} {String(c.name)}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ))}
+                  {catsSoltas.map((c) => (
                     <option key={String(c.id)} value={String(c.id)}>
                       {String(c.icon)} {String(c.name)}
                     </option>
                   ))}
                 </Select>
               </Field>
+            </div>
+            </Bloco>
+
+            {/* Terceirizados: o custo não vem do nosso motor, vem de
+                tabela de fornecedor (DTF UV, têxtil, lona) ou de um
+                serviço já cadastrado. Estava misturado com nome e SKU,
+                o que fazia parecer parte da identificação. */}
+            <Bloco
+              titulo="Custo de terceiros"
+              icone="building"
+              descricao="Só para o que não sai das nossas máquinas. Deixe em branco se imprimimos aqui."
+            >
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <Field label="Serviço agregado" hint="opcional">
                 <Combobox
                   value={form.baseServiceId || ""}
@@ -448,15 +660,50 @@ export function ProductsClient({
                   options={catalog.services.map((s) => ({ value: String(s.id), label: String(s.name), hint: formatMoney(num(s.baseCost)) }))}
                 />
               </Field>
-            </section>
+              <Field label="Tabela terceirizada" hint="DTF UV, têxtil, lona — entra pelo CUSTO">
+                <Combobox
+                  value={form.basePricingTableId || ""}
+                  onChange={(v) => setForm((f) => ({ ...f, basePricingTableId: v }))}
+                  placeholder="Nenhuma"
+                  options={catalog.pricingTables
+                    .filter((t) => t.active !== false)
+                    .map((t) => ({
+                      value: String(t.id),
+                      label: String(t.label),
+                      hint: `${formatMoney(num(t.unitCost))}/${String(t.unit)}`,
+                    }))}
+                />
+              </Field>
+              {form.basePricingTableId && (
+                <Field label="Quantidade da tabela" hint={`em ${String(pricingTableRow?.unit || "unidade")} por unidade do produto`}>
+                  <Input mono value={form.basePricingTableQty || "1"} onChange={set("basePricingTableQty")} />
+                </Field>
+              )}
+              {form.basePricingTableId && String(pricingTableRow?.unit) !== "m2" && (
+                <Field
+                  label="Peças por folha"
+                  hint={`quantas cabem na ${String(pricingTableRow?.label || "folha")} — depende do tamanho da estampa`}
+                >
+                  <Input
+                    mono
+                    value={form.basePricingTablePieces || ""}
+                    onChange={set("basePricingTablePieces")}
+                    placeholder={String(num(pricingTableRow?.piecesPerSheet, 1))}
+                  />
+                </Field>
+              )}
+            </div>
+            </Bloco>
 
-            {/* Motor */}
-            <section className="rounded-xl border border-paper-200 bg-paper-100/50 p-4">
-              <div className="mb-3.5 flex flex-wrap items-center justify-between gap-2">
-                <h4 className="flex items-center gap-2 font-mono text-[10.5px] font-semibold tracking-[0.16em] text-ink-600 uppercase">
-                  <Icon name="printer" size={13} />
-                  Motor de impressão
-                </h4>
+            <Bloco
+              titulo="Motor de impressão"
+              icone="printer"
+              descricao={
+                calcMode === "unit"
+                  ? "Unitário: o custo é calculado para UMA peça. Use para foto, cópia, copo e caneca."
+                  : "Por tiragem: o custo é calculado para o lote inteiro e dividido depois. Use para panfleto, cartão e adesivo."
+              }
+              acao={
                 <Segmented
                   value={calcMode}
                   onChange={setCalcMode}
@@ -465,7 +712,8 @@ export function ProductsClient({
                     { value: "batch", label: "Por tiragem" },
                   ]}
                 />
-              </div>
+              }
+            >
               <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
                 <Field label="Impressora" hint="define a categoria de custo">
                   <Combobox
@@ -503,6 +751,25 @@ export function ProductsClient({
                     <Field label="Vias / cópias">
                       <Input mono value={form.copies || ""} onChange={set("copies")} />
                     </Field>
+                    {/* Produto fracionado: 4 panfletos numa A4, 10 cartões,
+                        9 polaroids. O clique da folha se divide por este
+                        número — sem ele, cada peça carrega a impressão da
+                        folha inteira. */}
+                    <Field
+                      label="Peças por folha"
+                      hint="quantas saem de uma folha — 1 se o produto ocupa a folha toda"
+                    >
+                      <Input mono value={form.piecesPerSheet || ""} onChange={set("piecesPerSheet")} />
+                    </Field>
+                    {num(printer?.hourlyRate, 0) > 0 && (
+                      <Field
+                        label="Minutos de máquina"
+                        hint={`${formatMoney(num(printer?.hourlyRate, 0))}/h nesta impressora`}
+                        className="sm:col-span-2"
+                      >
+                        <Input mono value={form.machineMinutes || ""} onChange={set("machineMinutes")} placeholder="480" />
+                      </Field>
+                    )}
                   </>
                 ) : (
                   <>
@@ -536,14 +803,65 @@ export function ProductsClient({
                   </>
                 )}
               </div>
-            </section>
+            </Bloco>
+
+            {/* Prazo de entrega — vale para QUALQUER produto, por isso
+                fica fora do bloco de impressão. */}
+            <Bloco
+              titulo="Prazo de entrega"
+              icone="clock"
+              descricao={
+                <>
+                  Em <strong>dias úteis</strong>, contados da aprovação da arte. Não confunda com
+                  minutos de máquina: uma peça 3D roda 6&nbsp;h na impressora mas o cliente recebe
+                  em 4 dias. Num pedido com vários itens vale o maior, não a soma.
+                </>
+              }
+            >
+              {/* Dica ABAIXO do campo, não ao lado: o Field padrão põe
+                  rótulo e dica na mesma linha, e em três colunas
+                  estreitas a dica atropela o rótulo. */}
+              <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-3">
+                {([
+                  ["leadTimeCreation", "Criação", "0", "arte, modelagem — 0 se o cliente traz pronta"],
+                  ["leadTimeProduction", "Produção", "1", "máquina rodando"],
+                  ["leadTimeFinishing", "Acabamento", "0", "cura, montagem, secagem"],
+                ] as const).map(([campo, rotulo, exemplo, dica]) => (
+                  <label key={campo} className="block">
+                    <span className="mb-1.5 block text-[11.5px] font-semibold tracking-wide text-ink-600 uppercase">
+                      {rotulo}
+                    </span>
+                    <Input mono value={form[campo] ?? ""} onChange={set(campo)} placeholder={exemplo} />
+                    <span className="mt-1 block text-[10.5px] leading-snug text-ink-400">{dica}</span>
+                  </label>
+                ))}
+              </div>
+              <label className="mt-3.5 flex cursor-pointer items-start gap-2.5 text-[12.5px] text-ink-700">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 h-4 w-4 shrink-0 accent-ink-900"
+                  checked={form.leadTimeSerial === "true"}
+                  onChange={(e) => setForm((f) => ({ ...f, leadTimeSerial: e.target.checked ? "true" : "false" }))}
+                />
+                <span>
+                  <strong>Só começa depois dos outros itens</strong>
+                  <span className="block text-[11.5px] text-ink-500">
+                    Encadernação exige capa e miolo prontos. Marcado, soma por cima do maior prazo
+                    em vez de correr em paralelo.
+                  </span>
+                </span>
+              </label>
+              <p className="mt-3 rounded-lg bg-paper-200/60 px-3 py-2 font-mono text-[11.5px] text-ink-600">
+                total: {(Number(form.leadTimeCreation || 0) + Number(form.leadTimeProduction || 0) + Number(form.leadTimeFinishing || 0)) || 0} dia(s) útil(eis)
+              </p>
+            </Bloco>
 
             {/* Material base + insumos */}
-            <section className="rounded-xl border border-paper-200 bg-paper-100/50 p-4">
-              <h4 className="mb-3.5 flex items-center gap-2 font-mono text-[10.5px] font-semibold tracking-[0.16em] text-ink-600 uppercase">
-                <Icon name="boxes" size={13} />
-                Materiais & insumos
-              </h4>
+            <Bloco
+              titulo="Materiais & insumos"
+              icone="boxes"
+              descricao="O material base é a folha/objeto que vira o produto. Insumo extra é o que se gasta junto: primer, fita, embalagem."
+            >
               <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-[1fr_130px]">
                 <Field label="Material base">
                   <Combobox
@@ -575,14 +893,89 @@ export function ProductsClient({
                   Insumo extra
                 </Button>
               </div>
-            </section>
+            </Bloco>
+
+            {/* Faixas de preço por quantidade */}
+            <Bloco
+              titulo="Preço por quantidade"
+              icone="tag"
+              descricao="Para quem vende em lote: mínimo 50, depois 100, 250… Vale a maior faixa que o pedido alcançar. Sem faixas, usa o preço calculado acima."
+            >
+              <div className="space-y-2">
+                {tiers.map((t, i) => {
+                  const q = num(t.minQuantity);
+                  const pu = num(t.unitPrice);
+                  const custoUn = liveCalc && calcMode === "unit" ? liveCalc.baseCost : 0;
+                  const prejuizo = custoUn > 0 && pu > 0 && pu < custoUn;
+                  return (
+                    <div key={i}>
+                      <div className="grid grid-cols-[110px_130px_1fr_32px] items-center gap-2">
+                        <Input
+                          mono
+                          value={t.minQuantity}
+                          placeholder="a partir de"
+                          onChange={(e) => setTiers((arr) => arr.map((x, j) => (j === i ? { ...x, minQuantity: e.target.value } : x)))}
+                        />
+                        <Input
+                          mono
+                          value={t.unitPrice}
+                          placeholder="R$/un"
+                          onChange={(e) => setTiers((arr) => arr.map((x, j) => (j === i ? { ...x, unitPrice: e.target.value } : x)))}
+                        />
+                        <Input
+                          value={t.label}
+                          placeholder="rótulo no orçamento (opcional)"
+                          onChange={(e) => setTiers((arr) => arr.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)))}
+                        />
+                        <IconButton size="sm" name="trash" label="Remover" tone="danger" onClick={() => setTiers((arr) => arr.filter((_, j) => j !== i))} />
+                      </div>
+                      {q > 0 && pu > 0 && (
+                        <p className={cn("mt-1 pl-1 font-mono text-[10.5px]", prejuizo ? "font-semibold text-red-600" : "text-ink-400")}>
+                          {prejuizo
+                            ? `⚠ abaixo do custo de ${formatMoney(custoUn)}/un — venda no prejuízo`
+                            : `${q.toLocaleString("pt-BR")} un × ${formatMoney(pu)} = ${formatMoney(q * pu)}`}
+                        </p>
+                      )}
+                    </div>
+                  );
+                })}
+                <Button size="xs" variant="outline" icon="plus" onClick={() => setTiers((arr) => [...arr, { minQuantity: "", unitPrice: "", label: "" }])}>
+                  Faixa de quantidade
+                </Button>
+              </div>
+            </Bloco>
+
+            {/* Unidade de venda — PEÇA 0 do portal do cliente. Sem isto,
+                a Consulta Rápida copia "1 un — R$ 12,90" no adesivo que
+                vende por cartela de 60, e o cliente do WhatsApp lê
+                "1 adesivo por 12,90". */}
+            <Bloco
+              titulo="Unidade de venda"
+              icone="boxes"
+              descricao={
+                <>
+                  Como o cliente LEVA o produto: <strong>cartela</strong>, cento, pacote, par… Em branco
+                  = vendido por unidade. É só comunicação — não muda o cálculo, muda o texto que vai
+                  pro WhatsApp e pro site.
+                </>
+              }
+            >
+              <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
+                <Field label="Unidade" hint="ex.: cartela, cento, pacote">
+                  <Input value={form.saleUnitLabel || ""} onChange={set("saleUnitLabel")} placeholder="em branco = unidade" />
+                </Field>
+                <Field label="Qtd. dentro da unidade" hint="ex.: 60 adesivos por cartela">
+                  <Input mono value={form.saleUnitPieces || ""} onChange={set("saleUnitPieces")} placeholder="ex.: 60" />
+                </Field>
+              </div>
+            </Bloco>
 
             {/* Acabamentos */}
-            <section className="rounded-xl border border-paper-200 bg-paper-100/50 p-4">
-              <h4 className="mb-3.5 flex items-center gap-2 font-mono text-[10.5px] font-semibold tracking-[0.16em] text-ink-600 uppercase">
-                <Icon name="scissors" size={13} />
-                Acabamentos
-              </h4>
+            <Bloco
+              titulo="Acabamentos"
+              icone="scissors"
+              descricao="Corte, laminação, espiral, refile. Entram por unidade ou por folha, conforme cadastrado em Serviços."
+            >
               <div className="space-y-2">
                 {compFinishings.map((f, i) => (
                   <div key={i} className="grid grid-cols-[1fr_90px_130px_90px_32px] items-center gap-2">
@@ -609,10 +1002,17 @@ export function ProductsClient({
                   Acabamento
                 </Button>
               </div>
-            </section>
+            </Bloco>
 
-            {/* Comercial */}
-            <section className="grid grid-cols-2 gap-3.5 sm:grid-cols-4">
+            {/* Margem e disponibilidade estavam numa grade solta, sem
+                título: quem abria o cadastro via quatro caixinhas
+                órfãs entre acabamento e frete. */}
+            <Bloco
+              titulo="Margem & disponibilidade"
+              icone="wallet"
+              descricao="A margem é o que se soma sobre o custo para chegar ao preço. Produto inativo some do PDV mas continua no histórico."
+            >
+            <div className="grid grid-cols-2 gap-3.5 sm:grid-cols-4">
               <Field label={calcMode === "batch" ? "Lucro alvo (%)" : "Margem (%)"}>
                 <Input mono value={form.margin || ""} onChange={set("margin")} />
               </Field>
@@ -631,7 +1031,30 @@ export function ProductsClient({
                   <option value="false">Inativo</option>
                 </Select>
               </Field>
-            </section>
+            </div>
+            </Bloco>
+
+            {/* Logística — alimenta a cotação de frete (SuperFrete) */}
+            <Bloco
+              titulo="Logística · frete"
+              icone="truck"
+              descricao="Medidas da embalagem, para a cotação de frete. Deixe zerado para usar o pacote padrão da loja."
+            >
+              <div className="grid grid-cols-2 gap-3.5 sm:grid-cols-4">
+                <Field label="Peso" hint="kg">
+                  <Input mono inputMode="decimal" value={form.shipWeight || ""} onChange={set("shipWeight")} placeholder="0,000" />
+                </Field>
+                <Field label="Altura" hint="cm">
+                  <Input mono inputMode="decimal" value={form.shipHeight || ""} onChange={set("shipHeight")} placeholder="0" />
+                </Field>
+                <Field label="Largura" hint="cm">
+                  <Input mono inputMode="decimal" value={form.shipWidth || ""} onChange={set("shipWidth")} placeholder="0" />
+                </Field>
+                <Field label="Comprimento" hint="cm">
+                  <Input mono inputMode="decimal" value={form.shipLength || ""} onChange={set("shipLength")} placeholder="0" />
+                </Field>
+              </div>
+            </Bloco>
           </div>
 
           {/* Coluna do breakdown */}
@@ -658,7 +1081,7 @@ export function ProductsClient({
                 {liveCalc && (
                   <>
                     {"finalSheets" in liveCalc && calcMode === "batch" && (
-                      <div className="mb-3 grid grid-cols-3 gap-2">
+                      <div className="mb-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
                         {[
                           { k: "peças", v: String(liveCalc.qty) },
                           { k: "folhas base", v: String(Math.ceil(liveCalc.qty / Math.max(num(form.piecesPerSheet, 1), 1))) },

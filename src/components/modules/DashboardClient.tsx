@@ -30,6 +30,7 @@ type Props = {
   fleet: { id: number; name: string; brand: string | null; status: string; category: string; color: string; icon: string }[];
   lowStock: { id: number; name: string; stock: number; min: number; unit: string }[];
   recentQuotes: { id: number; number: string; status: string; total: number; createdAt: string }[];
+  birthdays?: { id: number; name: string; day: string; isToday: boolean; contact: string | null }[];
   recentOrders: { id: number; number: string; status: string; productionStatus: string; total: number; dueDate: string | null; priority: string }[];
   agendaToday: { id: number; title: string; startTime: string; estimatedMinutes: number; status: string; printer?: string }[];
 };
@@ -385,6 +386,36 @@ export function DashboardClient(p: Props) {
               </div>
             )}
           </Card>
+
+          {/* Aniversariantes: a data já era coletada e só existia na
+              ficha individual. Aqui vira ação comercial do dia. */}
+          {(p.birthdays?.length ?? 0) > 0 && (
+            <Card className="reveal reveal-4">
+              <SectionTitle title="Aniversariantes da semana" href="/clientes" />
+              <div className="space-y-1.5">
+                {p.birthdays!.map((b) => (
+                  <div key={b.id} className="flex items-center justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-[12px] font-medium text-ink-700">{b.name}</p>
+                      {!b.contact && (
+                        <p className="font-mono text-[9px] tracking-wide text-ink-400 uppercase">
+                          sem contato para envio
+                        </p>
+                      )}
+                    </div>
+                    <span
+                      className={cn(
+                        "shrink-0 rounded-md px-2 py-0.5 font-mono text-[10.5px] font-semibold tnum",
+                        b.isToday ? "bg-emerald-50 text-emerald-700" : "text-ink-500"
+                      )}
+                    >
+                      {b.isToday ? "hoje" : b.day}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          )}
 
           <Card className="reveal reveal-4">
             <SectionTitle title="Últimos orçamentos" href="/orcamentos" />

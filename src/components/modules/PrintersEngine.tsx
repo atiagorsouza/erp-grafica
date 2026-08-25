@@ -256,6 +256,22 @@ export function PrintersEngine({ categories, consumables, printers, formats }: {
   const [prtModal, setPrtModal] = useState<null | { categoryId: number; mode: string; edit?: Row }>(null);
   const [fmtModal, setFmtModal] = useState<null | { categoryId: number; edit?: Row }>(null);
 
+  /* Peças de desgaste marcadas como colorante.
+     `costRole` tem default "colorant": quem cadastra sem escolher faz o
+     cilindro escalar com a cobertura de tinta, o que não acontece na
+     máquina — ele se gasta por passagem de papel. O erro é invisível na
+     cobertura de referência e só aparece em arte com muita ou pouca
+     tinta, então precisa de aviso explícito. */
+  const suspeitasMecanicas = useMemo(
+    () =>
+      consumables.filter(
+        (c) =>
+          String(c.costRole || "colorant") === "colorant" &&
+          /cilindro|fusor|fus[oó]ra|cabe[çc]a|correia|belt|drum|l[âa]mina|rolo/i.test(String(c.name || ""))
+      ),
+    [consumables]
+  );
+
   const [form, setForm] = useState<Record<string, string>>({});
   const open = (data: Record<string, string>) => setForm(data);
   const set = (k: string) => (e: { target: { value: string } }) => setForm((f) => ({ ...f, [k]: e.target.value }));
@@ -317,6 +333,7 @@ export function PrintersEngine({ categories, consumables, printers, formats }: {
         model: form.model,
         status: form.status || "ativa",
         costMultiplier: Number(form.costMultiplier || 1).toFixed(4),
+        hourlyRate: Number(form.hourlyRate || 0).toFixed(4),
         maxFormat: mode === "grama" ? null : form.maxFormat || null,
         buildVolume: mode === "grama" ? form.buildVolume || null : null,
         notes: form.notes,
@@ -361,6 +378,29 @@ export function PrintersEngine({ categories, consumables, printers, formats }: {
           </Button>
         }
       />
+
+      {/* Aviso de cadastro: peça de desgaste marcada como colorante
+          distorce o custo sem que nada pareça errado na tela. */}
+      {suspeitasMecanicas.length > 0 && (
+        <Card className="mb-4 border-amber-300 bg-amber-50/60">
+          <div className="flex items-start gap-2.5">
+            <Icon name="alert" size={16} className="mt-0.5 shrink-0 text-amber-600" />
+            <div className="min-w-0">
+              <p className="text-[12.5px] font-semibold text-amber-900">
+                {suspeitasMecanicas.length === 1
+                  ? "1 consumível parece peça de desgaste, mas está como colorante"
+                  : `${suspeitasMecanicas.length} consumíveis parecem peça de desgaste, mas estão como colorantes`}
+              </p>
+              <p className="mt-0.5 text-[11.5px] text-amber-800">
+                {suspeitasMecanicas.map((c) => String(c.name)).join(", ")} — cilindro, fusor e
+                correia se gastam por folha que passa, não pela quantidade de tinta. Como
+                colorante, o custo sobe em arte pesada e cai em texto leve, o que não acontece na
+                máquina. Edite e marque “Mecânica (fixo por folha)”.
+              </p>
+            </div>
+          </div>
+        </Card>
+      )}
 
       <EngineFlow />
       <Simulator categories={categories} consumables={consumables} printers={printers} formats={formats} />
@@ -472,7 +512,7 @@ export function PrintersEngine({ categories, consumables, printers, formats }: {
                             <Icon name="printer" size={13} />
                             Máquinas
                           </h3>
-                          <Button size="xs" variant="outline" icon="plus" onClick={() => { open({ status: "ativa", costMultiplier: "1" }); setPrtModal({ categoryId: Number(cat.id), mode }); }}>
+                          <Button size="xs" variant="outline" icon="plus" onClick={() => { open({ status: "ativa", costMultiplier: "1", hourlyRate: "0" }); setPrtModal({ categoryId: Number(cat.id), mode }); }}>
                             Impressora
                           </Button>
                         </div>
@@ -497,7 +537,7 @@ export function PrintersEngine({ categories, consumables, printers, formats }: {
                                 </span>
                               </div>
                               <span className="absolute right-2 bottom-2 flex gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
-                                <IconButton size="sm" name="pencil" label="Editar" onClick={() => { open({ name: String(p.name), brand: String(p.brand || ""), model: String(p.model || ""), status: String(p.status), costMultiplier: String(p.costMultiplier), maxFormat: String(p.maxFormat || ""), buildVolume: String(p.buildVolume || ""), notes: String(p.notes || "") }); setPrtModal({ categoryId: Number(cat.id), mode, edit: p }); }} />
+                                <IconButton size="sm" name="pencil" label="Editar" onClick={() => { open({ name: String(p.name), brand: String(p.brand || ""), model: String(p.model || ""), status: String(p.status), costMultiplier: String(p.costMultiplier), hourlyRate: String(p.hourlyRate ?? 0), maxFormat: String(p.maxFormat || ""), buildVolume: String(p.buildVolume || ""), notes: String(p.notes || "") }); setPrtModal({ categoryId: Number(cat.id), mode, edit: p }); }} />
                                 <IconButton size="sm" name="trash" label="Excluir" tone="danger" onClick={del("printers", Number(p.id), "Excluir impressora?")} />
                               </span>
                             </div>
@@ -705,6 +745,9 @@ export function PrintersEngine({ categories, consumables, printers, formats }: {
           </Field>
           <Field label="Fator de ajuste" hint="1.00 = custo padrão da categoria">
             <Input mono value={form.costMultiplier || ""} onChange={set("costMultiplier")} placeholder="1.00" />
+          </Field>
+          <Field label="Valor da hora (R$)" hint="3D e recorte: o tempo é o custo real. 0 = não cobra tempo">
+            <Input mono value={form.hourlyRate || ""} onChange={set("hourlyRate")} placeholder="0,00" />
           </Field>
           {prtModal?.mode === "grama" ? (
             <Field label="Volume de construção" hint="3D não usa formato de papel">

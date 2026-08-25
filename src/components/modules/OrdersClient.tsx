@@ -23,32 +23,30 @@ import {
 import { Icon } from "@/components/icons";
 import { cn } from "@/lib/format";
 import { applyDiscount, formatBRL, round2, toNumber, toPositive } from "@/lib/money";
+import { todayISO } from "@/lib/period";
+import { formatCEP, formatDocumentAuto, formatPhone, isWhatsAppBlocked, whatsappNumber } from "@/lib/validators";
+
+import type { CompanyIdentity } from "@/lib/company";
+export type PosCompany = CompanyIdentity;
 
 /* ==================================================================
    TIPOS
    ================================================================== */
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Row = Record<string, any>;
 
-export type PosCompany = {
-  name: string;
-  legalName: string;
-  document: string;
-  email: string;
-  phone: string;
-  phone2: string;
-  whatsapp: string;
-  address: string;
-  street: string;
-  number: string;
-  district: string;
-  city: string;
-  state: string;
-  cep: string;
-  website: string;
-  pixKey: string;
+/* Estado da paginação, calculado no servidor. `contadores` são as
+   somas da base inteira, usadas nas abas. */
+type Paginacao = {
+  total: number;
+  pagina: number;
+  porPagina: number;
+  totalPaginas: number;
+  contadores: Record<string, number>;
+  busca: string;
+  filtro: string;
 };
+
 
 type OrderItem = {
   productId?: number | null;
@@ -128,8 +126,10 @@ export function OrdersClient({
   schedules,
   deliveries,
   company,
+  paginacao,
 }: {
   orders: Row[];
+  paginacao: Paginacao;
   customers: Row[];
   printers: Row[];
   approvals: Row[];
@@ -140,9 +140,39 @@ export function OrdersClient({
   const router = useRouter();
   const [customersList, setCustomersList] = useState<Row[]>(initialCustomers);
 
-  /* Estados de filtro e busca */
-  const [filter, setFilter] = useState("ativos");
-  const [q, setQ] = useState("");
+  /* Filtro e busca agora moram na URL (v3.62.0): quem decide o que
+     aparece é o servidor. `q` é só o texto enquanto se digita; ele vira
+     navegação depois de uma pausa, para não consultar a cada tecla. */
+  const filter = paginacao.filtro;
+  const [q, setQ] = useState(paginacao.busca);
+
+  const irPara = useCallback(
+    (mudancas: Record<string, string | number>) => {
+      const p = new URLSearchParams();
+      const base: Record<string, string> = {
+        q: paginacao.busca,
+        filtro: paginacao.filtro,
+        pagina: String(paginacao.pagina),
+        por: String(paginacao.porPagina),
+        ...Object.fromEntries(Object.entries(mudancas).map(([k, v]) => [k, String(v)])),
+      };
+      // Trocar de filtro ou de busca sempre devolve à primeira página,
+      // senão o usuário cairia numa página que não existe mais.
+      if (mudancas.q !== undefined || mudancas.filtro !== undefined) base.pagina = "1";
+      for (const [k, v] of Object.entries(base)) if (v && v !== "0") p.set(k, v);
+      router.push(`/pedidos${p.toString() ? `?${p}` : ""}`);
+    },
+    [router, paginacao]
+  );
+
+  const setFilter = useCallback((valor: string) => irPara({ filtro: valor }), [irPara]);
+
+  /* Debounce da busca: espera a digitação parar antes de ir ao servidor. */
+  useEffect(() => {
+    if (q === paginacao.busca) return;
+    const t = setTimeout(() => irPara({ q }), 300);
+    return () => clearTimeout(t);
+  }, [q, paginacao.busca, irPara]);
   const [openId, setOpenId] = useState<number | null>(null);
 
   /* Estados de formulário de novo pedido / edição */
@@ -158,15 +188,135 @@ export function OrdersClient({
   const [newCustomerOpen, setNewCustomerOpen] = useState(false);
   const [printDoc, setPrintDoc] = useState<{ order: Row; mode: "a4" | "thermal" } | null>(null);
 
+  /* ── Envio por WhatsApp ────────────────────────────────────────
+     Antes o botão só abria o wa.me numa aba nova. Quando o navegador
+     bloqueia pop-up (o padrão em muita instalação), NADA acontecia —
+     nem erro, nem aviso. Foi o que o dono viu: "não fez ação".
+
+     Agora usa o mesmo caminho já provado em Orçamentos: prévia
+     editável e envio pelo serviço, com o wa.me só como saída quando
+     o envio direto não é possível. */
+  const [zap, setZap] = useState<null | {
+    order: Row;
+    texto: string;
+    cliente: { nome: string; phone: string | null; whatsapp: string | null; whatsappOptOut: boolean | null } | null;
+  }>(null);
+  const [zapCarregando, setZapCarregando] = useState(false);
+  const [zapEnviando, setZapEnviando] = useState(false);
+  const [zapFalhou, setZapFalhou] = useState<string | null>(null);
+
+  async function abrirWhatsApp(order: Row) {
+    setZapCarregando(true);
+    try {
+      const r = await fetch("/api/orders/whatsapp", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ id: Number(order.id) }),
+      });
+      const d = await r.json();
+      if (!r.ok) {
+        toast.error("Não foi possível montar a mensagem", d?.error || "Tente de novo.");
+        return;
+      }
+      setZapFalhou(null);
+      setZap({ order, texto: d.texto, cliente: d.cliente });
+    } catch {
+      toast.error("Não foi possível montar a mensagem", "Verifique a conexão.");
+    } finally {
+      setZapCarregando(false);
+    }
+  }
+
+  function abrirNoWhatsAppWeb() {
+    if (!zap) return;
+    const c = zap.cliente;
+    const numero = c && !isWhatsAppBlocked(c as Row) ? whatsappNumber(c as Row) : "";
+    const url = numero
+      ? `https://wa.me/55${numero}?text=${encodeURIComponent(zap.texto)}`
+      : `https://wa.me/?text=${encodeURIComponent(zap.texto)}`;
+    window.open(url, "_blank");
+    setZap(null);
+    setZapFalhou(null);
+  }
+
+  async function enviarPeloServico() {
+    if (!zap) return;
+    const c = zap.cliente;
+
+    if (c && isWhatsAppBlocked(c as Row)) {
+      toast.error("Cliente não aceita WhatsApp", "Escolha outro canal.");
+      return;
+    }
+    const numero = c ? whatsappNumber(c as Row) : "";
+    if (!numero) {
+      setZapFalhou("Este pedido não tem número de WhatsApp no cadastro do cliente.");
+      return;
+    }
+
+    setZapEnviando(true);
+    setZapFalhou(null);
+    try {
+      const r = await fetch("/api/whatsapp/enviar", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ para: `55${numero}`, texto: zap.texto }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (r.ok) {
+        toast.success("Mensagem enviada", `Foi para ${formatPhone(String(c?.whatsapp || c?.phone || ""))}.`);
+        setZap(null);
+        return;
+      }
+      if (r.status === 409) {
+        setZapFalhou("O WhatsApp do sistema está desconectado. Reconecte em Atendimento → WhatsApp → Conexão.");
+      } else if (r.status === 403) {
+        setZapFalhou("Este contato pediu para não receber mensagens.");
+      } else if (r.status === 502 || r.status === 503) {
+        setZapFalhou("O serviço do WhatsApp não está no ar. Veja em Atendimento → WhatsApp → Conexão.");
+      } else {
+        setZapFalhou(String(d?.erro || d?.error || "Não consegui enviar agora."));
+      }
+    } catch {
+      setZapFalhou("Não consegui falar com o serviço do WhatsApp.");
+    } finally {
+      setZapEnviando(false);
+    }
+  }
+
   const order = useMemo(() => orders.find((o) => Number(o.id) === openId) || null, [orders, openId]);
   const custName = useCallback(
     (id: unknown) => customersList.find((c) => Number(c.id) === Number(id)) || null,
     [customersList]
   );
 
+  /* Prazo: o pedido exibia a data mas nunca a comparava com hoje —
+     nada sinalizava atraso numa gráfica, onde prazo é o que mais
+     importa. `todayISO` no fuso da aplicação, para não virar o dia
+     antes da hora. */
+  const todayStr = todayISO();
+
+  const dueInfo = useCallback(
+    (o: Row) => {
+      const encerrado = o.status === "cancelado" || o.productionStatus === "concluido";
+      const due = String(o.dueDate || "");
+      if (!due || encerrado) return { late: false, today: false, days: 0 };
+      const diff = Math.round(
+        (new Date(`${due}T12:00:00`).getTime() - new Date(`${todayStr}T12:00:00`).getTime()) / 86400000
+      );
+      return { late: diff < 0, today: diff === 0, days: diff };
+    },
+    [todayStr]
+  );
+
+  /* Contadores das abas vêm do servidor: contam a base inteira, não a
+     página. Contar a página faria "Atrasados" mostrar no máximo 50. */
+  const lateCount = paginacao.contadores.atrasados ?? 0;
+
   /* Filtro + Busca global de pedidos */
   const filtered = useMemo(() => {
-    const term = q.trim().toLowerCase();
+    /* O servidor já aplicou filtro e busca. Este passo virou apenas uma
+       rede de segurança para o intervalo entre digitar e a página chegar. */
+    const term = paginacao.busca.trim().toLowerCase();
     return orders.filter((o) => {
       const c = custName(o.customerId);
       const items = Array.isArray(o.items) ? o.items : [];
@@ -180,11 +330,12 @@ export function OrdersClient({
         items.some((i: Row) => String(i.description || "").toLowerCase().includes(term));
 
       if (!matchTerm) return false;
+      if (filter === "atrasados") return dueInfo(o).late;
       if (filter === "ativos") return o.status !== "cancelado" && o.productionStatus !== "concluido";
       if (filter === "todos") return true;
       return o.productionStatus === filter || o.status === filter;
     });
-  }, [orders, q, filter, custName]);
+  }, [orders, paginacao.busca, filter, custName, dueInfo]);
 
   /* Atualização de pedido sem recarga brusca.
    A API centraliza Kanban, Entrega e Financeiro para evitar divergência. */
@@ -201,6 +352,9 @@ export function OrdersClient({
 
   /* Cancelar pedido */
   const [cancelOpen, setCancelOpen] = useState(false);
+  /* cobrança InfinitePay (v3.13.0) */
+  const [charging, setCharging] = useState(false);
+  const [chargeLink, setChargeLink] = useState<string | null>(null);
   const [cancelReason, setCancelReason] = useState("");
   const [cancelling, setCancelling] = useState(false);
 
@@ -244,6 +398,26 @@ export function OrdersClient({
   }
 
   /* Decidir Aprovação de Arte */
+  async function chargeOrder(id: number) {
+    setCharging(true);
+    try {
+      const res = await fetch("/api/payments", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ op: "create", orderId: id }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Falha ao gerar cobrança");
+      setChargeLink(json.row.checkoutUrl);
+      toast.success("Link de pagamento gerado");
+      router.refresh();
+    } catch (e) {
+      toast.error("Não foi possível cobrar", e instanceof Error ? e.message : undefined);
+    } finally {
+      setCharging(false);
+    }
+  }
+
   async function decideArt(a: Row, status: string) {
     await mutate(
       "art-approvals",
@@ -352,14 +526,11 @@ export function OrdersClient({
   const orderDelivery = order ? deliveries.find((d) => Number(d.orderId) === Number(order.id)) : null;
 
   const stats = [
-    {
-      k: "ativos",
-      label: "Em aberto",
-      n: orders.filter((o) => o.status !== "cancelado" && o.productionStatus !== "concluido").length,
-    },
-    { k: "aguardando", label: "Aguardando", n: orders.filter((o) => o.productionStatus === "aguardando").length },
-    { k: "em_producao", label: "Em produção", n: orders.filter((o) => o.productionStatus === "em_producao").length },
-    { k: "concluido", label: "Concluídos", n: orders.filter((o) => o.productionStatus === "concluido").length },
+    { k: "ativos", label: "Em aberto", n: paginacao.contadores.ativos ?? 0 },
+    { k: "atrasados", label: "Atrasados", n: lateCount },
+    { k: "aguardando", label: "Aguardando", n: paginacao.contadores.aguardando ?? 0 },
+    { k: "em_producao", label: "Em produção", n: paginacao.contadores.em_producao ?? 0 },
+    { k: "concluido", label: "Concluídos", n: paginacao.contadores.concluido ?? 0 },
   ];
 
   /* Opções de cliente para Combobox */
@@ -427,7 +598,7 @@ export function OrdersClient({
                 : "border-paper-300 bg-paper-50 text-ink-500"
             )}
           >
-            Todos ({orders.length})
+            Todos ({paginacao.contadores.todos ?? 0})
           </button>
         </div>
 
@@ -545,10 +716,36 @@ export function OrdersClient({
 
                 <div className="mt-4 flex items-center justify-between border-t border-dashed border-paper-300 pt-2.5">
                   <div className="flex flex-col">
-                    <span className="flex items-center gap-1 font-mono text-[10px] text-ink-400 tnum">
-                      <Icon name="calendar" size={11} />
-                      {o.dueDate ? new Date(`${o.dueDate}T12:00:00`).toLocaleDateString("pt-BR") : "sem prazo"}
-                    </span>
+                    {(() => {
+                      const d = dueInfo(o);
+                      return (
+                        <span
+                          className={cn(
+                            "flex items-center gap-1 font-mono text-[10px] tnum",
+                            d.late
+                              ? "font-semibold text-red-600"
+                              : d.today
+                                ? "font-semibold text-amber-600"
+                                : "text-ink-400"
+                          )}
+                        >
+                          <Icon name={d.late ? "alert" : "calendar"} size={11} />
+                          {o.dueDate
+                            ? new Date(`${o.dueDate}T12:00:00`).toLocaleDateString("pt-BR")
+                            : "sem prazo"}
+                          {d.late && (
+                            <span className="rounded bg-red-100 px-1 text-[9px] font-bold uppercase">
+                              {Math.abs(d.days)}d atraso
+                            </span>
+                          )}
+                          {d.today && (
+                            <span className="rounded bg-amber-100 px-1 text-[9px] font-bold uppercase">
+                              hoje
+                            </span>
+                          )}
+                        </span>
+                      );
+                    })()}
                     <span className="font-mono text-[9.5px] text-ink-500 uppercase">
                       {o.paymentMethod || "A definir"}
                     </span>
@@ -571,6 +768,68 @@ export function OrdersClient({
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* ── PAGINAÇÃO ──
+         Duas formas para o mesmo estado: no celular um botão "carregar
+         mais" (rolagem é o gesto natural); no computador páginas
+         numeradas, que ajudam a saber onde se está e a voltar. */}
+      {paginacao.total > 0 && (
+        <div className="mt-5 flex flex-col items-center gap-3 border-t border-paper-200 pt-4">
+          <p className="text-xs text-ink-500">
+            Mostrando{"\u00a0"}
+            <strong className="text-ink-700">
+              {(paginacao.pagina - 1) * paginacao.porPagina + 1}
+              {"\u00a0"}a{"\u00a0"}
+              {Math.min(paginacao.pagina * paginacao.porPagina, paginacao.total)}
+            </strong>
+            {"\u00a0"}de{"\u00a0"}<strong className="text-ink-700">{paginacao.total}</strong>
+            {"\u00a0"}
+            {paginacao.total === 1 ? "pedido" : "pedidos"}
+            {paginacao.busca ? ` para "${paginacao.busca}"` : ""}
+          </p>
+
+          {paginacao.totalPaginas > 1 && (
+            <>
+              {/* Celular */}
+              <div className="flex w-full sm:hidden">
+                {paginacao.pagina < paginacao.totalPaginas && (
+                  <Button
+                    variant="outline"
+                    className="w-full"
+                    onClick={() => irPara({ pagina: paginacao.pagina + 1 })}
+                  >
+                    Carregar mais
+                  </Button>
+                )}
+              </div>
+
+              {/* Computador */}
+              <div className="hidden items-center gap-1.5 sm:flex">
+                <Button
+                  variant="outline"
+                  disabled={paginacao.pagina <= 1}
+                  onClick={() => irPara({ pagina: paginacao.pagina - 1 })}
+                >
+                  Anterior
+                </Button>
+                <span className="px-3 text-xs text-ink-500">
+                  Página{"\u00a0"}
+                  <strong className="text-ink-700">{paginacao.pagina}</strong>
+                  {"\u00a0"}de{"\u00a0"}
+                  <strong className="text-ink-700">{paginacao.totalPaginas}</strong>
+                </span>
+                <Button
+                  variant="outline"
+                  disabled={paginacao.pagina >= paginacao.totalPaginas}
+                  onClick={() => irPara({ pagina: paginacao.pagina + 1 })}
+                >
+                  Próxima
+                </Button>
+              </div>
+            </>
+          )}
         </div>
       )}
 
@@ -605,6 +864,29 @@ export function OrdersClient({
                 >
                   Imprimir OS (A4)
                 </Button>
+                {/* Avisar o cliente é ação frequente e não deveria
+                    exigir abrir a prévia de impressão antes. */}
+                <Button
+                  variant="soft"
+                  icon="whatsapp"
+                  disabled={zapCarregando}
+                  onClick={() => {
+                    setOpenId(null);
+                    abrirWhatsApp(order);
+                  }}
+                >
+                  {zapCarregando ? "Montando…" : "Avisar por WhatsApp"}
+                </Button>
+                {order.status !== "cancelado" && order.financialStatus !== "pago" && (
+                  <Button
+                    variant="ink"
+                    icon="wallet"
+                    loading={charging}
+                    onClick={() => chargeOrder(Number(order.id))}
+                  >
+                    Cobrar via InfinitePay
+                  </Button>
+                )}
                 {order.status !== "cancelado" && (
                   <Button
                     variant="danger"
@@ -1132,6 +1414,7 @@ export function OrdersClient({
 
       {/* ── MODAL CADASTRO RÁPIDO CLIENTE (F8) ── */}
       <QuickCustomerModal
+        key={newCustomerOpen ? "customer-open" : "customer-closed"}
         open={newCustomerOpen}
         onClose={() => setNewCustomerOpen(false)}
         onCreated={(newCust) => {
@@ -1172,20 +1455,15 @@ export function OrdersClient({
                 variant="soft"
                 size="sm"
                 icon="whatsapp"
+                disabled={zapCarregando}
                 onClick={() => {
                   if (!printDoc) return;
                   const o = printDoc.order;
-                  const c = custName(o.customerId);
-                  const text = `*${company.name}*\n*ORDEM DE PRODUÇÃO ${o.number}*\nStatus: ${o.status}\nCliente: ${c ? c.name : "Consumidor final"}\nTotal: ${formatBRL(Number(o.total || 0))}\nPrazo: ${o.dueDate || "A definir"}`;
-                  const phone = c?.whatsapp || c?.phone || "";
-                  const cleanPhone = phone.replace(/\D/g, "");
-                  const url = cleanPhone
-                    ? `https://wa.me/55${cleanPhone}?text=${encodeURIComponent(text)}`
-                    : `https://wa.me/?text=${encodeURIComponent(text)}`;
-                  window.open(url, "_blank");
+                  setPrintDoc(null);
+                  abrirWhatsApp(o);
                 }}
               >
-                WhatsApp
+                {zapCarregando ? "Montando…" : "WhatsApp"}
               </Button>
 
               <Button
@@ -1207,7 +1485,12 @@ export function OrdersClient({
         }
       >
         {printDoc && (
-          <div className="bg-paper-100 p-4 rounded-xl border border-paper-300">
+          <div className="bg-paper-100 p-4 rounded-xl border border-paper-300 overflow-x-auto">
+            {/* Reduz a folha inteira para caber na largura do aparelho.
+               Uso `zoom` em vez de `scale` porque ele recalcula a altura
+               do bloco — `scale` deixaria uma faixa vazia embaixo. No
+               computador o valor volta a 1 e nada muda. */}
+            <div className="[zoom:0.42] sm:[zoom:1] w-[800px] sm:mx-auto">
             {printDoc.mode === "a4" ? (
               <ProductionOrderA4
                 order={printDoc.order}
@@ -1221,9 +1504,65 @@ export function OrdersClient({
                 company={company}
               />
             )}
+            </div>
           </div>
         )}
       </Drawer>
+
+      {/* ── MODAL LINK DE COBRANÇA (InfinitePay) ── */}
+      <Modal
+        open={!!chargeLink}
+        onClose={() => setChargeLink(null)}
+        title="Link de pagamento gerado"
+        width="max-w-md"
+        footer={<Button icon="check" onClick={() => setChargeLink(null)}>Fechar</Button>}
+      >
+        <p className="text-[13px] text-ink-600">
+          Envie ao cliente. Quando ele pagar, o pedido é quitado e a receita entra no Financeiro
+          automaticamente.
+        </p>
+        <div className="mt-3 rounded-lg border border-paper-200 bg-paper-50 p-3">
+          <p className="break-all font-mono text-[11.5px] text-proc-c-strong">{chargeLink}</p>
+        </div>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <Button
+            size="sm"
+            icon="copy"
+            onClick={async () => {
+              try {
+                await navigator.clipboard.writeText(String(chargeLink));
+                toast.success("Link copiado");
+              } catch {
+                toast.error("Não foi possível copiar");
+              }
+            }}
+          >
+            Copiar
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            icon="whatsapp"
+            onClick={() =>
+              window.open(
+                `https://wa.me/?text=${encodeURIComponent(`Segue o link para pagamento: ${chargeLink}`)}`,
+                "_blank",
+                "noopener"
+              )
+            }
+          >
+            WhatsApp
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            icon="external"
+            onClick={() => window.open(String(chargeLink), "_blank", "noopener")}
+          >
+            Abrir
+          </Button>
+        </div>
+      </Modal>
 
       {/* ── MODAL CANCELAR PEDIDO ── */}
       <Modal
@@ -1254,6 +1593,77 @@ export function OrdersClient({
         <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-[11.5px] text-amber-800">
           O status do pedido será marcado como cancelado. Esta ação não exclui o registro.
         </p>
+      </Modal>
+
+      {/* ── PRÉVIA DO WHATSAPP ── mesma conduta de Orçamentos: o texto
+          vem pronto do catálogo editável e fica editável aqui antes de
+          sair. Ninguém envia às cegas. */}
+      <Modal
+        open={!!zap}
+        onClose={() => { setZap(null); setZapFalhou(null); }}
+        title="Avisar cliente por WhatsApp"
+        subtitle="Confira e ajuste o texto antes de enviar. Para mudar o padrão, use Painel → Mensagens."
+        width="max-w-lg"
+        footer={
+          <div className="flex w-full items-center justify-between gap-2">
+            <Button variant="ghost" onClick={() => { setZap(null); setZapFalhou(null); }}>
+              Cancelar
+            </Button>
+            {zapFalhou ? (
+              <Button icon="whatsapp" variant="outline" onClick={abrirNoWhatsAppWeb}>
+                Abrir no WhatsApp Web
+              </Button>
+            ) : (
+              <Button icon="whatsapp" onClick={enviarPeloServico} disabled={zapEnviando}>
+                {zapEnviando ? "Enviando…" : "Enviar pelo WhatsApp"}
+              </Button>
+            )}
+          </div>
+        }
+      >
+        {zap && (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-2 text-[11.5px]">
+              <span className="text-ink-500">
+                Para:{"\u00a0"}
+                <strong className="text-ink-700">{zap.cliente?.nome || "— sem cliente —"}</strong>
+              </span>
+              {zap.cliente && isWhatsAppBlocked(zap.cliente as Row) ? (
+                <Badge tone="magenta">Não aceita WhatsApp</Badge>
+              ) : whatsappNumber((zap.cliente || {}) as Row) ? (
+                <span className="font-mono text-ink-500">
+                  {formatPhone(String(zap.cliente?.whatsapp || zap.cliente?.phone || ""))}
+                </span>
+              ) : (
+                <Badge tone="cyan">Sem número no cadastro</Badge>
+              )}
+            </div>
+
+            <Textarea
+              value={zap.texto}
+              onChange={(e) => setZap({ ...zap, texto: e.target.value })}
+              rows={11}
+              className="font-mono text-[12px] leading-relaxed"
+            />
+
+            {zapFalhou && (
+              <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2.5">
+                <p className="text-[12px] font-semibold text-amber-900">
+                  Não deu para enviar pelo sistema
+                </p>
+                <p className="mt-0.5 text-[11.5px] leading-relaxed text-amber-800">{zapFalhou}</p>
+                <p className="mt-1.5 text-[11px] text-amber-700">
+                  O texto está pronto: use o botão ao lado para abrir o WhatsApp Web.
+                </p>
+              </div>
+            )}
+
+            <p className="text-[11px] text-ink-400">
+              O WhatsApp mostra *texto entre asteriscos* em negrito e
+              _entre sublinhados_ em itálico.
+            </p>
+          </div>
+        )}
       </Modal>
 
       {/* ÁREA ISOLADA DE IMPRESSÃO A4 (EXATA À FOTO DE REFERÊNCIA) */}
@@ -1299,7 +1709,11 @@ function ProductionOrderA4({
   isPrint?: boolean;
 }) {
   const items = Array.isArray(order.items) ? order.items : [];
-  const createdAtFormatted = new Date(order.createdAt || Date.now()).toLocaleDateString("pt-BR");
+  /* Sem `Date.now()` no render: ler o relógio durante a renderização é
+     impuro e daria datas diferentes entre servidor e cliente na OS. */
+  const createdAtFormatted = order.createdAt
+    ? new Date(order.createdAt).toLocaleDateString("pt-BR")
+    : "—";
   const subtotal = toNumber(order.subtotal, 0);
   const discount = toNumber(order.discount, 0);
   const shippingFee = toNumber(order.shippingFee, 0);
@@ -1309,7 +1723,13 @@ function ProductionOrderA4({
     <div
       className={cn(
         "font-sans text-ink-900 bg-white text-[12px] leading-snug select-text",
-        isPrint ? "w-full p-8" : "p-8 max-w-[800px] mx-auto shadow-sm rounded border border-paper-300"
+        /* Na tela o documento tem largura de folha; no celular ele era
+           espremido para ~360px e as colunas colidiam uma sobre a outra
+           (Subtotal por cima do valor, "AGUARDANDO"/"PAGO" embolados).
+           A folha agora mantém a largura real e é reduzida por inteiro,
+           que é como se lê um documento — não reflowada. A impressão
+           usa `isPrint` e não passa por aqui. */
+        isPrint ? "w-full p-8" : "w-[800px] shrink-0 p-8 shadow-sm rounded border border-paper-300"
       )}
       style={{ fontFamily: "'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif" }}
     >
@@ -1317,7 +1737,7 @@ function ProductionOrderA4({
       <div className="flex items-start justify-between border-b border-paper-300 pb-4">
         <div>
           <h1 className="text-[22px] font-extrabold text-ink-950 tracking-tight leading-none">
-            {company.name || "PrintFlow Gráfica Criativa"}
+            {company.name || "VTDIGITAL ART STUDIO"}
           </h1>
           <p className="text-[11px] font-semibold text-proc-c tracking-wider uppercase mt-1">
             GRÁFICA RÁPIDA E PERSONALIZADOS
@@ -1328,7 +1748,10 @@ function ProductionOrderA4({
           <p>{company.address}</p>
           <p>{company.phone} · {company.phone2}</p>
           <p>{company.email}</p>
-          <p className="font-mono">CNPJ {company.document}</p>
+          <p className="font-mono">
+            CNPJ {company.document}
+            {company.stateRegistration ? ` · IE ${company.stateRegistration}` : ""}
+          </p>
         </div>
       </div>
 
@@ -1375,11 +1798,41 @@ function ProductionOrderA4({
             <span className="truncate block">{customer?.email || "—"}</span>
           </div>
         </div>
+        {/* PJ: dados fiscais do destinatário, iguais aos do orçamento. */}
+        {customer?.type === "pj" && (
+          <div className="mt-2 grid grid-cols-4 gap-2 text-[11.5px]">
+            <div>
+              <span className="block font-mono text-[9px] text-ink-400 uppercase">RAZÃO SOCIAL</span>
+              <span>{String(customer?.name || "—")}</span>
+            </div>
+            <div>
+              <span className="block font-mono text-[9px] text-ink-400 uppercase">INSC. ESTADUAL</span>
+              <span className="font-mono">{String(customer?.stateRegistration || "ISENTO")}</span>
+            </div>
+            <div>
+              <span className="block font-mono text-[9px] text-ink-400 uppercase">INSC. MUNICIPAL</span>
+              <span className="font-mono">{String(customer?.municipalRegistration || "—")}</span>
+            </div>
+            <div>
+              <span className="block font-mono text-[9px] text-ink-400 uppercase">A/C</span>
+              <span>{String(customer?.contactName || "—")}</span>
+            </div>
+          </div>
+        )}
+
         <div className="mt-2 text-[11.5px]">
           <span className="block font-mono text-[9px] text-ink-400 uppercase">ENDEREÇO</span>
           <span>
             {customer && (customer.street || customer.district)
-              ? [customer.street, customer.number, customer.district, customer.city, customer.state, customer.cep]
+              ? [
+                  customer.street,
+                  customer.number,
+                  customer.complement,
+                  customer.district,
+                  customer.city,
+                  customer.state,
+                  customer.cep ? `CEP ${formatCEP(customer.cep)}` : null,
+                ]
                   .filter(Boolean)
                   .join(", ")
               : "—"}
@@ -1553,7 +2006,10 @@ function ThermalOrderReceipt({
   isPrint?: boolean;
 }) {
   const items = Array.isArray(order.items) ? order.items : [];
-  const createdAtFormatted = new Date(order.createdAt || Date.now()).toLocaleDateString("pt-BR");
+  /* idem: relógio fora do render */
+  const createdAtFormatted = order.createdAt
+    ? new Date(order.createdAt).toLocaleDateString("pt-BR")
+    : "—";
 
   return (
     <div
@@ -1566,6 +2022,9 @@ function ThermalOrderReceipt({
       <div className="text-left font-bold text-[12px] uppercase">{company.name}</div>
       <div className="text-left text-[11px] uppercase">{company.address}</div>
       <div className="text-left text-[11px] uppercase">Tel: {company.phone} / CNPJ: {company.document}</div>
+      {company.stateRegistration && (
+        <div className="text-left text-[11px] uppercase">IE: {company.stateRegistration}</div>
+      )}
       <div className="my-1.5 border-b border-dashed border-black" />
 
       <div className="font-bold text-[12px]">ORDEM DE PRODUÇÃO {order.number}</div>
@@ -1575,7 +2034,11 @@ function ThermalOrderReceipt({
       {customer && (
         <>
           <div className="font-bold uppercase">CLIENTE: {customer.name}</div>
-          {customer.phone && <div>TEL: {customer.phone}</div>}
+          {/* documento e contato PJ: a via de produção também serve de
+              comprovante de entrega (v3.23.0) */}
+          {customer.document ? <div>CPF/CNPJ: {formatDocumentAuto(String(customer.document))}</div> : null}
+          {customer.contactName ? <div className="uppercase">A/C: {String(customer.contactName)}</div> : null}
+          {customer.phone && <div>TEL: {formatPhone(customer.phone)}</div>}
           <div className="my-1.5 border-b border-dashed border-black" />
         </>
       )}
@@ -1631,19 +2094,8 @@ function QuickCustomerModal({
   const [loading, setLoading] = useState(false);
   const [fetchingCep, setFetchingCep] = useState(false);
 
-  useEffect(() => {
-    if (open) {
-      setName("");
-      setDocument("");
-      setPhone("");
-      setCep("");
-      setStreet("");
-      setNumber("");
-      setDistrict("");
-      setCity("");
-      setState("");
-    }
-  }, [open]);
+  /* Reset por `key` no pai: remontar é mais barato (e correto no
+     React 19) que zerar nove estados dentro de um efeito. */
 
   const handleCepBlur = async () => {
     const cleanCep = cep.replace(/\D/g, "");
@@ -1681,6 +2133,9 @@ function QuickCustomerModal({
         city: city.trim() || null,
         state: state.trim() || null,
         status: "ativo",
+        /* Cadastro rápido no meio do atendimento: documento fica
+           opcional aqui (a tela de Clientes & CRM exige). */
+        quickEntry: true,
       };
 
       const res = await fetch("/api/crud/customers", {

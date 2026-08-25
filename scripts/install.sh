@@ -122,6 +122,9 @@ setup_database() {
   node scripts/repair-kanban.mjs
   node scripts/repair-calendar.mjs
   node scripts/repair-stock.mjs
+  node scripts/repair-finance.mjs
+  node scripts/repair-shipping.mjs
+  node scripts/repair-payments.mjs
   c_ok "Seed concluído"
 }
 

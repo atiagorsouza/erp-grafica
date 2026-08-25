@@ -9,8 +9,10 @@ import {
   printerConsumables,
   printers,
   printFormats,
+  pricingTables,
   productFinishings,
   productMaterials,
+  productPriceTiers,
   products,
   quoteItems,
   services,
@@ -53,13 +55,29 @@ const productSchema = z.object({
   baseMaterialId: z.coerce.number().int().positive().nullable().optional(),
   baseMaterialQty: finite.min(0).max(1_000_000).default(1),
   baseServiceId: z.coerce.number().int().positive().nullable().optional(),
+  basePricingTableId: z.coerce.number().int().positive().nullable().optional(),
+  basePricingTableQty: finite.min(0).max(1_000_000).default(1),
+  basePricingTablePieces: finite.min(0).max(1_000_000).default(0),
   calculationMode: z.enum(["unit", "batch"]).default("unit"),
   defaultQuantity: finite.min(0).max(1_000_000).default(1),
   piecesPerSheet: finite.min(0.0001).max(1_000_000).default(1),
   printSides: z.coerce.number().int().min(1).max(10).default(1),
+  machineMinutes: finite.min(0).max(100000).default(0),
+  /* Prazo de ENTREGA em dias úteis — não confundir com machineMinutes,
+     que é tempo de máquina e entra no custo. Teto de 90 dias: número
+     maior que isso quase sempre é erro de digitação. */
+  leadTimeCreation: z.coerce.number().int().min(0).max(90).default(0),
+  leadTimeProduction: z.coerce.number().int().min(0).max(90).default(1),
+  leadTimeFinishing: z.coerce.number().int().min(0).max(90).default(0),
+  leadTimeSerial: z.coerce.boolean().default(false),
   wastePercent: finite.min(0).max(1).default(0),
   setupSheets: z.coerce.number().int().min(0).max(100000).default(0),
   minOrderQty: finite.min(0).max(1_000_000).default(1),
+  /* Unidade de venda (PEÇA 0, v3.68.2) — "cartela", "cento", "pacote".
+     NULL/ausente = vendido por unidade: o texto da Consulta Rápida e
+     do portal não muda. Rótulo curto: ele vai pro texto do WhatsApp. */
+  saleUnitLabel: z.string().trim().max(24).nullable().optional(),
+  saleUnitPieces: finite.min(0.0001).max(1_000_000).nullable().optional(),
   operationalRate: finite.min(0).max(0.95).default(0),
   roundingStep: finite.min(0.01).max(100000).default(0.01),
   margin: finite.min(0).max(0.95).default(0.4),
@@ -67,8 +85,24 @@ const productSchema = z.object({
   trackStock: z.boolean().default(false),
   stock: finite.min(-1_000_000).max(1_000_000).default(0),
   minStock: finite.min(0).max(1_000_000).default(0),
+  /* logística — usados na cotação de frete (v3.12.0) */
+  shipWeight: finite.min(0).max(1000).default(0),
+  shipHeight: finite.min(0).max(200).default(0),
+  shipWidth: finite.min(0).max(200).default(0),
+  shipLength: finite.min(0).max(200).default(0),
   finishings: z.array(componentSchema).optional().default([]),
   materials: z.array(componentSchema).optional().default([]),
+  /* faixas de preço por quantidade (v3.34.0) — "mínimo 50, depois 100..." */
+  priceTiers: z
+    .array(
+      z.object({
+        minQuantity: finite.min(0.001).max(1_000_000),
+        unitPrice: finite.min(0).max(1_000_000),
+        label: z.string().trim().max(80).nullable().optional(),
+      })
+    )
+    .optional()
+    .default([]),
 });
 
 type ProductPayload = z.infer<typeof productSchema>;
@@ -107,7 +141,7 @@ async function findById<T extends { id: number }>(rows: T[], id?: number | null)
 }
 
 async function buildCalculation(data: ProductPayload) {
-  const [cats, cons, prts, fmts, mats, fins, srvs, defaults] = await Promise.all([
+  const [cats, cons, prts, fmts, mats, fins, srvs, ptbs, defaults] = await Promise.all([
     db.select().from(printerCategories),
     db.select().from(printerConsumables),
     db.select().from(printers),
@@ -115,6 +149,7 @@ async function buildCalculation(data: ProductPayload) {
     db.select().from(materials),
     db.select().from(finishingItems),
     db.select().from(services),
+    db.select().from(pricingTables),
     getPricingDefaults(),
   ]);
 
@@ -124,6 +159,7 @@ async function buildCalculation(data: ProductPayload) {
   const format = await findById(fmts, data.printFormatId || null);
   const baseMaterial = await findById(mats, data.baseMaterialId || null);
   const service = await findById(srvs, data.baseServiceId || null);
+  const basePricingTable = await findById(ptbs, data.basePricingTableId || null);
   const categoryConsumables = printerCategoryId ? cons.filter((c) => Number(c.categoryId) === Number(printerCategoryId)) : [];
 
   const finishingLines: BatchFinishingLine[] = data.finishings.map((line) => ({
@@ -155,9 +191,12 @@ async function buildCalculation(data: ProductPayload) {
       extraMaterials: materialLines,
       finishings: finishingLines,
       service,
+      laborHourlyRate: defaults.laborHourlyRate,
       operationalRate: data.operationalRate || defaults.operationalRate,
       taxRate: defaults.taxRate,
-      paymentRate: defaults.cardFeeRate,
+      /* pior meio de pagamento aceito (ex.: 3x sem juros), não a taxa
+         de débito — é o que garante a margem mínima em qualquer forma */
+      paymentRate: defaults.paymentCostRate,
       profitRate: data.margin,
       roundingStep: data.roundingStep,
     });
@@ -181,17 +220,25 @@ async function buildCalculation(data: ProductPayload) {
     category,
     consumables: categoryConsumables,
     printer,
+    format,
     colorMode: data.colorMode as ColorMode,
     pagesPerUnit: data.pagesPerUnit,
+    /* Produto fracionado: o clique se divide entre as peças da folha. */
+    piecesPerSheet: data.piecesPerSheet,
     copies: data.copies,
+    machineMinutes: data.machineMinutes,
     baseMaterial,
     baseMaterialQty: data.baseMaterialQty,
+    basePricingTable,
+    basePricingTableQty: data.basePricingTableQty,
+    basePricingTablePieces: data.basePricingTablePieces,
     finishings: finishingLines,
     extraMaterials: materialLines,
     service,
+    laborHourlyRate: defaults.laborHourlyRate,
     margin: data.margin,
     taxRate: defaults.taxRate,
-    cardFeeRate: defaults.cardFeeRate,
+    cardFeeRate: defaults.paymentCostRate,
   });
 
   return {
@@ -226,6 +273,22 @@ async function syncComponents(tx: Tx, productId: number, data: ProductPayload) {
       quantity: toDecimalString(m.quantity, 3),
     });
   }
+
+  /* Faixas de preço: `Map` por quantidade porque o índice único no
+     banco rejeitaria duplicata com 500 — e um erro de digitação na
+     tela não deve derrubar o salvamento inteiro do produto. */
+  await tx.delete(productPriceTiers).where(eq(productPriceTiers.productId, productId));
+  const seen = new Map<number, (typeof data.priceTiers)[number]>();
+  for (const t of data.priceTiers) seen.set(t.minQuantity, t);
+  const ordered = [...seen.values()].sort((a, b) => a.minQuantity - b.minQuantity);
+  for (const t of ordered) {
+    await tx.insert(productPriceTiers).values({
+      productId,
+      minQuantity: toDecimalString(t.minQuantity, 3),
+      unitPrice: toDecimalString(t.unitPrice, 4),
+      label: t.label?.trim() || null,
+    });
+  }
 }
 
 function baseProductData(data: ProductPayload, calc: Awaited<ReturnType<typeof buildCalculation>> & Record<string, unknown>) {
@@ -244,13 +307,23 @@ function baseProductData(data: ProductPayload, calc: Awaited<ReturnType<typeof b
     baseMaterialId: data.baseMaterialId || null,
     baseMaterialQty: toDecimalString(data.baseMaterialQty, 3),
     baseServiceId: data.baseServiceId || null,
+    basePricingTableId: data.basePricingTableId || null,
+    basePricingTableQty: toDecimalString(data.basePricingTableQty, 3),
+    basePricingTablePieces: toDecimalString(data.basePricingTablePieces, 3),
     calculationMode: data.calculationMode,
     defaultQuantity: toDecimalString(data.defaultQuantity, 3),
     piecesPerSheet: toDecimalString(data.piecesPerSheet, 3),
     printSides: data.printSides,
+    machineMinutes: toDecimalString(data.machineMinutes, 2),
+    leadTimeCreation: data.leadTimeCreation,
+    leadTimeProduction: data.leadTimeProduction,
+    leadTimeFinishing: data.leadTimeFinishing,
+    leadTimeSerial: data.leadTimeSerial,
     wastePercent: toDecimalString(data.wastePercent, 4),
     setupSheets: data.setupSheets,
     minOrderQty: toDecimalString(data.minOrderQty, 3),
+    saleUnitLabel: nullable(data.saleUnitLabel),
+    saleUnitPieces: data.saleUnitPieces != null ? toDecimalString(data.saleUnitPieces, 3) : null,
     operationalRate: toDecimalString(data.operationalRate, 4),
     roundingStep: toDecimalString(data.roundingStep, 2),
     margin: toDecimalString(data.margin, 4),
@@ -262,7 +335,33 @@ function baseProductData(data: ProductPayload, calc: Awaited<ReturnType<typeof b
     trackStock: data.trackStock,
     stock: toDecimalString(data.stock, 3),
     minStock: toDecimalString(data.minStock, 3),
+    shipWeight: toDecimalString(data.shipWeight, 3),
+    shipHeight: toDecimalString(data.shipHeight, 2),
+    shipWidth: toDecimalString(data.shipWidth, 2),
+    shipLength: toDecimalString(data.shipLength, 2),
   };
+}
+
+/* Código de barras repetido quebra justamente o uso que justifica o
+   campo: bipar no PDV e achar UM produto. O banco tem índice único,
+   mas sozinho ele devolve erro 500 cru ("duplicate key ... 23505"),
+   que na tela vira "não foi possível concluir" — sem dizer o que
+   houve nem qual produto já usa o código.
+
+   Isto ficou de fora quando o campo virou editável na tela (v3.66.0):
+   a guarda foi feita em materiais e esquecida aqui. Só apareceu
+   porque o smoke tentou reutilizar um código. */
+async function barcodeEmUso(barcode: string | null, ignorarId?: number) {
+  if (!barcode) return null;
+  const iguais = await db
+    .select({ id: products.id, name: products.name })
+    .from(products)
+    .where(eq(products.barcode, barcode))
+    .limit(2);
+  const conflito = iguais.find((p) => p.id !== ignorarId);
+  return conflito
+    ? ({ error: `O código ${barcode} já está em "${conflito.name}".`, status: 422 } satisfies ProductError)
+    : null;
 }
 
 export async function createProduct(raw: unknown) {
@@ -271,6 +370,9 @@ export async function createProduct(raw: unknown) {
   const data = parsed.data;
   const calc = await buildCalculation(data);
   if ("error" in calc) return calc;
+
+  const duplicado = await barcodeEmUso(nullable(data.barcode));
+  if (duplicado) return duplicado;
 
   const row = await db.transaction(async (tx) => {
     const [created] = await tx.insert(products).values(baseProductData(data, calc) as never).returning();
@@ -302,6 +404,10 @@ export async function updateProduct(id: number, raw: unknown) {
   const data = parsed.data;
   const calc = await buildCalculation(data);
   if ("error" in calc) return calc;
+
+  const duplicado = await barcodeEmUso(nullable(data.barcode), id);
+  if (duplicado) return duplicado;
+
   const previousStock = toNumber(existing.stock, 0);
 
   const row = await db.transaction(async (tx) => {

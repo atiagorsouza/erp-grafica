@@ -56,12 +56,12 @@ export function BarChart({
   color?: string;
   formatValue?: (v: number) => string;
 }) {
-  const max = Math.max(...data.map((d) => d.value), 1);
+  const max = Math.max(...data.map((d) => Math.abs(d.value)), 1);
   return (
     <div>
       <div className="flex items-end gap-[5px]" style={{ height }}>
         {data.map((d, i) => {
-          const h = Math.max((d.value / max) * (height - 26), d.value > 0 ? 4 : 2);
+          const h = Math.max((Math.abs(d.value) / max) * (height - 26), d.value > 0 ? 4 : 2);
           return (
             <div key={i} className="group relative flex flex-1 flex-col items-center justify-end self-stretch">
               <div className="pointer-events-none absolute -top-1 z-10 -translate-y-full rounded-md bg-ink-900 px-2 py-1 font-mono text-[10px] whitespace-nowrap text-paper-50 opacity-0 shadow-pop transition-opacity group-hover:opacity-100 tnum">
@@ -102,34 +102,38 @@ export function Donut({
   centerLabel?: string;
   centerValue?: string;
 }) {
-  const total = data.reduce((s, d) => s + d.value, 0) || 1;
+  const safe = data.filter((d) => d.value > 0);
+  const total = safe.reduce((s, d) => s + d.value, 0) || 1;
   const r = (size - thickness) / 2;
   const C = 2 * Math.PI * r;
-  let acc = 0;
+  /* offsets pré-calculados: mutar um acumulador durante o render
+     quebra a regra de imutabilidade do React 19 (react-hooks). */
+  const slices = safe.reduce<{ d: (typeof safe)[number]; dash: number; offset: number }[]>(
+    (acc, d) => {
+      const consumed = acc.reduce((s, x) => s + x.dash, 0);
+      acc.push({ d, dash: (d.value / total) * C, offset: -consumed });
+      return acc;
+    },
+    []
+  );
   return (
     <div className="relative inline-flex items-center justify-center">
       <svg width={size} height={size} className="-rotate-90">
         <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--color-paper-200)" strokeWidth={thickness} />
-        {data.map((d, i) => {
-          const frac = d.value / total;
-          const dash = frac * C;
-          const offset = -acc * C;
-          acc += frac;
-          return (
-            <circle
-              key={i}
-              cx={size / 2}
-              cy={size / 2}
-              r={r}
-              fill="none"
-              stroke={d.color}
-              strokeWidth={thickness}
-              strokeDasharray={`${dash} ${C - dash}`}
-              strokeDashoffset={offset}
-              className="transition-all duration-700"
-            />
-          );
-        })}
+        {slices.map(({ d, dash, offset }, i) => (
+          <circle
+            key={i}
+            cx={size / 2}
+            cy={size / 2}
+            r={r}
+            fill="none"
+            stroke={d.color}
+            strokeWidth={thickness}
+            strokeDasharray={`${dash} ${C - dash}`}
+            strokeDashoffset={offset}
+            className="transition-all duration-700"
+          />
+        ))}
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
         {centerValue && <span className="font-mono text-[17px] font-semibold text-ink-900 tnum">{centerValue}</span>}
@@ -149,24 +153,44 @@ export function HBars({
   color?: string;
   format?: (v: number) => string;
 }) {
-  const max = Math.max(...data.map((d) => d.value), 1);
+  /* Escala pelo maior valor ABSOLUTO: margem negativa gerava
+     width negativo, o CSS era descartado e a barra aparecia CHEIA —
+     mostrando a pior margem como se fosse a melhor. */
+  const max = Math.max(...data.map((d) => Math.abs(d.value)), 1);
   return (
     <div className="space-y-3">
-      {data.map((d, i) => (
-        <div key={i}>
-          <div className="mb-1 flex items-baseline justify-between gap-3">
-            <span className="truncate text-[12.5px] font-medium text-ink-700">{d.label}</span>
-            <span className="shrink-0 font-mono text-[11.5px] font-semibold text-ink-900 tnum">{format(d.value)}</span>
+      {data.map((d, i) => {
+        const pct = Math.min(100, Math.max(0, (Math.abs(d.value) / max) * 100));
+        const negative = d.value < 0;
+        return (
+          <div key={i}>
+            <div className="mb-1 flex items-baseline justify-between gap-3">
+              <span className="truncate text-[12.5px] font-medium text-ink-700">{d.label}</span>
+              <span
+                className={cn(
+                  "shrink-0 font-mono text-[11.5px] font-semibold tnum",
+                  negative ? "text-red-600" : "text-ink-900"
+                )}
+              >
+                {format(d.value)}
+              </span>
+            </div>
+            <div className="h-[7px] overflow-hidden rounded-full bg-paper-200">
+              <div
+                className={cn("h-full rounded-full transition-all duration-700", negative && "opacity-80")}
+                style={{
+                  width: `${pct}%`,
+                  background: d.color ?? color,
+                  backgroundImage: negative
+                    ? "repeating-linear-gradient(45deg, rgba(255,255,255,.45) 0 3px, transparent 3px 6px)"
+                    : undefined,
+                }}
+              />
+            </div>
+            {d.sub && <p className="mt-0.5 text-[10.5px] text-ink-400">{d.sub}</p>}
           </div>
-          <div className="h-[7px] overflow-hidden rounded-full bg-paper-200">
-            <div
-              className="h-full rounded-full transition-all duration-700"
-              style={{ width: `${(d.value / max) * 100}%`, background: d.color ?? color }}
-            />
-          </div>
-          {d.sub && <p className="mt-0.5 text-[10.5px] text-ink-400">{d.sub}</p>}
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

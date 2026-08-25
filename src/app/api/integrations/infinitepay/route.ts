@@ -1,104 +1,67 @@
-import { db } from "@/db";
-import { settings } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { createCharge, getInfinitePayConfig } from "@/lib/infinitepay";
 
 export const dynamic = "force-dynamic";
 
-async function getSetting(key: string): Promise<string> {
-  const [row] = await db.select().from(settings).where(eq(settings.key, key));
-  return row?.value || "";
-}
-
 /**
- * POST /api/integrations/infinitepay
- * Cria link de pagamento via InfinityPay Checkout Integrado
- * Body: { amount, description, customerName, customerDoc, items?, redirect_url? }
+ * COMPATIBILIDADE — rota legada mantida para integrações externas.
+ *
+ * Até a v3.12.0 este arquivo tinha a lógica inteira, com o contrato
+ * ERRADO: enviava `Authorization: Bearer <handle>` e `{ amount }`, e a
+ * API respondia 400 "param is missing: handle". Nunca funcionou — e
+ * nada no sistema o chamava.
+ *
+ * A partir da v3.13.0 a regra vive em `@/lib/infinitepay`. Para novas
+ * integrações use `/api/payments`.
  */
 export async function POST(req: Request) {
   const body = await req.json().catch(() => ({}));
-  const handle = process.env.INFINITEPAY_HANDLE || await getSetting("infinitepay_handle");
 
-  if (!handle) {
-    return Response.json({
-      error: "InfinityPay Handle não configurado. Configure em Painel de Controle → InfinityPay ou env INFINITEPAY_HANDLE.",
-    }, { status: 503 });
-  }
+  const result = await createCharge({
+    amount: body.amount,
+    description: body.description,
+    orderId: body.orderId,
+    saleId: body.saleId,
+    customerId: body.customerId,
+  });
 
-  const amount = Number(body.amount || 0);
-  if (amount <= 0) {
-    return Response.json({ error: "Valor deve ser maior que zero" }, { status: 400 });
-  }
-
-  const description = String(body.description || "Pagamento PrintFlow ERP");
-  const customerName = String(body.customerName || body.customer_name || "");
-  const customerDoc = String(body.customerDoc || body.customer_doc || "");
-
-  try {
-    // API InfinityPay Checkout Integrado — endpoint oficial 2026
-    const res = await fetch("https://api.checkout.infinitepay.io/links", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${handle}`,
-      },
-      body: JSON.stringify({
-        amount: Math.round(amount * 100), // centavos
-        description,
-        customer: customerName ? {
-          name: customerName,
-          document: customerDoc.replace(/\D/g, "") || undefined,
-        } : undefined,
-        items: body.items || [{ description, quantity: 1, unit_price: Math.round(amount * 100) }],
-        redirect_url: body.redirect_url || undefined,
-        webhook_url: body.webhook_url || undefined,
-        methods: body.methods || ["pix", "credit_card"],
-      }),
-    });
-
-    const data = await res.json();
-
-    if (!res.ok) {
-      // Fallback: gerar link manual se API não responder
-      const manualLink = `https://infinitepay.io/${handle}`;
-      return Response.json({
+  if ("error" in result) {
+    const cfg = await getInfinitePayConfig();
+    return Response.json(
+      {
         ok: false,
-        error: data.message || data.error || "Erro InfinityPay",
-        fallback: {
-          manualLink,
-          amount,
-          description,
-          hint: `Use o link manual: ${manualLink} e informe R$${amount.toFixed(2)}`,
-        },
-      }, { status: res.status });
-    }
-
-    return Response.json({
-      ok: true,
-      paymentLink: data.url || data.payment_url || data.link,
-      id: data.id,
-      amount,
-      description,
-      methods: data.methods || ["pix", "credit_card"],
-      expiresAt: data.expires_at || null,
-    });
-  } catch (e) {
-    const manualLink = `https://infinitepay.io/${handle}`;
-    return Response.json({
-      error: e instanceof Error ? e.message : "Falha na requisição InfinityPay",
-      fallback: { manualLink, amount, description },
-    }, { status: 500 });
+        error: result.error,
+        fallback: cfg.handle
+          ? {
+              manualLink: `https://infinitepay.io/${cfg.handle}`,
+              amount: Number(body.amount || 0),
+              hint: `Use o link manual e informe R$ ${Number(body.amount || 0).toFixed(2)}`,
+            }
+          : undefined,
+      },
+      { status: result.status }
+    );
   }
+
+  return Response.json({
+    ok: true,
+    paymentLink: result.row.checkoutUrl,
+    id: result.row.id,
+    orderNsu: result.row.orderNsu,
+    amount: Number(result.row.amount),
+    description: result.row.description,
+    expiresAt: result.row.expiresAt,
+  });
 }
 
 /** GET — status da integração + link manual */
 export async function GET() {
-  const handle = process.env.INFINITEPAY_HANDLE || await getSetting("infinitepay_handle");
+  const cfg = await getInfinitePayConfig();
   return Response.json({
     module: "infinitepay",
-    configured: !!handle,
-    handle: handle || null,
-    manualLink: handle ? `https://infinitepay.io/${handle}` : null,
-    methods: ["pix", "credit_card"],
-    docs: "https://api.checkout.infinitepay.io",
+    configured: Boolean(cfg.handle),
+    handle: cfg.handle || null,
+    manualLink: cfg.handle ? `https://infinitepay.io/${cfg.handle}` : null,
+    methods: cfg.methods,
+    docs: "https://www.infinitepay.io/checkout-documentacao",
   });
 }

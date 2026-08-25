@@ -18,6 +18,29 @@ async function main() {
   try {
     await client.query("BEGIN");
 
+    /* v3.16.0 — um orçamento gera no máximo um pedido.
+       Antes do índice, duplo-clique em "Converter em Pedido" criava OS
+       duplicada. Bases antigas podem já ter duplicatas: mantemos a mais
+       antiga (a que gerou produção) e soltamos o vínculo das demais,
+       sem apagar nada, para o índice poder ser criado. */
+    const dups = await client.query(`
+      UPDATE orders SET quote_id = NULL
+       WHERE id IN (
+         SELECT id FROM (
+           SELECT id, row_number() OVER (PARTITION BY quote_id ORDER BY id) AS rn
+             FROM orders WHERE quote_id IS NOT NULL
+         ) t WHERE t.rn > 1
+       )
+    `);
+    if (dups.rowCount > 0) {
+      console.log(`⚠️  ${dups.rowCount} pedido(s) duplicado(s) desvinculado(s) do orçamento de origem.`);
+    }
+
+    await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS orders_one_per_quote_idx
+        ON orders (quote_id) WHERE quote_id IS NOT NULL
+    `);
+
     const expired = await client.query(`
       UPDATE quotes
          SET status = 'expirado'

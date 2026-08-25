@@ -225,8 +225,12 @@ body {
     background: #ffffff !important;
     color: #000000 !important;
     font-family: var(--font-mono), 'IBM Plex Mono', 'Courier New', Courier, monospace !important;
-    font-size: 11px !important;
-    line-height: 1.25 !important;
+    /* Calibrado (v3.59.1) contra o cupom do sistema antigo, medido na
+       foto com a bobina de 80mm como escala: lá o caractere ocupa
+       1,82mm contra 1,74mm nosso, e a entrelinha era 1,28 contra 1,49.
+       O cupom saía menor e mais arejado que o de referência. */
+    font-size: 11.5px !important;
+    line-height: 1.2 !important;
   }
 
   /* 2. IMPRESSÃO A4 (ORDEM DE PRODUÇÃO / PROPOSTA COMERCIAL: #order-print-a4 ou #quote-print-a4) */
@@ -255,8 +259,94 @@ body {
     color: #000000 !important;
   }
 
+  /* 3. LEGIBILIDADE NA IMPRESSORA TÉRMICA
+     ---------------------------------------------------------------
+     A térmica não tem tons de cinza: ela queima o ponto ou não queima.
+     O navegador, porém, rasteriza texto fino com antialiasing — os
+     pixels cinzentos das bordas viram pontos "meio queimados" e o
+     resultado sai lavado. No cupom impresso só ficava nítido o que
+     tinha font-bold; endereço, CNPJ, telefones e itens desapareciam.
+
+     A correção é imprimir TUDO em preto pleno e com peso alto. */
+  #receipt-print,
+  #receipt-print *,
+  #order-print-80mm,
+  #order-print-80mm * {
+    color: #000 !important;
+    /* Calibrável no Painel de Controle (PDV → Intensidade da impressão
+       térmica), via --receipt-weight. 600 escurece sem borrar; acima
+       disso, fonte mono de 11px pode empastar os caracteres estreitos
+       (8, B, R) em cabeça de impressão gasta. */
+    font-weight: var(--receipt-weight, 600) !important;
+    /* desliga o antialiasing: exige pixel cheio, sem meio-tom */
+    -webkit-font-smoothing: none !important;
+    font-smooth: never !important;
+    text-shadow: none !important;
+    opacity: 1 !important;
+    filter: none !important;
+    /* cinzas do tema (text-ink-400 etc.) não sobrevivem à térmica */
+    mix-blend-mode: normal !important;
+  }
+
+  /* O que já era bold sobe para 800: mantém a hierarquia visual do
+     cupom agora que o corpo do texto está mais escuro. */
+  #receipt-print .font-bold,
+  #receipt-print .font-semibold,
+  #order-print-80mm .font-bold,
+  #order-print-80mm .font-semibold {
+    font-weight: 800 !important;
+  }
+
+  /* Intensidade "Normal": respeita o peso original do layout, para quem
+     achar o reforço exagerado na sua impressora. */
+  #receipt-print[style*="--receipt-weight: 400"] *,
+  #order-print-80mm[style*="--receipt-weight: 400"] * {
+    -webkit-font-smoothing: auto !important;
+  }
+
+  /* Piso de tamanho: abaixo de ~11px a cabeça térmica (203 dpi, ~8
+     pontos/mm) não tem resolução para formar o glifo e o texto sai
+     esfarelado. O rodapé do cupom usava 9px e 10px — era a parte mais
+     ilegível do impresso. */
+  #receipt-print [class*="text-[9px]"],
+  #receipt-print [class*="text-[9.5px]"],
+  #receipt-print [class*="text-[10px]"],
+  #receipt-print [class*="text-[10.5px]"],
+  #order-print-80mm [class*="text-[9px]"],
+  #order-print-80mm [class*="text-[9.5px]"],
+  #order-print-80mm [class*="text-[10px]"],
+  #order-print-80mm [class*="text-[10.5px]"] {
+    font-size: 11px !important;
+  }
+
+  /* Linhas divisórias: tracejado fino some na térmica. */
+  #receipt-print [class*="border-dashed"],
+  #order-print-80mm [class*="border-dashed"] {
+    border-style: solid !important;
+    border-color: #000 !important;
+  }
+
+  /* TAMANHO DO PAPEL
+
+     `size: auto` deixava a escolha com a impressora — e o padrão de
+     fábrica de boa parte delas é Carta (216x279mm), não A4 (210x297mm).
+     O documento saía com margem irregular e risco de cortar o rodapé.
+
+     O cupom térmico tem @page próprio logo abaixo: 80mm de largura e
+     altura livre, porque a bobina é contínua e fixar altura força
+     salto de página no meio do cupom. */
   @page {
-    size: auto;
+    size: A4 portrait;
     margin: 10mm;
+  }
+
+  /* Cupom térmico e OS em bobina: 80mm, altura conforme o conteúdo. */
+  @page thermal {
+    size: 80mm auto;
+    margin: 0;
+  }
+
+  body:has(#receipt-print, #order-print-80mm) {
+    page: thermal;
   }
 }

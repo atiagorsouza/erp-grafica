@@ -2,7 +2,7 @@ import type { ReactNode, SVGProps } from "react";
 
 /**
  * Ícones autorais — traço 1.7, cantos arredondados, grade 24×24.
- * Desenhados para o PrintFlow (sem dependências externas).
+ * Desenhados para o VTDIGITAL (sem dependências externas).
  */
 const P: Record<string, ReactNode> = {
   gauge: (
@@ -117,6 +117,8 @@ const P: Record<string, ReactNode> = {
   ),
   plus: <path d="M12 5v14M5 12h14" />,
   x: <path d="m6 6 12 12M18 6 6 18" />,
+  /* hambúrguer do menu no celular (v3.61.0) */
+  menu: <path d="M4 7h16M4 12h16M4 17h16" />,
   check: <path d="m4.5 12.5 5 5 10-11" />,
   "chevron-down": <path d="m6 9.5 6 6 6-6" />,
   "chevron-right": <path d="m9.5 6 6 6-6 6" />,
@@ -215,6 +217,18 @@ const P: Record<string, ReactNode> = {
   grip: (
     <path d="M9 5.5h.01M9 12h.01M9 18.5h.01M15 5.5h.01M15 12h.01M15 18.5h.01" />
   ),
+  copy: (
+    <>
+      <rect x="9" y="9" width="11" height="11" rx="2" />
+      <path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1" />
+    </>
+  ),
+  file: (
+    <>
+      <path d="M14 3H7a1.8 1.8 0 0 0-1.8 1.8v14.4A1.8 1.8 0 0 0 7 21h10a1.8 1.8 0 0 0 1.8-1.8V7.8Z" />
+      <path d="M14 3v5h4.8" />
+    </>
+  ),
   external: (
     <>
       <path d="M13.5 5H19v5.5" />
@@ -287,7 +301,7 @@ export function Icon({
   );
 }
 
-/** Marca de registro CMYK — logo do PrintFlow */
+/** Marca de registro CMYK — usada como ícone do sistema */
 export function RegistrationMark({ size = 26 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 32 32" fill="none" aria-hidden="true">

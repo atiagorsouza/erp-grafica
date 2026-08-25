@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { mutate } from "@/lib/mutate";
 import { formatMoney } from "@/lib/format";
@@ -28,11 +28,61 @@ import {
 } from "@/components/ui";
 import { Icon } from "@/components/icons";
 import { cn, initials } from "@/lib/format";
+import { formatCEP, formatCNPJ, formatCPF, formatPhone, formatStateRegistration } from "@/lib/validators";
+import { focarPrimeiroErro, semErros, validaCEP, validaDocumentoObrigatorio, validaEmail, validaSite, validaTelefone, validaUF, type ErrosCadastro } from "@/lib/cadastro-validacao";
+import { todayISO } from "@/lib/period";
+import { PedirCadastroModal } from "@/components/modules/PedirCadastroModal";
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Row = Record<string, any>;
 
 const COLUMNS = ["novo", "qualificacao", "orcamento", "negociacao", "ganho", "perdido"];
+/* Rótulos legíveis dos campos estruturados do cadastro (v3.22.0).
+   O banco guarda a chave; a ficha mostra o texto. */
+const ORIGIN_LABEL: Record<string, string> = {
+  balcao: "Balcão",
+  whatsapp: "WhatsApp",
+  indicacao: "Indicação",
+  instagram: "Instagram",
+  site: "Site",
+  google: "Google",
+  marketplace: "Marketplace",
+  importacao: "Importação",
+  outro: "Outro",
+};
+const MARITAL_LABEL: Record<string, string> = {
+  solteiro: "Solteiro(a)",
+  casado: "Casado(a)",
+  divorciado: "Divorciado(a)",
+  viuvo: "Viúvo(a)",
+  uniao_estavel: "União estável",
+};
+
+/* Data ISO -> dd/mm/aaaa, sem passar por Date (evita fuso). */
+function brDate(v: unknown): string {
+  const m = String(v || "").match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : "";
+}
+
+/* Idade em anos completos, para a ficha e o aviso de aniversário. */
+function ageFrom(v: unknown): number | null {
+  const m = String(v || "").match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return null;
+  const today = new Date();
+  let age = today.getFullYear() - Number(m[1]);
+  const md = (today.getMonth() + 1) * 100 + today.getDate();
+  if (md < Number(m[2]) * 100 + Number(m[3])) age -= 1;
+  return age >= 0 && age < 130 ? age : null;
+}
+
+/* Aniversário hoje? Compara só dia e mês. */
+function isBirthdayToday(v: unknown): boolean {
+  const m = String(v || "").match(/^\d{4}-(\d{2})-(\d{2})/);
+  if (!m) return false;
+  /* compara com o "hoje" da loja: no navegador do usuário o fuso é o
+     dele, mas o restante do sistema raciocina em America/Sao_Paulo */
+  return `${m[1]}-${m[2]}` === todayISO().slice(5, 10);
+}
+
 const COL_LABEL: Record<string, string> = {
   novo: "Novo",
   qualificacao: "Qualificação",
@@ -52,49 +102,153 @@ const COL_COLOR: Record<string, string> = {
 const SOURCES = ["balcao", "instagram", "site", "indicacao", "google", "facebook", "marketplace", "outro"];
 const ACTIVITY_TYPES = ["nota", "ligacao", "reuniao", "tarefa", "visita", "proposta"];
 
-export function ClientsClient({ customers, leads, activities, quotes, orders, sales }: {
+/* Estado da paginação da carteira, calculado no servidor (v3.62.0). */
+type PaginacaoClientes = {
+  total: number;
+  totalCarteira: number;
+  pagina: number;
+  porPagina: number;
+  totalPaginas: number;
+  ltv: Record<number, number>;
+  origens: [string, number][];
+  busca: string;
+  status: string;
+  origem: string;
+};
+
+export function ClientsClient({ customers, leads, activities, quotes, orders, sales, registrationLinks = [], paginacao, aniversariantes = [], cadastrosIncompletos = [] }: {
   customers: Row[];
+  paginacao: PaginacaoClientes;
   leads: Row[];
   activities: Row[];
   quotes: Row[];
   orders: Row[];
   sales: Row[];
+  /** Links de cadastro público vivos (v3.50.0). Opcional para não
+      quebrar quem monta este componente em teste. */
+  registrationLinks?: Row[];
+  /** Aniversariantes dos próximos 15 dias — só de quem já comprou. */
+  aniversariantes?: { id: number; nome: string; telefone: string | null; dia: number; mes: number; faltam: number; ltv: number; optOut: boolean }[];
+  /** Clientes que compraram mas têm cadastro pela metade. */
+  cadastrosIncompletos?: { id: number; nome: string; telefone: string | null; faltando: string[]; pedidos: number; ltv: number }[];
 }) {
   const router = useRouter();
   const refresh = () => router.refresh();
   const params = useSearchParams();
   const [tab, setTab] = useState<"carteira" | "pipeline">("carteira");
-  const [q, setQ] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
 
+  /* Busca e filtros da carteira vivem na URL: quem filtra é o banco
+     (v3.62.0). `q` é só o texto enquanto se digita. */
+  const [q, setQ] = useState(paginacao.busca);
+  const statusFilter = paginacao.status;
+  const originFilter = paginacao.origem;
+
+  const irPara = useCallback(
+    (mudancas: Record<string, string | number>) => {
+      const p = new URLSearchParams();
+      const base: Record<string, string> = {
+        q: paginacao.busca,
+        status: paginacao.status,
+        origem: paginacao.origem,
+        pagina: String(paginacao.pagina),
+        por: String(paginacao.porPagina),
+        ...Object.fromEntries(Object.entries(mudancas).map(([k, v]) => [k, String(v)])),
+      };
+      // Mudar busca ou filtro volta à primeira página.
+      if (mudancas.q !== undefined || mudancas.status !== undefined || mudancas.origem !== undefined) {
+        base.pagina = "1";
+      }
+      for (const [k, v] of Object.entries(base)) if (v && v !== "0" && v !== "all") p.set(k, v);
+      router.push(`/clientes${p.toString() ? `?${p}` : ""}`);
+    },
+    [router, paginacao]
+  );
+
+  const setStatusFilter = useCallback((v: string) => irPara({ status: v }), [irPara]);
+  const setOriginFilter = useCallback((v: string) => irPara({ origem: v }), [irPara]);
+
+  useEffect(() => {
+    if (q === paginacao.busca) return;
+    const t = setTimeout(() => irPara({ q }), 300);
+    return () => clearTimeout(t);
+  }, [q, paginacao.busca, irPara]);
+
+  const [importOpen, setImportOpen] = useState(false);
   const [custModal, setCustModal] = useState<null | { edit?: Row }>(null);
   const [leadModal, setLeadModal] = useState<null | { edit?: Row; column?: string }>(null);
   const [deleteModal, setDeleteModal] = useState<null | { id: number; name: string; kind: "customer" | "lead" }>(null);
   const [drawerId, setDrawerId] = useState<number | null>(params.get("id") ? Number(params.get("id")) : null);
   const [form, setForm] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
+  const [errosForm, setErrosForm] = useState<ErrosCadastro>({});
   const [deleting, setDeleting] = useState(false);
   const [fetchingCep, setFetchingCep] = useState(false);
   const [actForm, setActForm] = useState({ type: "nota", title: "", description: "" });
+  /* Modal do link público de cadastro (v3.50.0). Guarda o cliente
+     inteiro, não só o id: o modal precisa do opt-out e do telefone
+     para decidir se o bot pode enviar. */
+  const [cadastroModal, setCadastroModal] = useState<Row | null>(null);
 
   const set = (k: string) => (e: { target: { value: string } }) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  /* Máscara aplicada enquanto digita: o operador digita só números e o
+     campo se formata sozinho. Evita CPF gravado em três formatos
+     diferentes e o retrabalho de conferir pontuação. */
+  const setMasked =
+    (k: string, mask: (v: string) => string) =>
+    (e: { target: { value: string } }) => {
+      setForm((f) => ({ ...f, [k]: mask(e.target.value) }));
+      setErrosForm((x) => (x[k] ? { ...x, [k]: "" } : x));
+    };
+  const limpaErro = (k: string) => setErrosForm((x) => (x[k] ? { ...x, [k]: "" } : x));
+
+  /* O documento muda de máscara conforme PF/PJ escolhido no seletor. */
+  const setDocument = (e: { target: { value: string } }) =>
+    setForm((f) => ({
+      ...f,
+      document: f.type === "pj" ? formatCNPJ(e.target.value) : formatCPF(e.target.value),
+    }));
+
   const drawer = customers.find((c) => Number(c.id) === drawerId) || null;
 
-  /* LTV por cliente — soma vendas PDV + pedidos */
+  /* Último link de cadastro por cliente. A lista já vem ordenada do
+     mais novo para o mais velho, então o primeiro que aparece vence. */
+  const linkPorCliente = useMemo(() => {
+    const map = new Map<number, Row>();
+    for (const l of registrationLinks) {
+      const cid = Number(l.customerId);
+      if (!map.has(cid)) map.set(cid, l);
+    }
+    return map;
+  }, [registrationLinks]);
+
+  /* LTV vem pronto do servidor, calculado só para os clientes da
+     página — antes exigia baixar vendas e pedidos inteiros. */
   const ltv = useMemo(() => {
     const map = new Map<number, number>();
-    for (const s of sales) map.set(Number(s.customerId), (map.get(Number(s.customerId)) || 0) + Number(s.total || 0));
-    for (const o of orders) map.set(Number(o.customerId), (map.get(Number(o.customerId)) || 0) + Number(o.total || 0));
+    for (const [id, v] of Object.entries(paginacao.ltv)) map.set(Number(id), Number(v) || 0);
     return map;
-  }, [sales, orders]);
+  }, [paginacao.ltv]);
 
   /* Filtro de clientes */
+  /* O servidor já filtrou; isto cobre só o intervalo entre digitar e
+     a página chegar. */
   const filtered = useMemo(() => customers.filter((c) => {
-    const mq = !q || [c.name, c.tradeName, c.document, c.email, c.phone]
-      .some((v) => String(v || "").toLowerCase().includes(q.toLowerCase()));
+    /* Busca também por IE, RG, WhatsApp e contato PJ: são os números
+       que o cliente informa ao telefone quando não lembra o CNPJ. */
+    const mq = !paginacao.busca || [
+      c.name, c.tradeName, c.document, c.email, c.phone,
+      c.whatsapp, c.stateRegistration, c.municipalRegistration, c.rg, c.contactName,
+    ].some((v) => String(v || "").toLowerCase().includes(paginacao.busca.toLowerCase()));
     const ms = statusFilter === "all" || c.status === statusFilter;
-    return mq && ms;
-  }), [customers, q, statusFilter]);
+    const mo = originFilter === "all" || String(c.origin || "") === originFilter;
+    return mq && ms && mo;
+  }), [customers, paginacao.busca, statusFilter, originFilter]);
+
+  /* Origens presentes na carteira, da mais comum para a menos comum. */
+  /* Origens da carteira inteira (do servidor), não só da página —
+     senão o filtro perderia opções conforme se navega. */
+  const originsInUse = paginacao.origens;
 
   /* Autopreenchimento ViaCEP */
   const handleCepBlur = useCallback(async () => {
@@ -119,7 +273,28 @@ export function ClientsClient({ customers, leads, activities, quotes, orders, sa
 
   /* Salvar cliente */
   async function saveCustomer(id?: number) {
-    if (!form.name?.trim()) return toast.error("Informe o nome / razão social");
+    /* A ficha já mascarava, mas aceitava CPF impossível e e-mail sem
+       arroba. O cadastro do cliente é a origem de documento fiscal e
+       de mensagem — errado aqui, errado em tudo depois. */
+    const tipo = (form.type === "pj" ? "pj" : "pf") as "pf" | "pj";
+    const e: ErrosCadastro = {};
+    if (!form.name?.trim()) e.name = tipo === "pj" ? "Informe a razão social" : "Informe o nome";
+    const checagens: [string, string | null][] = [
+      ["document", validaDocumentoObrigatorio(form.document, tipo, form.documentWaiverReason)],
+      ["email", validaEmail(form.email)],
+      ["phone", validaTelefone(form.phone)],
+      ["whatsapp", validaTelefone(form.whatsapp)],
+      ["secondaryPhone", validaTelefone(form.secondaryPhone)],
+      ["cep", validaCEP(form.cep)],
+      ["state", validaUF(form.state)],
+      ["website", validaSite(form.website)],
+    ];
+    for (const [campo, erro] of checagens) if (erro) e[campo] = erro;
+    setErrosForm(e);
+    if (!semErros(e)) {
+      setTimeout(focarPrimeiroErro, 0);
+      return toast.error(Object.values(e)[0] || "Confira os campos destacados");
+    }
     setSaving(true);
     try {
       const data = {
@@ -127,6 +302,7 @@ export function ClientsClient({ customers, leads, activities, quotes, orders, sa
         name: form.name.trim(),
         tradeName: form.tradeName?.trim() || null,
         document: form.document?.trim() || null,
+        documentWaiverReason: form.documentWaiverReason?.trim() || null,
         email: form.email?.trim() || null,
         phone: form.phone?.trim() || null,
         whatsapp: form.whatsapp?.trim() || null,
@@ -141,12 +317,18 @@ export function ClientsClient({ customers, leads, activities, quotes, orders, sa
         city: form.city?.trim() || null,
         state: form.state?.trim() || null,
         rg: form.rg?.trim() || null,
+        rgIssuer: form.rgIssuer?.trim() || null,
         birthDate: form.birthDate?.trim() || null,
         gender: form.gender || null,
+        maritalStatus: form.maritalStatus || null,
         stateRegistration: form.stateRegistration?.trim() || null,
         municipalRegistration: form.municipalRegistration?.trim() || null,
         legalNature: form.legalNature?.trim() || null,
         taxRegime: form.taxRegime || null,
+        companySize: form.companySize || null,
+        foundedAt: form.foundedAt?.trim() || null,
+        origin: form.origin || null,
+        whatsappOptOut: form.whatsappOptOut === "1",
         status: form.status || "lead",
         creditLimit: form.creditLimit || "0",
         tags: form.tags?.trim() || null,
@@ -263,6 +445,9 @@ export function ClientsClient({ customers, leads, activities, quotes, orders, sa
         description="Pessoa física e jurídica no mesmo lugar, com funil comercial de 6 etapas e histórico 360° de cada conta."
         actions={
           <>
+            <Button variant="outline" icon="download" onClick={() => setImportOpen(true)}>
+              Importar PDF
+            </Button>
             <Button variant="outline" icon="plus" onClick={() => { setForm({ type: "pf", status: "lead", column: "novo" }); setLeadModal({}); }}>
               Oportunidade
             </Button>
@@ -279,7 +464,7 @@ export function ClientsClient({ customers, leads, activities, quotes, orders, sa
           value={tab}
           onChange={setTab}
           options={[
-            { value: "carteira", label: "Carteira", count: customers.length },
+            { value: "carteira", label: "Carteira", count: paginacao.totalCarteira },
             { value: "pipeline", label: "Pipeline comercial", count: leads.filter((l) => l.column !== "ganho" && l.column !== "perdido").length },
           ]}
         />
@@ -287,7 +472,7 @@ export function ClientsClient({ customers, leads, activities, quotes, orders, sa
           <>
             <div className="relative w-full max-w-60">
               <Icon name="search" size={14} className="absolute top-1/2 left-3 -translate-y-1/2 text-ink-400" />
-              <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Nome, documento, contato…" className="pl-8.5" />
+              <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Nome, documento, IE, contato…" className="pl-8.5" />
             </div>
             <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="w-auto">
               <option value="all">Todos os status</option>
@@ -296,9 +481,131 @@ export function ClientsClient({ customers, leads, activities, quotes, orders, sa
               <option value="inativo">Inativos</option>
               <option value="bloqueado">Bloqueados</option>
             </Select>
+            {/* "De onde vêm meus clientes?" — só lista as origens que
+                realmente aparecem na carteira. */}
+            {originsInUse.length > 0 && (
+              <Select value={originFilter} onChange={(e) => setOriginFilter(e.target.value)} className="w-auto">
+                <option value="all">Todas as origens</option>
+                {originsInUse.map(([key, count]) => (
+                  <option key={key} value={key}>
+                    {(ORIGIN_LABEL[key] || key) + ` (${count})`}
+                  </option>
+                ))}
+              </Select>
+            )}
           </>
         )}
       </div>
+
+      {/* ── ALERTAS DO CRM ──
+          A tela listava e filtrava, mas não sugeria nada. Saber que
+          existem 200 clientes não diz o que fazer com eles; estas duas
+          faixas viram trabalho concreto do dia.
+
+          Só aparecem quando há o que mostrar: bloco vazio permanente
+          vira ruído e o olho aprende a ignorar. */}
+      {tab === "carteira" && (aniversariantes.length > 0 || cadastrosIncompletos.length > 0) && (
+        <div className="mb-4 grid grid-cols-1 gap-3 lg:grid-cols-2">
+          {aniversariantes.length > 0 && (
+            <div className="rounded-xl border border-paper-200 bg-paper-50 p-3.5">
+              <p className="mb-0.5 flex items-center gap-1.5 text-[12.5px] font-bold text-ink-900">
+                🎂 Aniversários
+              </p>
+              <p className="mb-2.5 text-[11px] text-ink-500">
+                Clientes que já compraram. Um “parabéns” não é venda — é o
+                contato que faz lembrarem de você.
+              </p>
+              <div className="space-y-1.5">
+                {aniversariantes.slice(0, 5).map((a) => (
+                  <div
+                    key={a.id}
+                    className="flex items-center gap-2 rounded-lg border border-paper-200 bg-white px-2.5 py-1.5"
+                  >
+                    <div className="min-w-0 grow">
+                      <p className="truncate text-[12px] font-semibold text-ink-900">{a.nome}</p>
+                      <p className="font-mono text-[10px] text-ink-400">
+                        {String(a.dia).padStart(2, "0")}/{String(a.mes).padStart(2, "0")}
+                        {" · "}já comprou {formatMoney(a.ltv)}
+                      </p>
+                    </div>
+                    <Badge tone={a.faltam === 0 ? "green" : "cyan"}>
+                      {a.faltam === 0 ? "hoje" : a.faltam === 1 ? "amanhã" : `em ${a.faltam}d`}
+                    </Badge>
+                    {a.optOut ? (
+                      <Badge tone="magenta">não aceita</Badge>
+                    ) : (
+                      <IconButton
+                        size="sm"
+                        name="whatsapp"
+                        label="Parabenizar no WhatsApp"
+                        onClick={() => {
+                          const primeiro = a.nome.trim().split(/\s+/)[0];
+                          const texto = `Oi, ${primeiro}! 🎉\n\nPassando para desejar um feliz aniversário! Muita saúde e sucesso.\n\nUm abraço da equipe VTDIGITAL.`;
+                          const fone = String(a.telefone || "").replace(/\D/g, "");
+                          window.open(
+                            fone
+                              ? `https://wa.me/55${fone}?text=${encodeURIComponent(texto)}`
+                              : `https://wa.me/?text=${encodeURIComponent(texto)}`,
+                            "_blank"
+                          );
+                        }}
+                      />
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {cadastrosIncompletos.length > 0 && (
+            <div className="rounded-xl border border-paper-200 bg-paper-50 p-3.5">
+              <p className="mb-0.5 flex items-center gap-1.5 text-[12.5px] font-bold text-ink-900">
+                📋 Cadastros pela metade
+              </p>
+              <p className="mb-2.5 text-[11px] text-ink-500">
+                Já compraram, mas falta dado. Sem e-mail não recebem orçamento;
+                sem CPF não saem documentos. Os que mais gastaram primeiro.
+              </p>
+              <div className="space-y-1.5">
+                {cadastrosIncompletos.slice(0, 5).map((c) => (
+                  <div
+                    key={c.id}
+                    className="flex items-center gap-2 rounded-lg border border-paper-200 bg-white px-2.5 py-1.5"
+                  >
+                    <div className="min-w-0 grow">
+                      <p className="truncate text-[12px] font-semibold text-ink-900">{c.nome}</p>
+                      <p className="truncate font-mono text-[10px] text-amber-700">
+                        falta {c.faltando.join(", ")}
+                      </p>
+                    </div>
+                    <span className="font-mono text-[11px] font-bold text-proc-c-strong tnum">
+                      {formatMoney(c.ltv)}
+                    </span>
+                    <IconButton
+                      size="sm"
+                      name="send"
+                      label="Pedir cadastro por WhatsApp"
+                      onClick={() => {
+                        /* O cliente pode não estar na página atual: a
+                           carteira é paginada. Se não achar, leva a
+                           busca até ele em vez de não fazer nada. */
+                        const alvo = customers.find((x) => Number(x.id) === c.id);
+                        if (alvo) setCadastroModal(alvo);
+                        else router.push(`/clientes?q=${encodeURIComponent(c.nome)}`);
+                      }}
+                    />
+                  </div>
+                ))}
+              </div>
+              {cadastrosIncompletos.length > 5 && (
+                <p className="mt-2 text-[11px] text-ink-400">
+                  e mais {cadastrosIncompletos.length - 5} com cadastro incompleto.
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ── CARTEIRA ── */}
       {tab === "carteira" && (
@@ -335,7 +642,21 @@ export function ClientsClient({ customers, leads, activities, quotes, orders, sa
                   </Td>
                   <Td mono>{String(c.document || "—")}</Td>
                   <Td>
-                    <p className="text-[12px]">{String(c.phone || "—")}</p>
+                    <p className="flex items-center gap-1.5 text-[12px]">
+                      {/* Cliente que veio do bot tem número só em
+                          `whatsapp` — `phone` fica vazio. Ler só
+                          `phone` mostrava "—" para quem TEM telefone,
+                          e o operador achava que precisava perguntar
+                          de novo. */}
+                      {String(c.phone || c.whatsapp || "—")}
+                      {/* aviso na própria lista: evita o disparo antes
+                          mesmo de abrir a ficha */}
+                      {c.whatsappOptOut === true && (
+                        <span title="Cliente não aceita WhatsApp" className="font-mono text-[9px] tracking-wide text-amber-700 uppercase">
+                          sem zap
+                        </span>
+                      )}
+                    </p>
                     <p className="truncate text-[11px] text-ink-400">{String(c.email || "")}</p>
                   </Td>
                   <Td right mono className="font-semibold text-ink-900">{formatMoney(ltv.get(Number(c.id)) || 0)}</Td>
@@ -346,7 +667,11 @@ export function ClientsClient({ customers, leads, activities, quotes, orders, sa
                       <IconButton size="sm" name="phone" label="Ligar" onClick={() => openPhone(c)} />
                       <IconButton size="sm" name="pencil" label="Editar" onClick={() => {
                         const f: Record<string, string> = {};
-                        for (const [k, v] of Object.entries(c)) if (v !== null && typeof v !== "object") f[k] = String(v);
+                        for (const [k, v] of Object.entries(c)) {
+                          if (v === null || typeof v === "object") continue;
+                          /* checkbox usa "1"/""; o banco devolve boolean */
+                          f[k] = typeof v === "boolean" ? (v ? "1" : "") : String(v);
+                        }
                         setForm(f);
                         setCustModal({ edit: c });
                       }} />
@@ -358,6 +683,64 @@ export function ClientsClient({ customers, leads, activities, quotes, orders, sa
             </tbody>
           </TableWrap>
         )
+      )}
+
+      {/* ── PAGINAÇÃO DA CARTEIRA ── carregar mais no celular, páginas
+         numeradas no computador. */}
+      {tab === "carteira" && paginacao.total > 0 && (
+        <div className="mt-5 flex flex-col items-center gap-3 border-t border-paper-200 pt-4">
+          <p className="text-xs text-ink-500">
+            Mostrando{"\u00a0"}
+            <strong className="text-ink-700">
+              {(paginacao.pagina - 1) * paginacao.porPagina + 1}
+              {"\u00a0"}a{"\u00a0"}
+              {Math.min(paginacao.pagina * paginacao.porPagina, paginacao.total)}
+            </strong>
+            {"\u00a0"}de{"\u00a0"}<strong className="text-ink-700">{paginacao.total}</strong>
+            {"\u00a0"}
+            {paginacao.total === 1 ? "cliente" : "clientes"}
+            {paginacao.busca ? ` para "${paginacao.busca}"` : ""}
+          </p>
+
+          {paginacao.totalPaginas > 1 && (
+            <>
+              <div className="flex w-full sm:hidden">
+                {paginacao.pagina < paginacao.totalPaginas && (
+                  <Button
+                    variant="outline"
+                    className="w-full"
+                    onClick={() => irPara({ pagina: paginacao.pagina + 1 })}
+                  >
+                    Carregar mais
+                  </Button>
+                )}
+              </div>
+
+              <div className="hidden items-center gap-1.5 sm:flex">
+                <Button
+                  variant="outline"
+                  disabled={paginacao.pagina <= 1}
+                  onClick={() => irPara({ pagina: paginacao.pagina - 1 })}
+                >
+                  Anterior
+                </Button>
+                <span className="px-3 text-xs text-ink-500">
+                  Página{"\u00a0"}
+                  <strong className="text-ink-700">{paginacao.pagina}</strong>
+                  {"\u00a0"}de{"\u00a0"}
+                  <strong className="text-ink-700">{paginacao.totalPaginas}</strong>
+                </span>
+                <Button
+                  variant="outline"
+                  disabled={paginacao.pagina >= paginacao.totalPaginas}
+                  onClick={() => irPara({ pagina: paginacao.pagina + 1 })}
+                >
+                  Próxima
+                </Button>
+              </div>
+            </>
+          )}
+        </div>
       )}
 
       {/* ── PIPELINE CRM ── */}
@@ -445,95 +828,263 @@ export function ClientsClient({ customers, leads, activities, quotes, orders, sa
             ]}
           />
         </div>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <Field label={form.type === "pj" ? "Razão social" : "Nome completo"} required>
-            <Input value={form.name || ""} onChange={set("name")} autoFocus />
-          </Field>
-          {form.type === "pj" ? (
-            <Field label="Nome fantasia">
-              <Input value={form.tradeName || ""} onChange={set("tradeName")} />
+        {/* ── IDENTIFICAÇÃO ── */}
+        <FormSection title="Identificação">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <Field
+              label={form.type === "pj" ? "Razão social" : "Nome completo"}
+              required
+              className="sm:col-span-2"
+            >
+              <Input value={form.name || ""} onChange={set("name")} autoFocus />
             </Field>
-          ) : (
-            <Field label="Data de nascimento">
-              <Input mono type="date" value={form.birthDate || ""} onChange={set("birthDate")} />
+
+            {form.type === "pj" && (
+              <Field label="Nome fantasia" className="sm:col-span-2">
+                <Input value={form.tradeName || ""} onChange={set("tradeName")} />
+              </Field>
+            )}
+
+            <Field label={form.type === "pj" ? "CNPJ" : "CPF"} required erro={errosForm.document}>
+              <Input
+                mono
+                value={form.document || ""}
+                onChange={(e) => { setDocument(e); limpaErro("document"); }}
+                inputMode="numeric"
+                placeholder={form.type === "pj" ? "00.000.000/0001-00" : "000.000.000-00"}
+              />
             </Field>
-          )}
-          <Field label={form.type === "pj" ? "CNPJ" : "CPF"}>
-            <Input mono value={form.document || ""} onChange={set("document")} placeholder={form.type === "pj" ? "00.000.000/0001-00" : "000.000.000-00"} />
-          </Field>
-          {form.type === "pj" ? (
-            <Field label="Regime tributário">
-              <Select value={form.taxRegime || ""} onChange={set("taxRegime")}>
+
+            {/* Escape de boa-fé: só aparece quando o documento está em
+                branco. Sem ele o operador inventa "000.000.000-00" e o
+                cadastro fica pior do que vazio. */}
+            {!String(form.document || "").trim() && (
+              <Field
+                label="Sem o documento agora?"
+                className="sm:col-span-2"
+                hint="Registre o motivo para salvar mesmo assim"
+              >
+                <Input
+                  value={form.documentWaiverReason || ""}
+                  onChange={(e) => { set("documentWaiverReason")(e); limpaErro("document"); }}
+                  placeholder="Ex.: cliente vai trazer depois — venda de balcão"
+                />
+              </Field>
+            )}
+
+            <Field label="Origem do cliente">
+              <Select value={form.origin || ""} onChange={set("origin")}>
                 <option value="">—</option>
-                <option>Simples Nacional</option>
-                <option>Lucro Presumido</option>
-                <option>Lucro Real</option>
-                <option>MEI</option>
+                <option value="balcao">Balcão</option>
+                <option value="whatsapp">WhatsApp</option>
+                <option value="indicacao">Indicação</option>
+                <option value="instagram">Instagram</option>
+                <option value="site">Site</option>
+                <option value="google">Google</option>
+                <option value="marketplace">Marketplace</option>
+                <option value="outro">Outro</option>
               </Select>
             </Field>
-          ) : (
-            <Field label="RG">
-              <Input mono value={form.rg || ""} onChange={set("rg")} />
+          </div>
+        </FormSection>
+
+        {/* ── DOCUMENTOS ── */}
+        <FormSection title={form.type === "pj" ? "Dados da empresa" : "Documentos pessoais"}>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+            {form.type === "pj" ? (
+              <>
+                <Field label="Inscrição estadual" hint="ou ISENTO">
+                  <Input
+                    mono
+                    value={form.stateRegistration || ""}
+                    onChange={setMasked("stateRegistration", formatStateRegistration)}
+                    placeholder="ISENTO"
+                  />
+                </Field>
+                <Field label="Inscrição municipal">
+                  <Input mono value={form.municipalRegistration || ""} onChange={set("municipalRegistration")} />
+                </Field>
+                <Field label="Regime tributário">
+                  <Select value={form.taxRegime || ""} onChange={set("taxRegime")}>
+                    <option value="">—</option>
+                    <option>Simples Nacional</option>
+                    <option>Lucro Presumido</option>
+                    <option>Lucro Real</option>
+                    <option>MEI</option>
+                  </Select>
+                </Field>
+                <Field label="Porte da empresa">
+                  <Select value={form.companySize || ""} onChange={set("companySize")}>
+                    <option value="">—</option>
+                    <option value="MEI">MEI</option>
+                    <option value="ME">Microempresa (ME)</option>
+                    <option value="EPP">Pequeno porte (EPP)</option>
+                    <option value="demais">Demais</option>
+                  </Select>
+                </Field>
+                <Field label="Data de fundação">
+                  <Input mono type="date" value={form.foundedAt || ""} onChange={set("foundedAt")} />
+                </Field>
+              </>
+            ) : (
+              <>
+                <Field label="RG">
+                  <Input mono value={form.rg || ""} onChange={set("rg")} />
+                </Field>
+                <Field label="Órgão emissor">
+                  <Input value={form.rgIssuer || ""} onChange={set("rgIssuer")} placeholder="DETRAN-RJ" />
+                </Field>
+                <Field label="Data de nascimento">
+                  <Input mono type="date" value={form.birthDate || ""} onChange={set("birthDate")} />
+                </Field>
+                <Field label="Estado civil">
+                  <Select value={form.maritalStatus || ""} onChange={set("maritalStatus")}>
+                    <option value="">—</option>
+                    <option value="solteiro">Solteiro(a)</option>
+                    <option value="casado">Casado(a)</option>
+                    <option value="divorciado">Divorciado(a)</option>
+                    <option value="viuvo">Viúvo(a)</option>
+                    <option value="uniao_estavel">União estável</option>
+                  </Select>
+                </Field>
+              </>
+            )}
+          </div>
+        </FormSection>
+
+        {/* ── ENDEREÇO (CEP primeiro: preenche o resto) ── */}
+        <FormSection title="Endereço">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-6">
+            <Field
+              label="CEP"
+              className="sm:col-span-2"
+              hint={fetchingCep ? "buscando endereço…" : "preenche o resto sozinho"}
+              erro={errosForm.cep}
+            >
+              <Input
+                mono
+                value={form.cep || ""}
+                onChange={setMasked("cep", formatCEP)}
+                onBlur={handleCepBlur}
+                inputMode="numeric"
+                placeholder="00000-000"
+              />
             </Field>
-          )}
-          <Field label="E-mail">
-            <Input value={form.email || ""} onChange={set("email")} type="email" placeholder="email@empresa.com.br" />
-          </Field>
-          <Field label="Telefone">
-            <Input mono value={form.phone || ""} onChange={set("phone")} placeholder="(21) 99999-0000" />
-          </Field>
-          {form.type === "pj" && (
-            <>
-              <Field label="Contato na empresa">
-                <Input value={form.contactName || ""} onChange={set("contactName")} />
-              </Field>
-              <Field label="Cargo do contato">
-                <Input value={form.contactRole || ""} onChange={set("contactRole")} />
-              </Field>
-            </>
-          )}
+            <Field label="Rua / Logradouro" className="sm:col-span-3">
+              <Input value={form.street || ""} onChange={set("street")} placeholder="Rua das Flores" />
+            </Field>
+            <Field label="Número">
+              <Input value={form.number || ""} onChange={set("number")} placeholder="100" />
+            </Field>
+            <Field label="Complemento" className="sm:col-span-2">
+              <Input value={form.complement || ""} onChange={set("complement")} placeholder="Sala 2, fundos…" />
+            </Field>
+            <Field label="Bairro" className="sm:col-span-2">
+              <Input value={form.district || ""} onChange={set("district")} />
+            </Field>
+            <Field label="Cidade">
+              <Input value={form.city || ""} onChange={set("city")} />
+            </Field>
+            <Field label="UF" erro={errosForm.state}>
+              <Input
+                value={form.state || ""}
+                onChange={(e) => setForm((f) => ({ ...f, state: e.target.value.toUpperCase().slice(0, 2) }))}
+                placeholder="RJ"
+              />
+            </Field>
+          </div>
+        </FormSection>
 
-          {/* Endereço com ViaCEP */}
-          <Field label="CEP" hint={fetchingCep ? "🔍 buscando..." : "Digite para preencher o endereço"}>
-            <Input
-              mono
-              value={form.cep || ""}
-              onChange={set("cep")}
-              onBlur={handleCepBlur}
-              placeholder="00000-000"
-            />
-          </Field>
-          <Field label="Cidade / UF">
-            <div className="flex gap-2">
-              <Input value={form.city || ""} onChange={set("city")} placeholder="Rio de Janeiro" />
-              <Input value={form.state || ""} onChange={set("state")} className="w-16" placeholder="RJ" />
-            </div>
-          </Field>
-          <Field label="Endereço / Rua">
-            <Input value={form.street || ""} onChange={set("street")} placeholder="Rua das Flores" />
-          </Field>
-          <Field label="Número / Bairro">
-            <div className="flex gap-2">
-              <Input value={form.number || ""} onChange={set("number")} className="w-20" placeholder="100" />
-              <Input value={form.district || ""} onChange={set("district")} placeholder="Bairro" />
-            </div>
-          </Field>
+        {/* ── CONTATO ── */}
+        <FormSection title="Contato">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <Field label="Telefone" erro={errosForm.phone}>
+              <Input
+                mono
+                value={form.phone || ""}
+                onChange={setMasked("phone", formatPhone)}
+                inputMode="numeric"
+                placeholder="(21) 3000-0000"
+              />
+            </Field>
+            <Field label="WhatsApp" erro={errosForm.whatsapp}>
+              <Input
+                mono
+                value={form.whatsapp || ""}
+                onChange={setMasked("whatsapp", formatPhone)}
+                inputMode="numeric"
+                placeholder="(21) 99999-0000"
+              />
+            </Field>
+            <Field label="E-mail" className="sm:col-span-2" erro={errosForm.email}>
+              <Input value={form.email || ""} onChange={(e) => { set("email")(e); limpaErro("email"); }} type="email" placeholder="email@empresa.com.br" />
+            </Field>
 
-          <Field label="Status comercial">
-            <Select value={form.status || "lead"} onChange={set("status")}>
-              <option value="lead">Lead</option>
-              <option value="ativo">Ativo</option>
-              <option value="inativo">Inativo</option>
-              <option value="bloqueado">Bloqueado</option>
-            </Select>
-          </Field>
-          <Field label="Limite de crédito (R$)">
-            <Input mono value={form.creditLimit || "0"} onChange={set("creditLimit")} />
-          </Field>
-          <Field label="Observações" className="sm:col-span-2">
-            <Textarea value={form.notes || ""} onChange={set("notes")} placeholder="Preferências, histórico, observações do relacionamento..." />
-          </Field>
-        </div>
+            {form.type === "pj" && (
+              <>
+                <Field label="Pessoa de contato">
+                  <Input value={form.contactName || ""} onChange={set("contactName")} />
+                </Field>
+                <Field label="Cargo do contato">
+                  <Input value={form.contactRole || ""} onChange={set("contactRole")} />
+                </Field>
+              </>
+            )}
+
+            <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-paper-200 bg-paper-50 px-3 py-2 sm:col-span-2">
+              <input
+                type="checkbox"
+                checked={form.whatsappOptOut === "1"}
+                onChange={(e) => setForm((f) => ({ ...f, whatsappOptOut: e.target.checked ? "1" : "" }))}
+                className="h-4 w-4 accent-ink-900"
+              />
+              <span className="text-[12.5px] text-ink-700">
+                Cliente NÃO autoriza mensagens automáticas de WhatsApp
+              </span>
+            </label>
+
+            {/* Consentimento de MARKETING é separado do opt-out geral
+                (v3.54.0). Quem aceita "seu pedido está pronto" não
+                aceitou receber promoção — e campanha sem este aceite
+                é o caminho curto para o número ser bloqueado. */}
+            <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-paper-200 bg-paper-50 px-3 py-2 sm:col-span-2">
+              <input
+                type="checkbox"
+                checked={form.marketingOptIn === "1"}
+                disabled={form.whatsappOptOut === "1"}
+                onChange={(e) => setForm((f) => ({ ...f, marketingOptIn: e.target.checked ? "1" : "" }))}
+                className="mt-0.5 h-4 w-4 accent-ink-900"
+              />
+              <span className="text-[12.5px] text-ink-700">
+                Autoriza receber novidades e promoções
+                <span className="block text-[11px] text-ink-400">
+                  Só marque se ele disse que sim. Sem isto, o cliente não entra em
+                  campanha — nem que já tenha conversado com você.
+                </span>
+              </span>
+            </label>
+          </div>
+        </FormSection>
+
+        {/* ── COMERCIAL ── */}
+        <FormSection title="Situação comercial" last>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <Field label="Status">
+              <Select value={form.status || "lead"} onChange={set("status")}>
+                <option value="lead">Lead</option>
+                <option value="ativo">Ativo</option>
+                <option value="inativo">Inativo</option>
+                <option value="bloqueado">Bloqueado</option>
+              </Select>
+            </Field>
+            <Field label="Limite de crédito (R$)">
+              <Input mono value={form.creditLimit || "0"} onChange={set("creditLimit")} />
+            </Field>
+            <Field label="Observações" className="sm:col-span-2">
+              <Textarea value={form.notes || ""} onChange={set("notes")} placeholder="Preferências, histórico, observações do relacionamento..." />
+            </Field>
+          </div>
+        </FormSection>
       </Modal>
 
       {/* ── MODAL LEAD ── */}
@@ -614,7 +1165,7 @@ export function ClientsClient({ customers, leads, activities, quotes, orders, sa
         <p className="text-[13px] text-ink-700">
           {deleteModal?.kind === "customer"
             ? <>O cliente <strong>{deleteModal.name}</strong> será marcado como inativo e permanecerá no histórico de orçamentos, pedidos e vendas.</>
-            : <>A oportunidade <strong>"{deleteModal?.name}"</strong> será marcada como perdida, preservando o histórico.</>
+            : <>A oportunidade <strong>&ldquo;{deleteModal?.name}&rdquo;</strong> será marcada como perdida, preservando o histórico.</>
           }
         </p>
         <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-[11.5px] text-amber-800">
@@ -633,6 +1184,21 @@ export function ClientsClient({ customers, leads, activities, quotes, orders, sa
               <Badge tone={drawer.type === "pj" ? "magenta" : "cyan"}>{drawer.type === "pj" ? "PJ" : "PF"}</Badge>
               <span className="font-mono">{String(drawer.document || "")}</span>
               <StatusBadge value={String(drawer.status)} />
+              {/* A recusa de WhatsApp precisa ser visível antes de
+                  qualquer tentativa de contato, não escondida no form. */}
+              {drawer.whatsappOptOut === true && <Badge tone="amber">Não enviar WhatsApp</Badge>}
+              {drawer.marketingOptIn === true && <Badge tone="green">Aceita novidades</Badge>}
+              {isBirthdayToday(drawer.birthDate) && <Badge tone="green">Aniversário hoje</Badge>}
+              {/* Estado do link de cadastro público: o operador precisa
+                  saber se já pediu e se o cliente abriu, antes de
+                  cobrar de novo. */}
+              {(() => {
+                const l = linkPorCliente.get(Number(drawer.id));
+                if (!l) return null;
+                if (l.status === "concluido") return <Badge tone="green">Cadastro pelo link</Badge>;
+                if (l.status === "aberto") return <Badge tone="cyan">Link aberto, não concluído</Badge>;
+                return <Badge tone="amber">Link enviado, não aberto</Badge>;
+              })()}
             </span>
           )
         }
@@ -647,6 +1213,21 @@ export function ClientsClient({ customers, leads, activities, quotes, orders, sa
                 Ligar
               </Button>
               <div className="flex gap-2">
+                {/* Cadastro completo é política da empresa para todo
+                    pedido. Este botão é o caminho curto: gera o link
+                    público e deixa o operador conferir a mensagem
+                    antes do bot mandar. */}
+                <Button
+                  variant="outline"
+                  icon="whatsapp"
+                  onClick={() => setCadastroModal(drawer)}
+                >
+                  {["pendente", "aberto"].includes(
+                    String(linkPorCliente.get(Number(drawer.id))?.status || "")
+                  )
+                    ? "Reenviar cadastro"
+                    : "Pedir cadastro"}
+                </Button>
                 <Button
                   variant="soft"
                   icon="quote"
@@ -658,7 +1239,10 @@ export function ClientsClient({ customers, leads, activities, quotes, orders, sa
                   icon="pencil"
                   onClick={() => {
                     const f: Record<string, string> = {};
-                    for (const [k, v] of Object.entries(drawer)) if (v !== null && typeof v !== "object") f[k] = String(v);
+                    for (const [k, v] of Object.entries(drawer)) {
+                      if (v === null || typeof v === "object") continue;
+                      f[k] = typeof v === "boolean" ? (v ? "1" : "") : String(v);
+                    }
                     setForm(f);
                     setCustModal({ edit: drawer });
                   }}
@@ -675,7 +1259,7 @@ export function ClientsClient({ customers, leads, activities, quotes, orders, sa
             {/* Contato */}
             <div className="grid grid-cols-2 gap-3">
               {[
-                { icon: "phone" as const, k: "Telefone", v: drawer.phone },
+                { icon: "phone" as const, k: "Telefone", v: drawer.phone || drawer.whatsapp },
                 { icon: "mail" as const, k: "E-mail", v: drawer.email },
                 { icon: "building" as const, k: "Cidade", v: [drawer.district, drawer.city, drawer.state].filter(Boolean).join(" · ") },
               ].map((x) => (
@@ -690,7 +1274,7 @@ export function ClientsClient({ customers, leads, activities, quotes, orders, sa
             </div>
 
             {/* LTV por canal */}
-            <div className="grid grid-cols-3 gap-2.5">
+            <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
               {[
                 { k: "Orçamentos", v: quotes.filter((x) => Number(x.customerId) === Number(drawer.id)).length, money: quotes.filter((x) => Number(x.customerId) === Number(drawer.id)).reduce((s, x) => s + Number(x.total || 0), 0) },
                 { k: "Pedidos", v: orders.filter((x) => Number(x.customerId) === Number(drawer.id)).length, money: orders.filter((x) => Number(x.customerId) === Number(drawer.id)).reduce((s, x) => s + Number(x.total || 0), 0) },
@@ -762,6 +1346,71 @@ export function ClientsClient({ customers, leads, activities, quotes, orders, sa
               </section>
             )}
 
+            {/* Dados cadastrais — o que o formulário coleta e a ficha
+                antes não devolvia. Só rende linha o que está preenchido,
+                para PF e PJ não carregarem campos um do outro. */}
+            {(() => {
+              const isPJ = drawer.type === "pj";
+              const rows: { k: string; v: string }[] = [];
+
+              if (isPJ) {
+                if (drawer.stateRegistration) rows.push({ k: "Inscrição estadual", v: String(drawer.stateRegistration) });
+                if (drawer.municipalRegistration) rows.push({ k: "Inscrição municipal", v: String(drawer.municipalRegistration) });
+                if (drawer.taxRegime) rows.push({ k: "Regime tributário", v: String(drawer.taxRegime) });
+                if (drawer.companySize) rows.push({ k: "Porte", v: String(drawer.companySize) });
+                if (drawer.foundedAt) rows.push({ k: "Fundação", v: brDate(drawer.foundedAt) });
+                if (drawer.contactName) rows.push({ k: "Contato", v: String(drawer.contactName) });
+              } else {
+                if (drawer.rg) {
+                  rows.push({
+                    k: "RG",
+                    v: [drawer.rg, drawer.rgIssuer].filter(Boolean).join(" · "),
+                  });
+                }
+                if (drawer.birthDate) {
+                  const age = ageFrom(drawer.birthDate);
+                  rows.push({
+                    k: "Nascimento",
+                    v: brDate(drawer.birthDate) + (age !== null ? ` · ${age} anos` : ""),
+                  });
+                }
+                if (drawer.maritalStatus) {
+                  rows.push({
+                    k: "Estado civil",
+                    v: MARITAL_LABEL[String(drawer.maritalStatus)] || String(drawer.maritalStatus),
+                  });
+                }
+              }
+
+              if (drawer.origin) {
+                rows.push({
+                  k: "Origem",
+                  v: ORIGIN_LABEL[String(drawer.origin)] || String(drawer.origin),
+                });
+              }
+              if (Number(drawer.creditLimit || 0) > 0) {
+                rows.push({ k: "Limite de crédito", v: formatMoney(Number(drawer.creditLimit)) });
+              }
+
+              if (rows.length === 0) return null;
+
+              return (
+                <section>
+                  <h4 className="mb-2 font-mono text-[10px] font-semibold tracking-[0.16em] text-ink-500 uppercase">
+                    Dados cadastrais
+                  </h4>
+                  <Card className="divide-y divide-paper-200 py-0 text-[12.5px]">
+                    {rows.map((r) => (
+                      <div key={r.k} className="flex items-center justify-between gap-3 py-2">
+                        <span className="text-ink-500">{r.k}</span>
+                        <span className="text-right font-medium text-ink-800">{r.v}</span>
+                      </div>
+                    ))}
+                  </Card>
+                </section>
+              );
+            })()}
+
             {/* Linha do tempo de atividades */}
             <section>
               <h4 className="mb-2 font-mono text-[10px] font-semibold tracking-[0.16em] text-ink-500 uppercase">Linha do tempo</h4>
@@ -803,6 +1452,274 @@ export function ClientsClient({ customers, leads, activities, quotes, orders, sa
           </div>
         )}
       </Drawer>
+
+      <PedirCadastroModal
+        cliente={
+          cadastroModal
+            ? {
+                id: Number(cadastroModal.id),
+                name: String(cadastroModal.name || ""),
+                whatsapp: cadastroModal.whatsapp as string | null,
+                phone: cadastroModal.phone as string | null,
+                whatsappOptOut: cadastroModal.whatsappOptOut as boolean | null,
+              }
+            : null
+        }
+        onClose={() => setCadastroModal(null)}
+        onDone={refresh}
+      />
+
+      {/* ── IMPORTAR CLIENTES DO SISTEMA ANTIGO ── */}
+      <ImportCustomersModal
+        key={importOpen ? "import-open" : "import-closed"}
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        onDone={() => {
+          setImportOpen(false);
+          router.refresh();
+        }}
+      />
     </div>
+  );
+}
+
+/* ==================================================================
+   IMPORTAÇÃO DE CLIENTES (PDF DO SISTEMA ANTIGO)
+   ================================================================== */
+
+type ImportPreviewRow = {
+  legacyCode: string | null;
+  name: string;
+  document: string | null;
+  type: "pf" | "pj";
+  email: string | null;
+  phone: string | null;
+  city: string | null;
+};
+
+type ImportResult = {
+  confirmed: boolean;
+  totalFichas: number;
+  imported: number;
+  updated: number;
+  skipped: number;
+  issues: { index: number; name: string; reason: string }[];
+  preview: ImportPreviewRow[];
+};
+
+function ImportCustomersModal({
+  open,
+  onClose,
+  onDone,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [file, setFile] = useState<File | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<ImportResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function send(confirm: boolean) {
+    if (!file || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      if (confirm) fd.append("confirm", "1");
+
+      const res = await fetch("/api/crm/import", { method: "POST", body: fd });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Falha na importação");
+
+      setResult(json as ImportResult);
+      if (confirm) {
+        toast.success(
+          "Importação concluída",
+          `${json.imported} novos · ${json.updated} atualizados`
+        );
+        onDone();
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Erro inesperado");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /* Depois de simular, o mesmo botão passa a gravar. */
+  const simulated = !!result && !result.confirmed;
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title="Importar clientes do sistema antigo"
+      subtitle="Envie o PDF com as fichas de cliente exportadas do sistema anterior."
+      width="max-w-2xl"
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>
+            Fechar
+          </Button>
+          {simulated ? (
+            <Button icon="check" loading={busy} onClick={() => send(true)}>
+              Confirmar importação
+            </Button>
+          ) : (
+            <Button icon="eye" loading={busy} disabled={!file} onClick={() => send(false)}>
+              Analisar arquivo
+            </Button>
+          )}
+        </>
+      }
+    >
+      <div className="space-y-3">
+        <label className="block cursor-pointer rounded-xl border border-dashed border-paper-300 bg-paper-50 px-4 py-6 text-center transition-colors hover:border-ink-400">
+          <input
+            type="file"
+            accept="application/pdf,.pdf"
+            className="hidden"
+            onChange={(e) => {
+              setFile(e.target.files?.[0] ?? null);
+              setResult(null);
+              setError(null);
+            }}
+          />
+          <Icon name="download" size={20} className="mx-auto mb-1.5 text-ink-400" />
+          <p className="text-[13px] font-semibold text-ink-800">
+            {file ? file.name : "Escolher arquivo PDF"}
+          </p>
+          <p className="mt-0.5 text-[11.5px] text-ink-500">
+            {file
+              ? `${(file.size / 1024).toFixed(0)} KB — clique para trocar`
+              : "Relatório “Ficha do Cliente” do sistema anterior · até 8 MB"}
+          </p>
+        </label>
+
+        {error && (
+          <p className="rounded-lg bg-red-50 px-3 py-2 text-[12.5px] leading-relaxed text-red-800">
+            {error}
+          </p>
+        )}
+
+        {result && (
+          <>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              {[
+                { label: "fichas lidas", value: result.totalFichas, tone: "text-ink-800" },
+                { label: "novos", value: result.imported, tone: "text-emerald-700" },
+                { label: "já existem", value: result.updated, tone: "text-cyan-700" },
+                { label: "ignorados", value: result.skipped, tone: "text-amber-700" },
+              ].map((s) => (
+                <div key={s.label} className="rounded-lg border border-paper-200 bg-white px-2 py-2 text-center">
+                  <p className={cn("font-mono text-[19px] leading-none font-semibold tnum", s.tone)}>
+                    {s.value}
+                  </p>
+                  <p className="mt-1 text-[10px] tracking-wider text-ink-500 uppercase">{s.label}</p>
+                </div>
+              ))}
+            </div>
+
+            {simulated && (
+              <p className="rounded-lg bg-cyan-50 px-3 py-2 text-[12px] leading-relaxed text-cyan-900">
+                Nada foi gravado ainda. Confira a prévia abaixo e clique em
+                <strong> Confirmar importação</strong> para efetivar.
+                {result.updated > 0 && (
+                  <>
+                    {" "}
+                    Os {result.updated} já cadastrados terão apenas os campos em branco
+                    preenchidos — nada do que você já digitou é sobrescrito.
+                  </>
+                )}
+              </p>
+            )}
+
+            {result.preview.length > 0 && (
+              <div className="max-h-56 overflow-x-auto overflow-y-auto rounded-lg border border-paper-200">
+                <table className="w-full text-[12px]">
+                  <thead className="sticky top-0 bg-paper-50 text-left font-mono text-[10px] tracking-wider text-ink-500 uppercase">
+                    <tr>
+                      <th className="px-2 py-1.5">Nome</th>
+                      <th className="px-2 py-1.5">Documento</th>
+                      <th className="px-2 py-1.5">Contato</th>
+                      <th className="px-2 py-1.5">Cidade</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {result.preview.map((p, i) => (
+                      <tr key={`${p.legacyCode}-${i}`} className="border-t border-paper-200">
+                        <td className="px-2 py-1.5">
+                          {p.name}
+                          <span className="ml-1 rounded bg-paper-100 px-1 text-[9.5px] text-ink-500 uppercase">
+                            {p.type}
+                          </span>
+                        </td>
+                        <td className="px-2 py-1.5 font-mono text-[11px]">{p.document || "—"}</td>
+                        <td className="max-w-[150px] truncate px-2 py-1.5 text-ink-600">
+                          {p.email || p.phone || "—"}
+                        </td>
+                        <td className="px-2 py-1.5 text-ink-600">{p.city || "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {result.totalFichas > result.preview.length && (
+                  <p className="border-t border-paper-200 bg-paper-50 px-2 py-1 text-center text-[11px] text-ink-500">
+                    … e mais {result.totalFichas - result.preview.length} fichas
+                  </p>
+                )}
+              </div>
+            )}
+
+            {result.issues.length > 0 && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+                <p className="mb-1 text-[11.5px] font-semibold text-amber-900">
+                  {result.issues.length} ficha(s) com observação
+                </p>
+                <ul className="max-h-28 space-y-0.5 overflow-y-auto text-[11.5px] leading-snug text-amber-900">
+                  {result.issues.map((it) => (
+                    <li key={`${it.index}-${it.name}`}>
+                      <span className="font-mono">#{it.index}</span> {it.name} — {it.reason}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
+/* ==================================================================
+   AGRUPAMENTO VISUAL DO FORMULÁRIO
+   ================================================================== */
+
+/**
+ * Bloco de campos com título, no mesmo espírito das caixas da ficha do
+ * sistema antigo. Mantém a paleta e os componentes existentes — só
+ * organiza: um cadastro com ~25 campos numa grade única vira parede.
+ */
+function FormSection({
+  title,
+  last,
+  children,
+}: {
+  title: string;
+  last?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className={last ? "" : "mb-5"}>
+      <h3 className="mb-2.5 flex items-center gap-2 font-mono text-[10px] font-semibold tracking-[0.16em] text-ink-500 uppercase">
+        {title}
+        <span className="h-px flex-1 bg-paper-200" />
+      </h3>
+      {children}
+    </section>
   );
 }

@@ -10,9 +10,12 @@ import {
   settings,
   transactions,
 } from "@/db/schema";
-import { and, eq, ilike, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { nextDocumentNumber } from "@/lib/documents";
 import { applyDiscount, round2, toDecimalString, toNumber, toPositive } from "@/lib/money";
+import { upsertAutoTransaction } from "@/lib/finance";
+import { toLocalISODate } from "@/lib/period";
+import { todayISO } from "@/lib/period";
 
 const finiteNumber = z.coerce.number().finite();
 
@@ -20,25 +23,70 @@ const orderItemSchema = z.object({
   productId: z.coerce.number().int().positive().nullable().optional(),
   serviceId: z.coerce.number().int().positive().nullable().optional(),
   description: z.string().trim().min(1, "Descrição obrigatória").max(240),
-  quantity: finiteNumber.positive("Quantidade deve ser maior que zero").max(1_000_000),
+  quantity: finiteNumber
+    .min(0.001, "Quantidade deve ser maior que zero")
+    .max(1_000_000),
   unitPrice: finiteNumber.min(0, "Preço não pode ser negativo").max(10_000_000),
 });
+
+/* Os cinco eixos de status do pedido.
+   Eram `text` livre: um valor fora da lista era gravado e o pedido
+   SUMIA das abas da tela (que filtram por valor exato), apesar de
+   existir no banco, ter card no Kanban e lançamento no Financeiro. */
+const ORDER_STATUS = ["aberto", "confirmado", "concluido", "cancelado"] as const;
+const PRODUCTION_STATUS = ["aguardando", "em_producao", "concluido", "cancelado"] as const;
+/* "aprovado"/"recusado" no masculino: é como a tela e o portal de artes
+   já gravam. Mudar a grafia agora invalidaria os pedidos existentes. */
+const ART_STATUS = ["nao_enviada", "enviada", "aprovado", "revisao", "recusado"] as const;
+/* `cancelado` entra nos três eixos abaixo porque `cancelOrder` marca
+   assim ao desfazer o pedido — sem isso o cancelamento seria recusado
+   pela própria validação. */
+const DELIVERY_STATUS = [
+  "a_definir",
+  "separado",
+  "em_rota",
+  "entregue",
+  "retirado",
+  "cancelado",
+] as const;
+const FINANCIAL_STATUS = ["pendente", "parcial", "pago", "estornado", "cancelado"] as const;
+const PRIORITY = ["baixa", "normal", "alta", "urgente"] as const;
+
+/** Enum com mensagem que lista os valores aceitos. */
+function statusEnum<T extends readonly [string, ...string[]]>(values: T, label: string) {
+  return z.enum(values, {
+    message: `${label} inválido. Valores aceitos: ${values.join(", ")}`,
+  });
+}
 
 const orderPayloadSchema = z.object({
   quoteId: z.coerce.number().int().positive().nullable().optional(),
   customerId: z.coerce.number().int().positive().nullable().optional(),
-  status: z.string().trim().max(40).optional(),
-  productionStatus: z.string().trim().max(40).optional(),
-  artStatus: z.string().trim().max(40).optional(),
-  deliveryStatus: z.string().trim().max(40).optional(),
-  financialStatus: z.string().trim().max(40).optional(),
-  priority: z.string().trim().max(40).optional(),
+  status: statusEnum(ORDER_STATUS, "Status do pedido").optional(),
+  productionStatus: statusEnum(PRODUCTION_STATUS, "Status de produção").optional(),
+  artStatus: statusEnum(ART_STATUS, "Status da arte").optional(),
+  deliveryStatus: statusEnum(DELIVERY_STATUS, "Status de entrega").optional(),
+  financialStatus: statusEnum(FINANCIAL_STATUS, "Status financeiro").optional(),
+  priority: statusEnum(PRIORITY, "Prioridade").optional(),
   dueDate: z.string().trim().nullable().optional(),
   items: z.array(orderItemSchema).optional(),
   discount: finiteNumber.min(0).optional(),
+  /* Percentual acima de 100 zerava (ou invertia) o pedido. */
+  discountMode: z.enum(["value", "percent"]).optional().default("value"),
   shippingFee: finiteNumber.min(0).optional(),
   taxes: finiteNumber.min(0).optional(),
   paymentMethod: z.string().trim().max(80).optional(),
+  /* Entrada e saldo — política 50/50 da casa. Valores absolutos, não
+     percentuais: o total pode mudar depois e 50% de outro número
+     viraria conta errada. */
+  depositAmount: finiteNumber.min(0).optional(),
+  depositPaid: z.boolean().optional(),
+  depositMethod: z.string().trim().max(40).nullable().optional(),
+  balancePaid: z.boolean().optional(),
+  balanceMethod: z.string().trim().max(40).nullable().optional(),
+  /* Escape consciente da trava de produção. Exige motivo — a regra
+     tem exceção, mas a exceção fica registrada. */
+  liberarSemEntrada: z.string().trim().min(3).max(120).optional(),
   channel: z.string().trim().max(80).optional(),
   sellerName: z.string().trim().max(100).optional(),
   notes: z.string().trim().max(1000).nullable().optional(),
@@ -115,14 +163,60 @@ function totalsFromItems(
   items: OrderItem[],
   discountInput: unknown,
   shippingInput: unknown,
-  taxesInput: unknown
+  taxesInput: unknown,
+  discountMode: "value" | "percent" = "value"
 ) {
   const subtotal = round2(items.reduce((s, i) => s + i.total, 0));
-  const discount = applyDiscount(subtotal, discountInput, "value");
+  const discount = applyDiscount(subtotal, discountInput, discountMode);
   const shippingFee = toPositive(shippingInput, 0);
   const taxes = toPositive(taxesInput, 0);
   const total = round2(subtotal - discount + shippingFee + taxes);
   return { subtotal, discount, shippingFee, taxes, total };
+}
+
+/**
+ * Regras de valor do pedido.
+ *
+ * Sem elas, um desconto maior que o subtotal zerava o pedido e o zero
+ * seguia para o Financeiro como receita de R$ 0,00 — mesmo buraco já
+ * fechado no PDV (v3.14.0) e no Orçamento (v3.16.0).
+ */
+function assertOrderTotals(
+  totals: { subtotal: number; discount: number; total: number },
+  discountRaw: unknown,
+  mode: "value" | "percent"
+): SaleError | null {
+  if (mode === "percent" && toNumber(discountRaw, 0) > 100) {
+    return { error: "Desconto percentual não pode passar de 100%", status: 422 };
+  }
+  if (totals.discount > totals.subtotal) {
+    return {
+      error: `Desconto (${totals.discount.toFixed(2)}) não pode ser maior que o subtotal (${totals.subtotal.toFixed(2)})`,
+      status: 422,
+    };
+  }
+  if (totals.total <= 0) {
+    return {
+      error:
+        totals.discount >= totals.subtotal && totals.subtotal > 0
+          ? "Desconto não pode zerar o pedido. Para cortesia, registre um lançamento próprio."
+          : "O total do pedido precisa ser maior que zero",
+      status: 422,
+    };
+  }
+  return null;
+}
+
+/** Prazo de entrega no passado nasce vencido e contamina Kanban e Entregas. */
+function assertDueDate(dueDate: string | null | undefined): SaleError | null {
+  if (!dueDate) return null;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dueDate)) {
+    return { error: "Data de entrega inválida", status: 422 };
+  }
+  if (dueDate < toLocalISODate(new Date())) {
+    return { error: "A data de entrega não pode ser uma data passada", status: 422 };
+  }
+  return null;
 }
 
 async function getCustomer(customerId: number | null) {
@@ -208,33 +302,24 @@ function transactionStatusFromFinancial(financialStatus: string): "pago" | "pend
 }
 
 async function syncFinancial(tx: Tx, order: typeof orders.$inferSelect, customerName: string | null) {
-  const today = new Date().toISOString().slice(0, 10);
-  const due = order.dueDate || today;
-  const status = transactionStatusFromFinancial(order.financialStatus);
-  const descriptionPrefix = `Pedido ${order.number}`;
-  const [existing] = await tx
-    .select()
-    .from(transactions)
-    .where(and(eq(transactions.category, "pedido"), ilike(transactions.description, `${descriptionPrefix}%`)))
-    .limit(1);
-
-  const data = {
-    type: "receita" as const,
+  /* ----------------------------------------------------------------
+   * v3.11.0 — o casamento passou a ser por orderId.
+   *
+   * Antes era `ilike(description, "Pedido PED-2026-001%")`, que casa
+   * também com PED-2026-0010, 0011, 0012… A partir do décimo pedido
+   * a atualização financeira de um sobrescrevia a de outro.
+   * --------------------------------------------------------------- */
+  await upsertAutoTransaction(tx, {
+    type: "receita",
     category: "pedido",
-    description: `${descriptionPrefix} — ${customerName || "Consumidor final"}`,
-    amount: toDecimalString(order.total, 2),
-    dueDate: due,
-    paidDate: status === "pago" ? today : null,
-    status,
+    description: `Pedido ${order.number} — ${customerName || "Consumidor final"}`,
+    amount: toNumber(order.total, 0),
+    dueDate: order.dueDate || todayISO(),
+    status: transactionStatusFromFinancial(order.financialStatus),
     method: order.paymentMethod,
     customerId: order.customerId,
-  };
-
-  if (existing) {
-    await tx.update(transactions).set(data).where(eq(transactions.id, existing.id));
-  } else {
-    await tx.insert(transactions).values(data);
-  }
+    orderId: order.id,
+  });
 }
 
 export async function createOrder(raw: unknown) {
@@ -246,7 +331,14 @@ export async function createOrder(raw: unknown) {
   if (items.length === 0) return { error: "Adicione ao menos um item ao pedido", status: 422 } satisfies SaleError;
 
   const policy = await getOrderPolicy();
-  const totals = totalsFromItems(items, d.discount, d.shippingFee, d.taxes);
+  const totals = totalsFromItems(items, d.discount, d.shippingFee, d.taxes, d.discountMode);
+
+  const totalsError = assertOrderTotals(totals, d.discount ?? 0, d.discountMode || "value");
+  if (totalsError) return totalsError;
+
+  const dueError = assertDueDate(d.dueDate);
+  if (dueError) return dueError;
+
   const customerId = d.customerId ? Number(d.customerId) : null;
   const customer = await getCustomer(customerId);
   const customerName = customer ? customer.tradeName || customer.name : null;
@@ -304,6 +396,30 @@ export async function updateOrder(orderId: number, raw: unknown) {
     return cancelOrder(orderId, d.notes || "Cancelamento solicitado");
   }
 
+  /* ── Trava da entrada ────────────────────────────────────────────
+     Política da casa: "50% no ato do fechamento". Sem isso o trabalho
+     começa, o material é consumido, e a cobrança fica para depois —
+     que é quando se esquece.
+
+     A exceção existe e é registrada: `liberarSemEntrada` com motivo
+     destrava e grava a justificativa nas observações. Regra com
+     escape anotado vale mais que regra que o atendente contorna por
+     fora do sistema. */
+  const entrandoEmProducao =
+    d.productionStatus === "em_producao" && current.productionStatus !== "em_producao";
+  const entradaCombinada = toNumber(current.depositAmount) > 0;
+  const entradaPaga = !!current.depositPaidAt || d.depositPaid === true;
+
+  if (entrandoEmProducao && entradaCombinada && !entradaPaga && !d.liberarSemEntrada) {
+    return {
+      error:
+        `A entrada de R$ ${toDecimalString(current.depositAmount, 2)} ainda não foi paga. ` +
+        `Registre o pagamento ou informe um motivo para liberar assim mesmo.`,
+      status: 409,
+      details: { code: "DEPOSIT_REQUIRED", depositAmount: toDecimalString(current.depositAmount, 2) },
+    } satisfies SaleError;
+  }
+
   const policy = await getOrderPolicy();
   const hasItemsPatch = Array.isArray(d.items);
   const items = hasItemsPatch
@@ -318,9 +434,24 @@ export async function updateOrder(orderId: number, raw: unknown) {
         items,
         d.discount !== undefined ? d.discount : current.discount,
         d.shippingFee !== undefined ? d.shippingFee : current.shippingFee,
-        d.taxes !== undefined ? d.taxes : current.taxes
+        d.taxes !== undefined ? d.taxes : current.taxes,
+        d.discountMode
       )
     : null;
+
+  /* As mesmas regras da criação valem na edição: sem isto, bastava
+     editar o pedido depois para zerá-lo. */
+  if (totals) {
+    const totalsError = assertOrderTotals(
+      totals,
+      d.discount !== undefined ? d.discount : current.discount,
+      d.discountMode || "value"
+    );
+    if (totalsError) return totalsError;
+  }
+
+  const dueError = assertDueDate(d.dueDate);
+  if (dueError) return dueError;
 
   const customerId = d.customerId !== undefined ? (d.customerId ? Number(d.customerId) : null) : current.customerId;
   const customer = await getCustomer(customerId);
@@ -334,6 +465,10 @@ export async function updateOrder(orderId: number, raw: unknown) {
     if (d.customerId !== undefined) patch.customerId = customerId;
     if (d.status !== undefined) patch.status = d.status;
     if (d.productionStatus !== undefined) {
+      if (entrandoEmProducao && d.liberarSemEntrada) {
+        const marca = `[${new Date().toLocaleDateString("pt-BR")}] Liberado sem entrada: ${d.liberarSemEntrada}`;
+        patch.notes = current.notes ? `${current.notes}\n${marca}` : marca;
+      }
       patch.productionStatus = d.productionStatus;
       if (d.productionStatus === "concluido") patch.status = "concluido";
       else if (!d.status) patch.status = "confirmado";
@@ -344,6 +479,20 @@ export async function updateOrder(orderId: number, raw: unknown) {
     if (d.priority !== undefined) patch.priority = d.priority;
     if (d.dueDate !== undefined) patch.dueDate = d.dueDate ? String(d.dueDate) : null;
     if (d.paymentMethod !== undefined) patch.paymentMethod = d.paymentMethod || "A definir";
+
+    /* Entrada e saldo. O saldo é sempre derivado do total — nunca
+       digitado — para não existir pedido em que entrada + saldo ≠ total. */
+    if (d.depositAmount !== undefined) {
+      patch.depositAmount = toDecimalString(Math.max(0, d.depositAmount), 2);
+    }
+    if (d.depositPaid !== undefined) {
+      patch.depositPaidAt = d.depositPaid ? (current.depositPaidAt ?? new Date()) : null;
+    }
+    if (d.depositMethod !== undefined) patch.depositMethod = d.depositMethod || null;
+    if (d.balancePaid !== undefined) {
+      patch.balancePaidAt = d.balancePaid ? (current.balancePaidAt ?? new Date()) : null;
+    }
+    if (d.balanceMethod !== undefined) patch.balanceMethod = d.balanceMethod || null;
     if (d.channel !== undefined) patch.channel = d.channel || policy.defaultChannel;
     if (d.sellerName !== undefined) patch.sellerName = d.sellerName || policy.defaultSeller;
     if (d.notes !== undefined) patch.notes = d.notes ? String(d.notes) : null;
@@ -355,6 +504,19 @@ export async function updateOrder(orderId: number, raw: unknown) {
       patch.taxes = toDecimalString(totals.taxes);
       patch.shippingFee = toDecimalString(totals.shippingFee);
       patch.total = toDecimalString(totals.total);
+    }
+
+    /* O saldo NUNCA é digitado: é sempre total − entrada, recalculado
+       aqui, num ponto só. Se fosse campo livre, bastaria alguém mexer
+       no total depois para o pedido ficar com entrada + saldo ≠ total
+       — e a diferença só apareceria na hora de cobrar. */
+    {
+      const totalFinal = toNumber(patch.total ?? current.total);
+      const entradaFinal = Math.min(toNumber(patch.depositAmount ?? current.depositAmount), totalFinal);
+      if (patch.depositAmount !== undefined) {
+        patch.depositAmount = toDecimalString(entradaFinal, 2);
+      }
+      patch.balanceAmount = toDecimalString(Math.max(0, round2(totalFinal - entradaFinal)), 2);
     }
 
     const [order] = await tx.update(orders).set(patch).where(eq(orders.id, orderId)).returning();
@@ -413,18 +575,35 @@ export async function cancelOrder(orderId: number, reason: string) {
 
     const total = toNumber(current.total, 0);
     if (total > 0) {
-      const today = new Date().toISOString().slice(0, 10);
-      await tx.insert(transactions).values({
+      const today = todayISO();
+      /* estorno vinculado ao pedido, para reconciliação e auditoria */
+      await upsertAutoTransaction(tx, {
         type: "despesa",
         category: "estorno_pedido",
         description: `Cancelamento do pedido ${current.number} — ${cleanReason}`,
-        amount: toDecimalString(total, 2),
+        amount: total,
         dueDate: today,
         paidDate: today,
         status: "pago",
         method: current.paymentMethod,
         customerId: current.customerId,
+        orderId: current.id,
       });
+
+      /* a receita original deixa de ser esperada */
+      await tx
+        .update(transactions)
+        .set({
+          archivedAt: new Date(),
+          archiveReason: `Pedido cancelado: ${cleanReason}`,
+        })
+        .where(
+          and(
+            eq(transactions.orderId, current.id),
+            eq(transactions.category, "pedido"),
+            sql`${transactions.status} <> 'pago'`
+          )
+        );
     }
 
     return order;

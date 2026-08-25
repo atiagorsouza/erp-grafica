@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { mutate } from "@/lib/mutate";
 import {
@@ -25,33 +25,18 @@ import {
 } from "@/components/ui";
 import { Icon } from "@/components/icons";
 import { cn } from "@/lib/format";
+import { formatCEP, formatDocumentAuto, formatPhone, isWhatsAppBlocked, whatsappNumber } from "@/lib/validators";
 import { applyDiscount, formatBRL, round2, toNumber, toPositive } from "@/lib/money";
+
+import type { CompanyIdentity } from "@/lib/company";
+export type PosCompany = CompanyIdentity;
 
 /* ==================================================================
    TIPOS
    ================================================================== */
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Row = Record<string, any>;
 
-export type PosCompany = {
-  name: string;
-  legalName: string;
-  document: string;
-  email: string;
-  phone: string;
-  phone2: string;
-  whatsapp: string;
-  address: string;
-  street: string;
-  number: string;
-  district: string;
-  city: string;
-  state: string;
-  cep: string;
-  website: string;
-  pixKey: string;
-};
 
 type Item = {
   description: string;
@@ -60,6 +45,17 @@ type Item = {
   quantity: number;
   unitPrice: number;
   total: number;
+};
+
+/* Estado da paginação vindo do servidor (v3.62.0). */
+type Paginacao = {
+  total: number;
+  pagina: number;
+  porPagina: number;
+  totalPaginas: number;
+  contadores: Record<string, number>;
+  busca: string;
+  filtro: string;
 };
 
 const STATUSES = ["rascunho", "enviado", "aprovado", "recusado", "expirado"];
@@ -76,8 +72,10 @@ export function QuotesClient({
   services,
   orders,
   company,
+  paginacao,
 }: {
   quotes: Row[];
+  paginacao: Paginacao;
   items: Row[];
   customers: Row[];
   products: Row[];
@@ -89,16 +87,171 @@ export function QuotesClient({
   const params = useSearchParams();
   const [customersList, setCustomersList] = useState<Row[]>(initialCustomers);
 
-  const [filter, setFilter] = useState("all");
-  const [q, setQ] = useState("");
+  /* Filtro e busca vivem na URL: quem decide o que aparece é o
+     servidor (v3.62.0). */
+  const filter = paginacao.filtro;
+  const [q, setQ] = useState(paginacao.busca);
+
+  const irPara = useCallback(
+    (mudancas: Record<string, string | number>) => {
+      const p = new URLSearchParams();
+      const base: Record<string, string> = {
+        q: paginacao.busca,
+        filtro: paginacao.filtro,
+        pagina: String(paginacao.pagina),
+        por: String(paginacao.porPagina),
+        ...Object.fromEntries(Object.entries(mudancas).map(([k, v]) => [k, String(v)])),
+      };
+      if (mudancas.q !== undefined || mudancas.filtro !== undefined) base.pagina = "1";
+      for (const [k, v] of Object.entries(base)) if (v && v !== "0" && v !== "all") p.set(k, v);
+      router.push(`/orcamentos${p.toString() ? `?${p}` : ""}`);
+    },
+    [router, paginacao]
+  );
+
+  const setFilter = useCallback((valor: string) => irPara({ filtro: valor }), [irPara]);
+
+  useEffect(() => {
+    if (q === paginacao.busca) return;
+    const t = setTimeout(() => irPara({ q }), 300);
+    return () => clearTimeout(t);
+  }, [q, paginacao.busca, irPara]);
   const [editorOpen, setEditorOpen] = useState(false);
   const [editId, setEditId] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
+  /* Trava do botão "virar pedido": o índice único no banco já impede a
+     duplicata, mas travar aqui evita a ida e volta desnecessária. */
+  const [converting, setConverting] = useState<number | null>(null);
   const [form, setForm] = useState<Record<string, string>>({});
   const [editItems, setEditItems] = useState<Item[]>([]);
   const [viewId, setViewId] = useState<number | null>(null);
   const [newCustomerOpen, setNewCustomerOpen] = useState(false);
   const [printDoc, setPrintDoc] = useState<{ quote: Row; mode: "a4" | "thermal" } | null>(null);
+
+  /* Prévia do WhatsApp: o texto vem pronto do servidor (catálogo
+     editável) e fica editável aqui antes de sair. Mandar orçamento é a
+     cara da empresa indo para o cliente — ninguém envia às cegas. */
+  const [zap, setZap] = useState<null | {
+    quote: Row;
+    texto: string;
+    cliente: { nome: string; phone: string | null; whatsapp: string | null; whatsappOptOut: boolean | null } | null;
+  }>(null);
+  const [zapCarregando, setZapCarregando] = useState(false);
+  /* Enviando pelo serviço; e o aviso de "não deu, quer abrir o Web?".
+     Guardar o motivo separado do envio permite mostrar a saída
+     alternativa sem esconder o que houve. */
+  const [zapEnviando, setZapEnviando] = useState(false);
+  const [zapFalhou, setZapFalhou] = useState<string | null>(null);
+
+  /* Abre o WhatsApp Web com o texto — o caminho antigo, agora só como
+     saída quando o envio direto não é possível. */
+  function abrirNoWhatsAppWeb() {
+    if (!zap) return;
+    const c = zap.cliente;
+    const numero = c && !isWhatsAppBlocked(c as Row) ? whatsappNumber(c as Row) : "";
+    const url = numero
+      ? `https://wa.me/55${numero}?text=${encodeURIComponent(zap.texto)}`
+      : `https://wa.me/?text=${encodeURIComponent(zap.texto)}`;
+    window.open(url, "_blank");
+    setZap(null);
+    setZapFalhou(null);
+  }
+
+  /* Envio direto pelo serviço do WhatsApp (Baileys).
+     Antes o botão só abria o wa.me: o operador ainda precisava esperar
+     o WhatsApp Web, conferir o contato e clicar em enviar. Três passos
+     manuais para uma mensagem que o sistema já sabia escrever.
+
+     O serviço grava a mensagem em `whatsapp_mensagens`, então o envio
+     aparece sozinho no histórico do cliente — quem atender depois vê
+     o que já foi mandado. */
+  async function enviarPeloServico() {
+    if (!zap) return;
+    const c = zap.cliente;
+
+    if (c && isWhatsAppBlocked(c as Row)) {
+      toast.error(
+        "Cliente não aceita WhatsApp",
+        "Escolha outro canal. O envio direto respeita o opt-out."
+      );
+      return;
+    }
+
+    const numero = c ? whatsappNumber(c as Row) : "";
+    if (!numero) {
+      setZapFalhou("Este orçamento não tem número de WhatsApp no cadastro.");
+      return;
+    }
+
+    setZapEnviando(true);
+    setZapFalhou(null);
+    try {
+      const r = await fetch("/api/whatsapp/enviar", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ para: `55${numero}`, texto: zap.texto }),
+      });
+      const d = await r.json().catch(() => ({}));
+
+      if (r.ok) {
+        toast.success(
+          "Orçamento enviado",
+          `Foi para ${formatPhone(String(c?.whatsapp || c?.phone || ""))}.`
+        );
+        setZap(null);
+        return;
+      }
+
+      /* Cada motivo tem uma frase própria: "falhou" sozinho obriga o
+         operador a adivinhar se o problema é dele ou do sistema. */
+      if (r.status === 409) {
+        setZapFalhou(
+          "O WhatsApp do sistema está desconectado. Reconecte em Atendimento → WhatsApp → Conexão."
+        );
+      } else if (r.status === 403) {
+        setZapFalhou("Este contato pediu para não receber mensagens.");
+      } else if (r.status === 422) {
+        setZapFalhou(String(d?.erro || "O número do cadastro não é válido para WhatsApp."));
+      } else if (r.status === 502 || r.status === 503) {
+        /* O proxy devolve "não está rodando" quando não alcança o
+           serviço. Sozinha, a frase manda o operador chamar suporte;
+           com o caminho da tela, ele mesmo resolve. */
+        setZapFalhou(
+          "O serviço do WhatsApp não está no ar. Veja em Atendimento → WhatsApp → Conexão."
+        );
+      } else {
+        setZapFalhou(String(d?.erro || d?.error || "Não consegui enviar agora."));
+      }
+    } catch {
+      setZapFalhou("Não consegui falar com o serviço do WhatsApp.");
+    } finally {
+      setZapEnviando(false);
+    }
+  }
+
+  async function abrirWhatsApp(quote: Row) {
+    setZapCarregando(true);
+    try {
+      const r = await fetch("/api/quotes/whatsapp", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ id: Number(quote.id) }),
+      });
+      const d = await r.json();
+      if (!r.ok) {
+        toast.error("Não foi possível montar a mensagem", d?.error || "Tente de novo.");
+        return;
+      }
+      /* Limpa o aviso da tentativa anterior: reabrir a prévia já
+         mostrando "não deu para enviar" seria mentira. */
+      setZapFalhou(null);
+      setZap({ quote, texto: d.texto, cliente: d.cliente });
+    } catch {
+      toast.error("Não foi possível montar a mensagem", "Verifique a conexão.");
+    } finally {
+      setZapCarregando(false);
+    }
+  }
 
   const view = useMemo(() => quotes.find((q) => Number(q.id) === viewId) || null, [quotes, viewId]);
   const viewItems = useMemo(
@@ -113,7 +266,9 @@ export function QuotesClient({
 
   /* Busca inteligente + filtro */
   const filtered = useMemo(() => {
-    const term = q.trim().toLowerCase();
+    /* O servidor já filtrou; isto só cobre o instante entre digitar e
+       a página chegar. */
+    const term = paginacao.busca.trim().toLowerCase();
     return quotes.filter((quote) => {
       const c = custName(quote.customerId);
       const qItems = items.filter((i) => Number(i.quoteId) === Number(quote.id));
@@ -128,7 +283,7 @@ export function QuotesClient({
       if (!matchTerm) return false;
       return filter === "all" || quote.status === filter;
     });
-  }, [quotes, q, filter, custName, items]);
+  }, [quotes, paginacao.busca, filter, custName, items]);
 
   /* Cálculo de totais com money.ts */
   const totals = useMemo(() => {
@@ -160,10 +315,13 @@ export function QuotesClient({
     setEditorOpen(true);
   }
 
+  /* Abertura automática via ?novo=1 (vinda do CRM/atalhos).
+     `startTransition` evita a cascata de render que o React 19 sinaliza
+     quando um efeito chama setState de forma síncrona. */
   useEffect(() => {
-    if (params.get("novo") === "1") {
-      openNew(params.get("customerId") || undefined);
-    }
+    if (params.get("novo") !== "1") return;
+    const preset = params.get("customerId") || undefined;
+    startTransition(() => openNew(preset));
     // abre somente na entrada da página
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -272,10 +430,22 @@ export function QuotesClient({
         notes: form.notes || null,
         items: editItems.map((i) => ({ ...i, description: i.description || "Item avulso" })),
       };
-      if (editId) await mutate("quotes", "update", data, editId);
-      else await mutate("quotes", "create", data);
+      const saved = editId
+        ? await mutate("quotes", "update", data, editId)
+        : await mutate("quotes", "create", data);
 
       toast.success("Orçamento salvo com sucesso!", `Total ${formatBRL(totals.total)}`);
+
+      /* Preço fora da tabela não bloqueia — orçamento é negociação —,
+         mas o vendedor precisa saber que saiu do preço de catálogo. */
+      const warnings: string[] = Array.isArray(saved?.warnings) ? saved.warnings : [];
+      if (warnings.length > 0) {
+        toast.info(
+          warnings.length === 1 ? "Preço fora da tabela" : `${warnings.length} preços fora da tabela`,
+          warnings.join(" · ")
+        );
+      }
+
       setEditorOpen(false);
       router.refresh();
     } catch (e) {
@@ -286,12 +456,39 @@ export function QuotesClient({
   }
 
   async function setStatus(q: Row, status: string) {
-    await mutate("quotes", "update", { status }, Number(q.id));
-    toast.success(`Orçamento marcado como ${status}`);
-    router.refresh();
+    try {
+      await mutate("quotes", "update", { status }, Number(q.id));
+      toast.success(`Orçamento marcado como ${status}`);
+      router.refresh();
+    } catch (e) {
+      toast.error("Não foi possível mudar o status", e instanceof Error ? e.message : undefined);
+    }
+  }
+
+  /* Orçamento aprovado é acordo fechado: o servidor recusa alteração de
+     valor. Reabrir devolve para rascunho e registra o valor anterior nas
+     observações, para a renegociação ficar rastreável. */
+  async function reopenQuote(q: Row) {
+    const total = formatBRL(toNumber(q.total, 0));
+    if (
+      !confirm(
+        `Reabrir o orçamento ${q.number} para renegociação?\n\nEle volta para "rascunho" e o valor aprovado (${total}) fica registrado nas observações.`
+      )
+    ) {
+      return;
+    }
+    try {
+      await mutate("quotes", "update", { reopen: true, discount: toNumber(q.discount, 0) }, Number(q.id));
+      toast.success("Orçamento reaberto", `${q.number} voltou para rascunho`);
+      router.refresh();
+    } catch (e) {
+      toast.error("Não foi possível reabrir", e instanceof Error ? e.message : undefined);
+    }
   }
 
   async function convertToOrder(q: Row) {
+    if (converting !== null) return;
+    setConverting(Number(q.id));
     try {
       const res = await fetch("/api/orders/convert", {
         method: "POST",
@@ -308,11 +505,14 @@ export function QuotesClient({
       router.refresh();
     } catch (e) {
       toast.error("Erro na conversão", e instanceof Error ? e.message : undefined);
+    } finally {
+      setConverting(null);
     }
   }
 
   const hasOrder = (quoteId: number) => orders.some((o) => Number(o.quoteId) === quoteId);
-  const counts = STATUSES.map((s) => ({ s, n: quotes.filter((q) => q.status === s).length }));
+  /* Contadores do servidor: somam a base inteira, não a página. */
+  const counts = STATUSES.map((s) => ({ s, n: paginacao.contadores[s] ?? 0 }));
 
   const customerOptions = useMemo(
     () =>
@@ -350,7 +550,7 @@ export function QuotesClient({
                 : "border-paper-300 bg-paper-50 text-ink-500 hover:border-ink-400"
             )}
           >
-            Todos · {quotes.length}
+            Todos · {paginacao.contadores.todos ?? 0}
           </button>
           {counts.map(({ s, n }) => (
             <button
@@ -438,6 +638,18 @@ export function QuotesClient({
                       >
                         Imprimir
                       </Button>
+                      {/* Mandar orçamento é a ação mais frequente desta
+                          tela. Antes só existia dentro da prévia de
+                          impressão (Imprimir → WhatsApp), o que obrigava
+                          a abrir um documento A4 para enviar uma
+                          mensagem. Aqui é um clique direto da lista. */}
+                      <IconButton
+                        size="sm"
+                        name="whatsapp"
+                        label="Enviar por WhatsApp"
+                        loading={zapCarregando}
+                        onClick={() => abrirWhatsApp(q)}
+                      />
                       {q.status === "rascunho" && (
                         <IconButton
                           size="sm"
@@ -457,10 +669,20 @@ export function QuotesClient({
                       {q.status === "aprovado" && !hasOrder(Number(q.id)) && (
                         <button
                           onClick={() => convertToOrder(q)}
-                          className="focus-ring flex h-7 cursor-pointer items-center gap-1 rounded-md bg-proc-c-strong px-2.5 font-mono text-[10px] font-bold text-white uppercase transition-colors hover:bg-cyan-800"
+                          disabled={converting !== null}
+                          className="focus-ring flex h-7 cursor-pointer items-center gap-1 rounded-md bg-proc-c-strong px-2.5 font-mono text-[10px] font-bold text-white uppercase transition-colors hover:bg-cyan-800 disabled:cursor-not-allowed disabled:opacity-50"
                         >
-                          <Icon name="arrow-right" size={11} /> virar pedido
+                          <Icon name="arrow-right" size={11} />{" "}
+                          {converting === Number(q.id) ? "convertendo…" : "virar pedido"}
                         </button>
+                      )}
+                      {q.status === "aprovado" && !hasOrder(Number(q.id)) && (
+                        <IconButton
+                          size="sm"
+                          name="refresh"
+                          label="Reabrir para renegociação"
+                          onClick={() => reopenQuote(q)}
+                        />
                       )}
                       {hasOrder(Number(q.id)) && <Badge tone="green">pedido gerado</Badge>}
                       <IconButton
@@ -476,6 +698,64 @@ export function QuotesClient({
             })}
           </tbody>
         </TableWrap>
+      )}
+
+      {/* ── PAGINAÇÃO ── mesma dupla de Pedidos: rolagem no celular,
+         páginas numeradas no computador. */}
+      {paginacao.total > 0 && (
+        <div className="mt-5 flex flex-col items-center gap-3 border-t border-paper-200 pt-4">
+          <p className="text-xs text-ink-500">
+            Mostrando{"\u00a0"}
+            <strong className="text-ink-700">
+              {(paginacao.pagina - 1) * paginacao.porPagina + 1}
+              {"\u00a0"}a{"\u00a0"}
+              {Math.min(paginacao.pagina * paginacao.porPagina, paginacao.total)}
+            </strong>
+            {"\u00a0"}de{"\u00a0"}<strong className="text-ink-700">{paginacao.total}</strong>
+            {"\u00a0"}
+            {paginacao.total === 1 ? "orçamento" : "orçamentos"}
+            {paginacao.busca ? ` para "${paginacao.busca}"` : ""}
+          </p>
+
+          {paginacao.totalPaginas > 1 && (
+            <>
+              <div className="flex w-full sm:hidden">
+                {paginacao.pagina < paginacao.totalPaginas && (
+                  <Button
+                    variant="outline"
+                    className="w-full"
+                    onClick={() => irPara({ pagina: paginacao.pagina + 1 })}
+                  >
+                    Carregar mais
+                  </Button>
+                )}
+              </div>
+
+              <div className="hidden items-center gap-1.5 sm:flex">
+                <Button
+                  variant="outline"
+                  disabled={paginacao.pagina <= 1}
+                  onClick={() => irPara({ pagina: paginacao.pagina - 1 })}
+                >
+                  Anterior
+                </Button>
+                <span className="px-3 text-xs text-ink-500">
+                  Página{"\u00a0"}
+                  <strong className="text-ink-700">{paginacao.pagina}</strong>
+                  {"\u00a0"}de{"\u00a0"}
+                  <strong className="text-ink-700">{paginacao.totalPaginas}</strong>
+                </span>
+                <Button
+                  variant="outline"
+                  disabled={paginacao.pagina >= paginacao.totalPaginas}
+                  onClick={() => irPara({ pagina: paginacao.pagina + 1 })}
+                >
+                  Próxima
+                </Button>
+              </div>
+            </>
+          )}
+        </div>
       )}
 
       {/* ── EDITOR / FORMULÁRIO DO ORÇAMENTO ── */}
@@ -733,6 +1013,7 @@ export function QuotesClient({
 
       {/* ── CADASTRO RÁPIDO DE CLIENTE (F8) ── */}
       <QuickCustomerModal
+        key={newCustomerOpen ? "customer-open" : "customer-closed"}
         open={newCustomerOpen}
         onClose={() => setNewCustomerOpen(false)}
         onCreated={(newCust) => {
@@ -788,15 +1069,27 @@ export function QuotesClient({
                   </Button>
                 )}
                 {view.status === "aprovado" && !hasOrder(Number(view.id)) && (
-                  <Button
-                    icon="arrow-right"
-                    onClick={() => {
-                      convertToOrder(view);
-                      setViewId(null);
-                    }}
-                  >
-                    Converter em Pedido
-                  </Button>
+                  <>
+                    <Button
+                      variant="outline"
+                      icon="refresh"
+                      onClick={() => {
+                        reopenQuote(view);
+                        setViewId(null);
+                      }}
+                    >
+                      Reabrir
+                    </Button>
+                    <Button
+                      icon="arrow-right"
+                      onClick={() => {
+                        convertToOrder(view);
+                        setViewId(null);
+                      }}
+                    >
+                      Converter em Pedido
+                    </Button>
+                  </>
                 )}
               </div>
 
@@ -817,7 +1110,7 @@ export function QuotesClient({
       >
         {view && (
           <div className="space-y-5">
-            <div className="grid grid-cols-3 gap-2.5">
+            <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
               {[
                 { k: "Subtotal", v: formatBRL(Number(view.subtotal || 0)) },
                 { k: "Desconto", v: `− ${formatBRL(Number(view.discount || 0))}` },
@@ -887,15 +1180,30 @@ export function QuotesClient({
         width="max-w-4xl"
         footer={
           <div className="flex items-center justify-between w-full">
-            <Button
-              variant="ink"
-              icon="printer"
-              onClick={() => {
-                window.print();
-              }}
-            >
-              Imprimir A4
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="ink"
+                icon="printer"
+                onClick={() => {
+                  window.print();
+                }}
+              >
+                Imprimir A4
+              </Button>
+              <Button
+                variant="soft"
+                icon="whatsapp"
+                disabled={zapCarregando}
+                onClick={() => {
+                  if (!printDoc) return;
+                  const q = printDoc.quote;
+                  setPrintDoc(null);
+                  abrirWhatsApp(q);
+                }}
+              >
+                {zapCarregando ? "Montando…" : "WhatsApp"}
+              </Button>
+            </div>
             <Button variant="ghost" onClick={() => setPrintDoc(null)}>
               Fechar
             </Button>
@@ -903,16 +1211,106 @@ export function QuotesClient({
         }
       >
         {printDoc && (
-          <div className="bg-paper-100 p-4 rounded-xl border border-paper-300">
-            <CommercialProposalA4
-              quote={printDoc.quote}
-              quoteItems={items.filter((i) => Number(i.quoteId) === Number(printDoc.quote.id))}
-              customer={custName(printDoc.quote.customerId)}
-              company={company}
-            />
+          <div className="bg-paper-100 p-4 rounded-xl border border-paper-300 overflow-x-auto">
+            {/* Reduz a folha para caber na largura do aparelho; no
+               computador volta ao tamanho real. */}
+            <div className="[zoom:0.42] sm:[zoom:1] w-[800px] sm:mx-auto">
+              <CommercialProposalA4
+                quote={printDoc.quote}
+                quoteItems={items.filter((i) => Number(i.quoteId) === Number(printDoc.quote.id))}
+                customer={custName(printDoc.quote.customerId)}
+                company={company}
+              />
+            </div>
           </div>
         )}
       </Drawer>
+
+      {/* ── PRÉVIA DO WHATSAPP ──
+         O texto sai do catálogo editável (Painel → Mensagens) e pode
+         ser ajustado aqui antes de enviar, sem virar padrão. */}
+      <Modal
+        open={!!zap}
+        onClose={() => setZap(null)}
+        title="Enviar orçamento por WhatsApp"
+        subtitle="Confira e ajuste o texto antes de enviar. Para mudar o padrão, use Painel → Mensagens."
+        width="max-w-lg"
+        footer={
+          <div className="flex w-full items-center justify-between gap-2">
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setZap(null);
+                setZapFalhou(null);
+              }}
+            >
+              Cancelar
+            </Button>
+            {/* Enquanto o envio direto for possível, é UM clique. A
+                saída pelo WhatsApp Web só aparece quando o direto
+                falha — assim o caminho bom não fica competindo com o
+                caminho de emergência. */}
+            {zapFalhou ? (
+              <Button icon="whatsapp" variant="outline" onClick={abrirNoWhatsAppWeb}>
+                Abrir no WhatsApp Web
+              </Button>
+            ) : (
+              <Button icon="whatsapp" onClick={enviarPeloServico} disabled={zapEnviando}>
+                {zapEnviando ? "Enviando…" : "Enviar pelo WhatsApp"}
+              </Button>
+            )}
+          </div>
+        }
+      >
+        {zap && (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-2 text-[11.5px]">
+              <span className="text-ink-500">
+                Para:{"\u00a0"}
+                <strong className="text-ink-700">
+                  {zap.cliente?.nome || "— sem cliente —"}
+                </strong>
+              </span>
+              {zap.cliente && isWhatsAppBlocked(zap.cliente as Row) ? (
+                <Badge tone="magenta">Não aceita WhatsApp</Badge>
+              ) : whatsappNumber((zap.cliente || {}) as Row) ? (
+                <span className="font-mono text-ink-500">
+                  {formatPhone(String(zap.cliente?.whatsapp || zap.cliente?.phone || ""))}
+                </span>
+              ) : (
+                <Badge tone="cyan">Sem número — você escolhe</Badge>
+              )}
+            </div>
+
+            <Textarea
+              value={zap.texto}
+              onChange={(e) => setZap({ ...zap, texto: e.target.value })}
+              rows={12}
+              className="font-mono text-[12px] leading-relaxed"
+            />
+
+            {zapFalhou && (
+              <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2.5">
+                <p className="text-[12px] font-semibold text-amber-900">
+                  Não deu para enviar pelo sistema
+                </p>
+                <p className="mt-0.5 text-[11.5px] leading-relaxed text-amber-800">
+                  {zapFalhou}
+                </p>
+                <p className="mt-1.5 text-[11px] text-amber-700">
+                  O texto está pronto: use o botão ao lado para abrir o
+                  WhatsApp Web e enviar por lá.
+                </p>
+              </div>
+            )}
+
+            <p className="text-[11px] text-ink-400">
+              O WhatsApp mostra *texto entre asteriscos* em negrito e
+              _entre sublinhados_ em itálico.
+            </p>
+          </div>
+        )}
+      </Modal>
 
       {/* ÁREA ISOLADA DE IMPRESSÃO A4 PROPOSTA COMERCIAL */}
       {printDoc && (
@@ -947,7 +1345,12 @@ function CommercialProposalA4({
   company: PosCompany;
   isPrint?: boolean;
 }) {
-  const createdAtFormatted = new Date(quote.createdAt || Date.now()).toLocaleDateString("pt-BR");
+  /* Sem `Date.now()` no render: ler o relógio durante a renderização é
+     impuro (o React 19 acusa) e ainda daria datas diferentes entre
+     servidor e cliente na proposta impressa. */
+  const createdAtFormatted = quote.createdAt
+    ? new Date(quote.createdAt).toLocaleDateString("pt-BR")
+    : "—";
   const subtotal = toNumber(quote.subtotal, 0);
   const discount = toNumber(quote.discount, 0);
   const shippingFee = toNumber(quote.shippingFee, 0);
@@ -957,7 +1360,9 @@ function CommercialProposalA4({
     <div
       className={cn(
         "font-sans text-ink-900 bg-white text-[12px] leading-snug select-text",
-        isPrint ? "w-full p-8" : "p-8 max-w-[800px] mx-auto shadow-sm rounded border border-paper-300"
+        /* Mesma correção do pedido: a folha mantém a largura real e é
+           reduzida por inteiro no celular, em vez de espremida. */
+        isPrint ? "w-full p-8" : "w-[800px] shrink-0 p-8 shadow-sm rounded border border-paper-300"
       )}
       style={{ fontFamily: "'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif" }}
     >
@@ -965,7 +1370,7 @@ function CommercialProposalA4({
       <div className="flex items-start justify-between border-b border-paper-300 pb-4">
         <div>
           <h1 className="text-[22px] font-extrabold text-ink-950 tracking-tight leading-none">
-            {company.name || "PrintFlow Gráfica Criativa"}
+            {company.name || "VTDIGITAL ART STUDIO"}
           </h1>
           <p className="text-[11px] font-semibold text-proc-c tracking-wider uppercase mt-1">
             GRÁFICA RÁPIDA E PERSONALIZADOS
@@ -976,7 +1381,10 @@ function CommercialProposalA4({
           <p>{company.address}</p>
           <p>{company.phone} · {company.phone2}</p>
           <p>{company.email}</p>
-          <p className="font-mono">CNPJ {company.document}</p>
+          <p className="font-mono">
+            CNPJ {company.document}
+            {company.stateRegistration ? ` · IE ${company.stateRegistration}` : ""}
+          </p>
         </div>
       </div>
 
@@ -1012,17 +1420,65 @@ function CommercialProposalA4({
           </div>
           <div>
             <span className="block font-mono text-[9px] text-ink-400 uppercase">CPF/CNPJ</span>
-            <span className="font-mono">{customer?.document || "—"}</span>
+            <span className="font-mono">
+              {customer?.document ? formatDocumentAuto(String(customer.document)) : "—"}
+            </span>
           </div>
           <div>
             <span className="block font-mono text-[9px] text-ink-400 uppercase">CONTATO</span>
-            <span>{customer?.phone || customer?.whatsapp || "—"}</span>
+            <span>
+              {customer?.phone || customer?.whatsapp
+                ? formatPhone(String(customer.phone || customer.whatsapp))
+                : "—"}
+            </span>
           </div>
           <div>
             <span className="block font-mono text-[9px] text-ink-400 uppercase">E-MAIL</span>
             <span className="truncate block">{customer?.email || "—"}</span>
           </div>
         </div>
+
+        {/* PJ: mesmos dados fiscais que a OS já imprime, para os dois
+            documentos não saírem divergentes da mesma gráfica. */}
+        {customer?.type === "pj" && (
+          <div className="mt-2 grid grid-cols-4 gap-2 text-[11.5px]">
+            <div>
+              <span className="block font-mono text-[9px] text-ink-400 uppercase">RAZÃO SOCIAL</span>
+              <span>{String(customer?.name || "—")}</span>
+            </div>
+            <div>
+              <span className="block font-mono text-[9px] text-ink-400 uppercase">INSC. ESTADUAL</span>
+              <span className="font-mono">{String(customer?.stateRegistration || "ISENTO")}</span>
+            </div>
+            <div>
+              <span className="block font-mono text-[9px] text-ink-400 uppercase">INSC. MUNICIPAL</span>
+              <span className="font-mono">{String(customer?.municipalRegistration || "—")}</span>
+            </div>
+            <div>
+              <span className="block font-mono text-[9px] text-ink-400 uppercase">A/C</span>
+              <span>{String(customer?.contactName || "—")}</span>
+            </div>
+          </div>
+        )}
+
+        {(customer?.street || customer?.city) && (
+          <div className="mt-2 text-[11.5px]">
+            <span className="block font-mono text-[9px] text-ink-400 uppercase">ENDEREÇO</span>
+            <span>
+              {[
+                customer?.street,
+                customer?.number,
+                customer?.complement,
+                customer?.district,
+                customer?.city,
+                customer?.state,
+                customer?.cep ? `CEP ${formatCEP(customer.cep)}` : null,
+              ]
+                .filter(Boolean)
+                .join(", ")}
+            </span>
+          </div>
+        )}
       </div>
 
       {/* ── CONDIÇÕES DA PROPOSTA ── */}
@@ -1163,19 +1619,9 @@ function QuickCustomerModal({
   const [loading, setLoading] = useState(false);
   const [fetchingCep, setFetchingCep] = useState(false);
 
-  useEffect(() => {
-    if (open) {
-      setName("");
-      setDocument("");
-      setPhone("");
-      setCep("");
-      setStreet("");
-      setNumber("");
-      setDistrict("");
-      setCity("");
-      setState("");
-    }
-  }, [open]);
+  /* O reset dos campos é feito pelo `key` no componente pai: remontar é
+     mais barato (e mais correto no React 19) que zerar nove estados
+     dentro de um efeito. */
 
   const handleCepBlur = async () => {
     const cleanCep = cep.replace(/\D/g, "");
@@ -1213,6 +1659,9 @@ function QuickCustomerModal({
         city: city.trim() || null,
         state: state.trim() || null,
         status: "ativo",
+        /* Cadastro rápido no meio do atendimento: documento fica
+           opcional aqui (a tela de Clientes & CRM exige). */
+        quickEntry: true,
       };
 
       const res = await fetch("/api/crud/customers", {

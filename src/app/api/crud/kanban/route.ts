@@ -44,7 +44,11 @@ export async function POST(req: Request) {
     if (op === "reorder") {
       const column = String(body.column || d.column || "backlog") as never;
       const ids = Array.isArray(body.ids) ? body.ids.map(Number) : [];
-      return jsonResult(await reorderKanban(column, ids));
+      /* `allowMove` só quando o arrasto vem de outra coluna: sem ele,
+         reordenar não pode trazer cards de fora (nem burlar as travas
+         de cancelamento e sincronização com Pedidos). */
+      const allowMove = body.allowMove === true || body.allowMove === "1";
+      return jsonResult(await reorderKanban(column, ids, { allowMove }));
     }
 
     if (op === "create") return jsonResult(await createKanbanCard(d));

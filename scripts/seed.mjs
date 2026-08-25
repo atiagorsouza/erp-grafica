@@ -159,9 +159,15 @@ async function main() {
   const formats = [
     // [categoria, nome, largura, altura, fator área, cobertura, custo manual/face, foto]
     // --- LASER: matriz comercial configurável ---
-    ["laser", "A4", 210, 297, 1.0, 0.30, 1.50, false],
-    ["laser", "A3", 297, 420, 2.0, 0.30, 2.50, false],
-    ["laser", "A3+ (SRA3)", 320, 450, 2.31, 0.30, 3.50, false],
+    /* print_cost_override = 0: o motor calcula pelo consumível real.
+       Até a v3.46.3 estes formatos vinham com 1,50 / 2,50 / 3,50 — valores
+       genéricos de exemplo que SUBSTITUÍAM o cálculo técnico inteiro
+       (toner, cilindro, fusor, técnico, cobertura, área e desperdício
+       eram ignorados). Numa agenda de 92 faces o override dava R$ 138,00
+       contra R$ 21,14 de custo real. */
+    ["laser", "A4", 210, 297, 1.0, 0.30, 0, false],
+    ["laser", "A3", 297, 420, 2.0, 0.30, 0, false],
+    ["laser", "A3+ (SRA3)", 320, 450, 2.31, 0.30, 0, false],
     // --- JATO DE TINTA: A4 foto R$1,80 conforme exemplo ---
     ["jato-de-tinta", "A4", 210, 297, 1.0, 1.0, 1.80, false],
     ["jato-de-tinta", "A3", 297, 420, 2.0, 1.0, 3.60, false],

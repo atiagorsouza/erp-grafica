@@ -23,18 +23,25 @@ printf "Release %s → %s\n" "$CURRENT" "$NEW_VERSION"
 printf '%s\n' "$NEW_VERSION" > VERSION
 node scripts/check-version.mjs --fix >/dev/null
 
-if [ -f CHANGELOG.md ] && ! grep -q "\#\# \[$NEW_VERSION\]" CHANGELOG.md; then
+# O changelog mora em docs/ desde sempre — o script procurava na raiz,
+# o git add inteiro falhava calado ("|| true") e o commit do bump de
+# versão não saía: a tag nascia apontando pro commit SEM o bump.
+# Descoberto no release da 3.68.2 (tag caiu no commit anterior).
+CHANGELOG="docs/CHANGELOG.md"
+[ -f "$CHANGELOG" ] || CHANGELOG="CHANGELOG.md"
+
+if [ -f "$CHANGELOG" ] && ! grep -q "\#\# \[$NEW_VERSION\]" "$CHANGELOG"; then
   TODAY="$(date +%Y-%m-%d)"
   TMP="$(mktemp)"
   {
     printf '## [%s] — %s\n\n%s\n\n' "$NEW_VERSION" "$TODAY" "- $MESSAGE"
-    cat CHANGELOG.md
+    cat "$CHANGELOG"
   } > "$TMP"
-  mv "$TMP" CHANGELOG.md
+  mv "$TMP" "$CHANGELOG"
 fi
 
 if [ -d .git ]; then
-  git add VERSION CHANGELOG.md package.json package-lock.json src/lib/version.ts 2>/dev/null || true
+  git add VERSION "$CHANGELOG" package.json package-lock.json src/lib/version.ts
   git commit -q -m "chore(release): v$NEW_VERSION — $MESSAGE" || true
   git tag -a "v$NEW_VERSION" -m "$MESSAGE"
   printf "Tag criada: v%s — publique com: git push --follow-tags\n" "$NEW_VERSION"

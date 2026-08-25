@@ -16,10 +16,14 @@ const tableSchema = z.object({
   categoryId: z.coerce.number().int().positive().nullable().optional(),
   label: z.string().trim().min(2, "Descrição obrigatória").max(180),
   unitCost: z.coerce.number().finite().min(0, "Preço não pode ser negativo").max(999999999),
+  sellPrice: z.coerce.number().finite().min(0, "Preço de venda não pode ser negativo").max(999999999).default(0),
   unit: z.enum(UNITS).default("unidade"),
   widthCm: z.coerce.number().finite().min(0).max(100000).nullable().optional(),
   heightCm: z.coerce.number().finite().min(0).max(100000).nullable().optional(),
   minQty: z.coerce.number().finite().min(0.001).max(999999999).default(1),
+  piecesPerSheet: z.coerce.number().finite().min(0).max(100000).default(1),
+  minCharge: z.coerce.number().finite().min(0).max(999999999).default(0),
+  minChargeSell: z.coerce.number().finite().min(0).max(999999999).default(0),
   notes: z.string().trim().max(500).nullable().optional(),
   active: z.boolean().default(true),
 });
@@ -41,7 +45,10 @@ function parse(raw: unknown): { ok: true; data: TablePayload } | PricingTableErr
 
 function normalizeUnit(type: TablePayload["type"], unit: TablePayload["unit"]) {
   if (type === "lona" || type === "adesivo") return "m2";
-  if (type === "dtf_textil") return unit === "unidade" ? "metro" : unit;
+  /* DTF têxtil NÃO é forçado a metro linear (v3.43.0).
+     O fornecedor do usuário vende folha fechada de tamanho fixo
+     (38×25 por R$ 11,61), igual ao DTF UV. Converter para "metro"
+     obrigava a informar largura útil e impedia o cadastro real. */
   return unit;
 }
 
@@ -63,10 +70,14 @@ function dataToDb(data: TablePayload) {
     categoryId: data.categoryId || null,
     label: data.label.trim(),
     unitCost: toDecimalString(data.unitCost, 4),
+    sellPrice: toDecimalString(data.sellPrice, 4),
     unit,
     widthCm: data.widthCm != null && data.widthCm > 0 ? toDecimalString(data.widthCm, 2) : null,
     heightCm: data.heightCm != null && data.heightCm > 0 ? toDecimalString(data.heightCm, 2) : null,
     minQty: toDecimalString(data.minQty, 3),
+    piecesPerSheet: toDecimalString(data.piecesPerSheet || 1, 3),
+    minCharge: toDecimalString(data.minCharge, 4),
+    minChargeSell: toDecimalString(data.minChargeSell, 4),
     notes: data.notes?.trim() || null,
     active: data.active,
   };
@@ -112,13 +123,70 @@ export async function archivePricingTable(id: number) {
   return { ok: true as const, row };
 }
 
-export function estimatePricingTableCost(row: typeof pricingTables.$inferSelect, quantity: number, widthCm?: number, heightCm?: number) {
+/**
+ * Custo de uma linha de tabela para a quantidade pedida.
+ *
+ * Em `m2` a conta tem DOIS eixos que não podem ser confundidos:
+ *   - a área de UMA peça (largura × altura), com m² mínimo faturável;
+ *   - quantas peças foram pedidas.
+ *
+ * A versão anterior calculava a área e devolvia o valor de UMA peça,
+ * descartando `quantity`: 10 lonas de 1 m² custavam o mesmo que 1.
+ * O bug estava dormente porque a função nunca era chamada — mas ela é
+ * a única porta de entrada para plugar a tabela no orçamento, então
+ * seria o primeiro erro a aparecer no dia em que fosse ligada.
+ *
+ * `minQty` em m² é o mínimo faturável POR PEÇA (gráfica não vende
+ * 0,3 m² de lona), não o mínimo do pedido.
+ */
+export function estimatePricingTableCost(
+  row: typeof pricingTables.$inferSelect,
+  quantity: number,
+  widthCm?: number,
+  heightCm?: number,
+  /* "cost" para compor produto (margem vem depois), "sell" para venda
+     direta no PDV. Sem `sellPrice` cadastrado, cai no custo — melhor
+     cobrar o custo do que cobrar zero. */
+  mode: "cost" | "sell" = "cost"
+) {
   const unit = String(row.unit || "unidade");
-  const q = Math.max(quantity, toNumber(row.minQty, 1));
+  const sell = toNumber(row.sellPrice, 0);
+  const unitCost = mode === "sell" && sell > 0 ? sell : toNumber(row.unitCost, 0);
+  const minQty = toNumber(row.minQty, 1);
+  /* O piso do CUSTO é o que o fornecedor cobra; o piso da VENDA é o
+     seu, com margem. Usar o mesmo número nos dois zerava o lucro:
+     um adesivo 30×30 custava R$ 30 de mínimo e era vendido por R$ 30. */
+  const minChargeSell = toNumber(row.minChargeSell, 0);
+  const minCharge =
+    mode === "sell"
+      ? minChargeSell > 0
+        ? minChargeSell
+        : 0
+      : toNumber(row.minCharge, 0);
+  /* Quantidade nunca é negativa nem fracionária-negativa; 0 peças = 0. */
+  const qty = Math.max(quantity, 0);
+  if (qty <= 0) return 0;
+
   if (unit === "m2") {
-    const areaM2 = Math.max((toNumber(widthCm, toNumber(row.widthCm, 100)) * toNumber(heightCm, toNumber(row.heightCm, 100))) / 10000, 0);
-    return round2(Math.max(areaM2, toNumber(row.minQty, 1)) * toNumber(row.unitCost, 0));
+    /* Lona/Vinil: área real × preço/m², com PISO EM REAIS por peça.
+       Adesivo de 30×30 cm dá 0,09 m² = R$ 4,05, mas o fornecedor tem
+       mínimo de R$ 30 — quem paga o piso é cada peça, não o pedido. */
+    const w = toNumber(widthCm, toNumber(row.widthCm, 0));
+    const h = toNumber(heightCm, toNumber(row.heightCm, 0));
+    const areaM2 = Math.max((w * h) / 10000, 0);
+    const perPiece = Math.max(areaM2 * unitCost, minCharge);
+    return round2(perPiece * qty);
   }
-  if (unit === "metro") return round2(q * toNumber(row.unitCost, 0));
-  return round2(q * toNumber(row.unitCost, 0));
+
+  /* DTF: a folha é INDIVISÍVEL. Com 6 peças por folha, 8 canecas
+     consomem 2 folhas (capacidade 12) e a sobra é perda — cobrar
+     8 × R$ 3,87 deixaria R$ 15,48 no prejuízo a cada pedido quebrado. */
+  const perSheet = toNumber(row.piecesPerSheet, 1);
+  if (perSheet > 1) {
+    const sheets = Math.ceil(qty / perSheet);
+    return round2(Math.max(sheets * unitCost, minCharge));
+  }
+
+  /* unidade | metro | folha: o mínimo é do PEDIDO. */
+  return round2(Math.max(Math.max(qty, minQty) * unitCost, minCharge));
 }

@@ -80,6 +80,8 @@ export function IconButton({
   label,
   tone = "default",
   size = "md",
+  loading,
+  disabled,
   className,
   ...rest
 }: ButtonHTMLAttributes<HTMLButtonElement> & {
@@ -87,13 +89,16 @@ export function IconButton({
   label: string;
   tone?: "default" | "danger" | "primary";
   size?: "sm" | "md";
+  /** trava o botão e mostra spinner enquanto a ação está em voo */
+  loading?: boolean;
 }) {
   return (
     <button
       title={label}
       aria-label={label}
+      disabled={disabled || loading}
       className={cn(
-        "focus-ring inline-flex cursor-pointer items-center justify-center rounded-md transition-colors",
+        "focus-ring inline-flex cursor-pointer items-center justify-center rounded-md transition-colors disabled:cursor-not-allowed disabled:opacity-40",
         size === "sm" ? "h-7 w-7" : "h-8.5 w-8.5",
         tone === "danger" && "text-ink-400 hover:bg-red-50 hover:text-red-700",
         tone === "primary" && "text-proc-c-strong hover:bg-proc-c-soft",
@@ -102,7 +107,16 @@ export function IconButton({
       )}
       {...rest}
     >
-      <Icon name={name} size={size === "sm" ? 14 : 16} />
+      {loading ? (
+        <span
+          className={cn(
+            "animate-spin rounded-full border-2 border-current border-t-transparent",
+            size === "sm" ? "h-3 w-3" : "h-3.5 w-3.5"
+          )}
+        />
+      ) : (
+        <Icon name={name} size={size === "sm" ? 14 : 16} />
+      )}
     </button>
   );
 }
@@ -270,33 +284,79 @@ export function StatusBadge({ value, label }: { value: string; label?: string })
 /* ════════════════════════════════════════════════════════════════
    FORMULÁRIOS
    ════════════════════════════════════════════════════════════════ */
-const fieldBase =
-  "focus-ring w-full rounded-lg border border-paper-300 bg-white px-3 text-[13px] text-ink-900 placeholder:text-ink-300 transition-colors hover:border-ink-400 focus:border-proc-c disabled:bg-paper-100 disabled:text-ink-400";
+/**
+ * Base dos campos, em duas versões (v3.46.3).
+ *
+ * Antes existia só a versão clara, e telas de fundo escuro — o PDV —
+ * mandavam `bg-ink-900 text-white` por cima via `className`. Isso
+ * deixava DUAS regras de cor no mesmo elemento, e qual vencia dependia
+ * da ordem em que o Tailwind gerou o CSS, não da ordem no código.
+ *
+ * No CSS gerado a ordem era:
+ *     .bg-ink-850   (PDV)
+ *     .bg-white     (base)   <- vinha depois, VENCIA
+ *     .text-ink-900 (base)
+ *     .text-white   (PDV)    <- vinha depois, VENCIA
+ *
+ * Resultado: fundo branco com texto branco. O campo "Recebido R$"
+ * ficava invisível — o valor era digitado e o troco calculava certo,
+ * mas não dava para ler o que se digitou.
+ *
+ * `tailwind-merge` resolve isso removendo a classe perdedora, mas
+ * depender dele deixa a legibilidade do PDV refém de uma dependência e
+ * da ordem do bundler. Com `tone="dark"` a classe clara simplesmente
+ * NÃO É EMITIDA: não há conflito para resolver.
+ */
+const fieldShared =
+  "focus-ring w-full rounded-lg border px-3 text-[13px] transition-colors focus:border-proc-c";
+
+const fieldLight =
+  "border-paper-300 bg-white text-ink-900 placeholder:text-ink-300 hover:border-ink-400 disabled:bg-paper-100 disabled:text-ink-400";
+
+const fieldDark =
+  "border-ink-700 bg-ink-900 text-white placeholder:text-ink-500 hover:border-ink-600 disabled:bg-ink-850 disabled:text-ink-500";
+
+/** `tone="dark"` para campos sobre fundo escuro (PDV). */
+export type FieldTone = "light" | "dark";
+
+const fieldTone = (tone: FieldTone = "light") =>
+  cn(fieldShared, tone === "dark" ? fieldDark : fieldLight);
+
+const fieldBase = cn(fieldShared, fieldLight);
 
 export function Input({
   className,
   mono,
+  tone,
   ref,
   ...rest
 }: InputHTMLAttributes<HTMLInputElement> & {
   mono?: boolean;
+  tone?: FieldTone;
   /** React 19 aceita `ref` como prop normal — usado pelo PDV (atalho F2). */
   ref?: Ref<HTMLInputElement>;
 }) {
-  return <input ref={ref} className={cn(fieldBase, "h-9.5", mono && "font-mono text-[12.5px]", className)} {...rest} />;
+  return (
+    <input
+      ref={ref}
+      className={cn(fieldTone(tone), "h-9.5", mono && "font-mono text-[12.5px]", className)}
+      {...rest}
+    />
+  );
 }
 
-export function Textarea({ className, ...rest }: TextareaHTMLAttributes<HTMLTextAreaElement>) {
-  return <textarea className={cn(fieldBase, "min-h-[84px] py-2.5 leading-relaxed", className)} {...rest} />;
+export function Textarea({ className, tone, ...rest }: TextareaHTMLAttributes<HTMLTextAreaElement> & { tone?: FieldTone }) {
+  return <textarea className={cn(fieldTone(tone), "min-h-[84px] py-2.5 leading-relaxed", className)} {...rest} />;
 }
 
 export function Select({
   className,
   children,
+  tone,
   ...rest
-}: SelectHTMLAttributes<HTMLSelectElement>) {
+}: SelectHTMLAttributes<HTMLSelectElement> & { tone?: FieldTone }) {
   return (
-    <select className={cn(fieldBase, "h-9.5 cursor-pointer appearance-none pr-8", className)} {...rest}>
+    <select className={cn(fieldTone(tone), "h-9.5 cursor-pointer appearance-none pr-8", className)} {...rest}>
       {children}
     </select>
   );
@@ -307,24 +367,37 @@ export function Field({
   hint,
   required,
   className,
+  erro,
   children,
 }: {
   label: string;
   hint?: string;
   required?: boolean;
   className?: string;
+  /** Mensagem de validação. Some com a dica e marca o campo em vermelho. */
+  erro?: string;
   children: ReactNode;
 }) {
   return (
-    <label className={cn("block", className)}>
+    <label className={cn("block", className)} data-erro={erro ? "1" : undefined}>
       <span className="mb-1.5 flex items-baseline justify-between">
-        <span className="text-[11.5px] font-semibold tracking-wide text-ink-600 uppercase">
+        <span
+          className={cn(
+            "text-[11.5px] font-semibold tracking-wide uppercase",
+            erro ? "text-red-600" : "text-ink-600"
+          )}
+        >
           {label}
           {required && <span className="ml-0.5 text-proc-m">*</span>}
         </span>
-        {hint && <span className="text-[10.5px] text-ink-400">{hint}</span>}
+        {/* A dica sai de cena quando há erro: duas linhas de texto
+            miúdo competindo só atrapalham a leitura. */}
+        {hint && !erro && <span className="text-[10.5px] text-ink-400">{hint}</span>}
       </span>
-      {children}
+      <span className={cn("block", erro && "[&_input]:border-red-400 [&_select]:border-red-400 [&_textarea]:border-red-400")}>
+        {children}
+      </span>
+      {erro && <span className="mt-1 block text-[11px] font-medium text-red-600">{erro}</span>}
     </label>
   );
 }

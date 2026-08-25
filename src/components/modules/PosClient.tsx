@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Button,
@@ -15,6 +15,7 @@ import {
   toast,
 } from "@/components/ui";
 import { Icon } from "@/components/icons";
+import { ShippingQuote, type QuoteOption } from "@/components/modules/ShippingQuote";
 import { cn } from "@/lib/format";
 import {
   applyDiscount,
@@ -24,6 +25,11 @@ import {
   toNumber,
   toPositive,
 } from "@/lib/money";
+import { formatCEP, formatDocumentAuto, formatPhone, isWhatsAppBlocked, whatsappNumber } from "@/lib/validators";
+import { focarPrimeiroErro, semErros, validaClienteRapido, type ErrosCadastro } from "@/lib/cadastro-validacao";
+
+import type { CompanyIdentity } from "@/lib/company";
+export type PosCompany = CompanyIdentity;
 
 /* ==================================================================
    TIPOS DA APLICAÇÃO
@@ -40,6 +46,10 @@ export type PosProduct = {
   trackStock: boolean | null;
   stock: string | number | null;
   minStock: string | number | null;
+  /** custo direto — usado para mostrar a margem real da venda (v3.28.0) */
+  costSnapshot?: string | number | null;
+  /** faixas de preço por quantidade (v3.37.0) */
+  priceTiers?: { minQuantity: string | number; unitPrice: string | number; label?: string | null }[];
 };
 
 export type PosCategory = {
@@ -64,27 +74,12 @@ export type PosCustomer = {
   city: string | null;
   state: string | null;
   cep: string | null;
+  /* PJ: quem recebe a nota/entrega no cliente (v3.21.0) */
+  contactName?: string | null;
+  /* cliente pediu para não receber WhatsApp (v3.22.0) */
+  whatsappOptOut?: boolean | null;
 };
 
-export type PosCompany = {
-  name: string;
-  legalName: string;
-  document: string;
-  email: string;
-  phone: string;
-  phone2: string;
-  whatsapp: string;
-  address: string;
-  street: string;
-  number: string;
-  district: string;
-  city: string;
-  state: string;
-  cep: string;
-  website: string;
-  pixKey: string;
-  receiptFooter?: string;
-};
 
 export type PdvConfig = {
   sellerDefault: string;
@@ -93,6 +88,16 @@ export type PdvConfig = {
   requireCustomer: boolean;
   requireOpenCash: boolean;
   receiptFooter: string;
+  /** peso da fonte no cupom impresso (400–800), ajustável no Painel */
+  receiptBoldness?: number;
+  /* Regras de pagamento (v3.28.0) — todas vindas do Painel de Controle.
+     O preço de tabela já embute o pior meio aceito, então PIX e dinheiro
+     têm desconto e o parcelamento tem piso de valor. */
+  pixDiscountRate?: number;
+  installmentMin?: number;
+  installmentMax?: number;
+  minMarginRate?: number;
+  taxRate?: number;
 };
 
 export type CashSession = {
@@ -109,6 +114,93 @@ type CartLine = {
   unitPrice: number;
   quantity: number;
   unitLabel?: string;
+  /** custo unitário no momento da venda, para a análise de margem */
+  costSnapshot?: number;
+  /* --------------------------------------------------------------
+   * FAIXAS POR QUANTIDADE (v3.37.0)
+   *
+   * Guardadas NA LINHA para a reprecificação não depender de procurar
+   * o produto de novo a cada clique no +/-. O servidor recalcula tudo
+   * na hora de fechar — isto aqui é só para a tela não mentir.
+   * ------------------------------------------------------------- */
+  priceTiers?: { minQuantity: number; unitPrice: number; label?: string | null }[];
+  /** menor quantidade vendável; 0 = sem mínimo */
+  minQuantity?: number;
+  /** rótulo da faixa ativa, mostrado na linha do carrinho */
+  tierLabel?: string | null;
+};
+
+/** Rascunho do carrinho espelhado no navegador (recuperação após F5/queda). */
+/**
+ * Reprecifica a linha do carrinho segundo a faixa de quantidade.
+ *
+ * Espelha `resolvePriceTier` do servidor: vale a MAIOR faixa cujo
+ * mínimo cabe na quantidade. A conta é refeita a cada +/- porque o
+ * preço unitário muda no meio da venda — passar de 99 para 100 un
+ * derruba o unitário, e a tela precisa mostrar isso na hora.
+ *
+ * O servidor recalcula tudo de novo em `createSale`; esta função existe
+ * para a tela não mentir para o operador, não para definir o preço.
+ */
+function repriceLine(line: CartLine): CartLine {
+  const tiers = line.priceTiers;
+  if (!tiers || tiers.length === 0) return line;
+
+  const applicable = tiers.reduce<(typeof tiers)[number] | null>(
+    (acc, t) => (line.quantity >= t.minQuantity ? t : acc),
+    null
+  );
+  /* Abaixo do mínimo mantemos o preço da menor faixa: o aviso visual
+     fica por conta de `minQuantity`, e o servidor recusa no fechamento. */
+  const chosen = applicable || tiers[0];
+  return { ...line, unitPrice: round2(chosen.unitPrice), tierLabel: chosen.label ?? null };
+}
+
+const DRAFT_KEY = "pdv_cart_draft";
+/** Rascunho de mais de 12h é lixo de turno anterior. */
+const DRAFT_TTL_MS = 12 * 60 * 60 * 1000;
+
+type PosDraft = {
+  savedAt: number;
+  clientRef: string;
+  cart: CartLine[];
+  customerId: string;
+  discountInput: string;
+  discountMode: "value" | "percent";
+  payment: string;
+  sellerName: string;
+  deliveryMode: string;
+  notes: string;
+};
+
+/** Uma parcela do pagamento dividido. `amount` é o valor líquido digitado
+ *  pelo operador; a taxa de cartão é somada pelo servidor. */
+type SplitLine = { key: string; method: string; amount: string };
+
+/** Linha de "últimas vendas" vinda de /api/pdv/recent-sales. */
+type RecentSale = {
+  id: number;
+  number: string;
+  total: string | number;
+  subtotal: string | number;
+  discount: string | number;
+  cardFee: string | number;
+  paymentMethod: string | null;
+  payments: unknown;
+  receivedAmount: string | number | null;
+  changeAmount: string | number | null;
+  status: string;
+  items: unknown;
+  sellerName: string | null;
+  deliveryMode: string | null;
+  deliveryDate: string | null;
+  notes: string | null;
+  cancelReason: string | null;
+  createdAt: string;
+  customerId: number | null;
+  customerName: string | null;
+  customerDocument: string | null;
+  customerPhone: string | null;
 };
 
 type ReceiptData = {
@@ -127,6 +219,8 @@ type ReceiptData = {
   deliveryMode: string;
   deliveryDate: string;
   notes: string;
+  /** parcelas do pagamento dividido, já com a taxa aplicada pelo servidor */
+  splits?: { method: string; amount: number }[] | null;
 };
 
 const PAYMENTS = [
@@ -152,6 +246,7 @@ const uid = () =>
    ================================================================== */
 
 export function PosClient({
+  sellers,
   products: allProducts,
   productCats,
   customers: initialCustomers,
@@ -161,6 +256,8 @@ export function PosClient({
   pdvConfig,
   cashSession: initialSession,
 }: {
+  /** vendedores cadastrados — o cupom deixa de depender de texto livre */
+  sellers: { id: number; nome: string }[];
   products: PosProduct[];
   productCats: PosCategory[];
   customers: PosCustomer[];
@@ -182,11 +279,22 @@ export function PosClient({
   const [discountMode, setDiscountMode] = useState<"value" | "percent">("value");
   const [payment, setPayment] = useState("PIX");
   const [receivedInput, setReceivedInput] = useState("");
+  /* pagamento dividido (v3.15.0): quando ativo, `payment` é ignorado e
+     a venda vai com `payments[]`. O backend já precificava a taxa por
+     parcela desde a v3.10 — só a tela não usava. */
+  const [splitOn, setSplitOn] = useState(false);
+  const [splitLines, setSplitLines] = useState<SplitLine[]>([]);
   const [sellerName, setSellerName] = useState(pdvConfig.sellerDefault || "OPERADOR");
+  /* Guardar o ID além do nome: o nome ainda vai no cupom (e no
+     histórico antigo), mas é o ID que liga a venda ao extrato de
+     comissão. Sem ele, "Tiago" e "TIAGO" seriam pessoas diferentes. */
+  const [sellerId, setSellerId] = useState<number | null>(null);
   const [deliveryMode, setDeliveryMode] = useState(
     pdvConfig.deliveryDefault || "Retirada no balcão"
   );
   const [deliveryDate, setDeliveryDate] = useState("");
+  /* frete cotado na SuperFrete (v3.12.0) */
+  const [shipping, setShipping] = useState<QuoteOption | null>(null);
   const [notes, setNotes] = useState(pdvConfig.receiptFooter || "");
   const [showExtraFields, setShowExtraFields] = useState(false);
 
@@ -197,25 +305,118 @@ export function PosClient({
   const [cashOpen, setCashOpen] = useState(false);
   const [newCustomerOpen, setNewCustomerOpen] = useState(false);
   const [session, setSession] = useState<CashSession>(initialSession);
+  /* últimas vendas (v3.15.0): reimpressão de cupom e cancelamento
+     direto do balcão, sem depender do módulo de Vendas. */
+  const [recentOpen, setRecentOpen] = useState(false);
+  const [recentSales, setRecentSales] = useState<RecentSale[]>([]);
+  const [recentLoading, setRecentLoading] = useState(false);
+  const [cancelTarget, setCancelTarget] = useState<RecentSale | null>(null);
 
   const searchRef = useRef<HTMLInputElement>(null);
   const clientRef = useRef<string>(uid());
   const chargingLock = useRef(false);
 
-  /* Preferência local de vendedor sobrescreve o padrão do painel */
+  /* Preferência local do vendedor, lida uma vez na montagem.
+     Antes era um useEffect com setState — cascata de render que o
+     React 19 sinaliza como erro. */
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem("pdv_seller_name");
-      if (saved) setSellerName(saved);
-    } catch {
-      /* ignore */
+    const saved = (() => {
+      try {
+        return localStorage.getItem("pdv_seller_name");
+      } catch {
+        return null;
+      }
+    })();
+    if (saved) {
+      startTransition(() => setSellerName(saved));
     }
   }, []);
 
-  /* Sincroniza sessão quando o servidor revalida */
+  /* ---------------- recuperação de carrinho ----------------
+     Queda de energia, F5 acidental ou aba fechada no meio do
+     atendimento apagavam o carrinho inteiro. Agora ele é espelhado no
+     localStorage e oferecido de volta na próxima abertura.
+     Só o rascunho: nada aqui substitui a venda gravada no servidor. */
+  const [draftOffer, setDraftOffer] = useState<PosDraft | null>(null);
+  const draftLoaded = useRef(false);
+
   useEffect(() => {
+    if (draftLoaded.current) return;
+    draftLoaded.current = true;
+    try {
+      const raw = localStorage.getItem(DRAFT_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as PosDraft;
+      /* rascunho velho não interessa — o balcão já virou */
+      if (!parsed?.cart?.length || Date.now() - parsed.savedAt > DRAFT_TTL_MS) {
+        localStorage.removeItem(DRAFT_KEY);
+        return;
+      }
+      startTransition(() => setDraftOffer(parsed));
+    } catch {
+      try {
+        localStorage.removeItem(DRAFT_KEY);
+      } catch {}
+    }
+  }, []);
+
+  /* Espelha o carrinho a cada mudança. Gravação é barata e síncrona;
+     não vale a pena debounce para um carrinho de balcão. */
+  useEffect(() => {
+    try {
+      if (cart.length === 0) {
+        localStorage.removeItem(DRAFT_KEY);
+        return;
+      }
+      const draft: PosDraft = {
+        savedAt: Date.now(),
+        clientRef: clientRef.current,
+        cart,
+        customerId,
+        discountInput,
+        discountMode,
+        payment,
+        sellerName,
+        deliveryMode,
+        notes,
+      };
+      localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+    } catch {}
+  }, [cart, customerId, discountInput, discountMode, payment, sellerName, deliveryMode, notes]);
+
+  const restoreDraft = useCallback((d: PosDraft) => {
+    /* Rascunho guarda o preço congelado da sessão anterior. As faixas
+       podem ter sido editadas no intervalo, então reprecificamos ao
+       restaurar em vez de confiar no que estava no localStorage. */
+    setCart(d.cart.map(repriceLine));
+    setCustomerId(d.customerId || "");
+    setDiscountInput(d.discountInput || "0");
+    setDiscountMode(d.discountMode === "percent" ? "percent" : "value");
+    setPayment(d.payment || "PIX");
+    if (d.sellerName) setSellerName(d.sellerName);
+    if (d.deliveryMode) setDeliveryMode(d.deliveryMode);
+    if (d.notes) setNotes(d.notes);
+    /* mantém o clientRef original: se a venda chegou a ser enviada
+       antes da queda, a idempotência do servidor evita duplicar */
+    if (d.clientRef) clientRef.current = d.clientRef;
+    setDraftOffer(null);
+  }, []);
+
+  const discardDraft = useCallback(() => {
+    try {
+      localStorage.removeItem(DRAFT_KEY);
+    } catch {}
+    setDraftOffer(null);
+  }, []);
+
+  /* Sincroniza a sessão quando o servidor revalida, sem efeito:
+     ajuste durante o render é o padrão recomendado para estado
+     derivado de props. */
+  const [lastSession, setLastSession] = useState(initialSession);
+  if (initialSession !== lastSession) {
+    setLastSession(initialSession);
     setSession(initialSession);
-  }, [initialSession]);
+  }
 
   const handleSellerChange = (name: string) => {
     setSellerName(name);
@@ -226,6 +427,17 @@ export function PosClient({
 
   /* ---------------- catálogo ---------------- */
   const products = useMemo(() => allProducts.filter((p) => p.active !== false), [allProducts]);
+  /* Só as categorias que TÊM produto. O cadastro acumulou 60
+     categorias de várias tentativas de taxonomia; mostrar todas
+     enche a tela de abas vazias e esconde as três que importam.
+     Categoria sem produto não ajuda ninguém no balcão. */
+  const catsComProduto = useMemo(() => {
+    const usadas = new Set(products.map((p) => p.productCategoryId));
+    return productCats
+      .filter((c) => usadas.has(c.id))
+      .sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+  }, [productCats, products]);
+
 
   const filtered = useMemo(() => {
     const term = q.trim().toLowerCase();
@@ -249,46 +461,137 @@ export function PosClient({
   /* ---------------- totais ---------------- */
   const subtotal = round2(cart.reduce((s, l) => s + l.unitPrice * l.quantity, 0));
   const discount = applyDiscount(subtotal, discountInput, discountMode);
-  const net = round2(subtotal - discount);
+  const shippingFee = round2(shipping?.price || 0);
+  const net = round2(subtotal - discount + shippingFee);
   const feeRate = payment === "Crédito" ? cardFeeCredit : payment === "Débito" ? cardFeeDebit : 0;
-  const fee = feeRate > 0 ? cardFeeAmount(net, feeRate) : 0;
+
+  /* Taxa: no modo dividido cada parcela paga a sua (espelha o cálculo do
+     servidor em `lib/sales.ts`, que aplica a alíquota por linha). */
+  const splitParsed = useMemo(
+    () => splitLines.map((l) => ({ ...l, value: toPositive(l.amount) })),
+    [splitLines]
+  );
+  const splitSum = round2(splitParsed.reduce((s, l) => s + l.value, 0));
+  const splitFee = round2(
+    splitParsed.reduce((s, l) => {
+      const rate = l.method === "Crédito" ? cardFeeCredit : l.method === "Débito" ? cardFeeDebit : 0;
+      return s + (rate > 0 ? cardFeeAmount(l.value, rate) : 0);
+    }, 0)
+  );
+  /* Sobra a distribuir entre as parcelas — o operador precisa zerar. */
+  const splitRemaining = round2(net - splitSum);
+  const splitBalanced = Math.abs(splitRemaining) <= 0.05;
+
+  const fee = splitOn ? splitFee : feeRate > 0 ? cardFeeAmount(net, feeRate) : 0;
   const total = round2(net + fee);
   const totalQty = cart.reduce((s, l) => s + l.quantity, 0);
 
-  const isCash = payment === "Dinheiro";
+  /* ---------------- regras de pagamento (v3.28.0) ----------------
+   *
+   * O preço de tabela embute o pior meio aceito (3x sem juros). Quem
+   * paga PIX ou dinheiro não passa pela adquirente, então esse custo
+   * volta para o cliente como desconto à vista — em vez de "acréscimo
+   * no cartão", que irrita e é problema no Procon quando não informado.
+   */
+  const pixDiscountRate = Math.max(pdvConfig.pixDiscountRate ?? 0, 0);
+  const installmentMin = Math.max(pdvConfig.installmentMin ?? 0, 0);
+  const installmentMax = Math.max(pdvConfig.installmentMax ?? 1, 1);
+  const minMarginRate = Math.max(pdvConfig.minMarginRate ?? 0, 0);
+  const taxRate = Math.max(pdvConfig.taxRate ?? 0, 0);
+
+  const aVista = !splitOn && (payment === "PIX" || payment === "Dinheiro");
+  const cashDiscount = aVista && pixDiscountRate > 0 ? round2(net * pixDiscountRate) : 0;
+  /* total que o cliente realmente paga, já com o desconto à vista */
+  const totalDue = round2(total - cashDiscount);
+
+  /* Parcelamento sem juros: só acima do piso configurado. Abaixo disso a
+     parcela fica pequena demais para justificar o custo da operação. */
+  const canInstall = payment === "Crédito" && !splitOn && totalDue >= installmentMin && installmentMin > 0;
+  const installmentValue = canInstall ? round2(totalDue / installmentMax) : 0;
+
+  /* Margem real desta venda: o que sobra depois de imposto e taxa,
+     comparado ao custo dos itens. Responde "vale a pena?" na hora. */
+  const cartCost = round2(
+    cart.reduce((s, l) => s + toNumber(l.costSnapshot, 0) * l.quantity, 0)
+  );
+  const saleMargin = useMemo(() => {
+    if (totalDue <= 0 || cartCost <= 0) return null;
+    const taxAmount = totalDue * taxRate;
+    const netReceived = totalDue - fee - taxAmount;
+    const profit = netReceived - cartCost;
+    return {
+      netReceived: round2(netReceived),
+      profit: round2(profit),
+      rate: profit / totalDue,
+      belowFloor: minMarginRate > 0 && profit / totalDue < minMarginRate - 1e-9,
+    };
+  }, [totalDue, cartCost, fee, taxRate, minMarginRate]);
+
+  /* Parcela em dinheiro: no split pode conviver com cartão/PIX. */
+  /* `totalDue`, não `total`: em dinheiro o desconto à vista já foi
+     aplicado, e cobrar/`trocar` pelo valor cheio daria troco errado. */
+  const cashPortion = splitOn
+    ? round2(splitParsed.filter((l) => l.method === "Dinheiro").reduce((s, l) => s + l.value, 0))
+    : totalDue;
+  const isCash = splitOn
+    ? splitParsed.some((l) => l.method === "Dinheiro" && l.value > 0)
+    : payment === "Dinheiro";
   const received = toPositive(receivedInput);
-  const change = isCash && received > 0 ? round2(received - total) : 0;
-  const missingCash = isCash && received > 0 && received < total;
+  const change = isCash && received > 0 ? round2(received - cashPortion) : 0;
+  const missingCash = isCash && received > 0 && received < cashPortion;
 
   /* ---------------- ações do carrinho ---------------- */
   const addProduct = useCallback((p: PosProduct) => {
     const price = toNumber(p.finalPrice, 0);
-    if (price <= 0) {
+    const tiers = (p.priceTiers || [])
+      .map((t) => ({ minQuantity: toNumber(t.minQuantity, 0), unitPrice: toNumber(t.unitPrice, 0), label: t.label ?? null }))
+      .filter((t) => t.minQuantity > 0)
+      .sort((a, b) => a.minQuantity - b.minQuantity);
+
+    /* Sem faixas o produto precisa de preço próprio. Com faixas o
+       `finalPrice` pode até estar zerado — quem manda é a faixa. */
+    if (price <= 0 && tiers.length === 0) {
       toast.error("Produto sem preço", `"${p.name}" está sem preço final definido.`);
       return;
     }
+
+    /* Produto com mínimo entra no carrinho JÁ na quantidade mínima:
+       adicionar 1 un de um item que só sai a partir de 50 mostraria um
+       preço que o servidor vai recusar no fechamento. */
+    const minQuantity = tiers.length > 0 ? tiers[0].minQuantity : 0;
+    const startQty = minQuantity > 0 ? minQuantity : 1;
+
     setCart((c) => {
       const found = c.find((l) => l.productId === p.id);
       if (found)
-        return c.map((l) => (l.productId === p.id ? { ...l, quantity: l.quantity + 1 } : l));
+        return c.map((l) =>
+          l.productId === p.id ? repriceLine({ ...l, quantity: l.quantity + 1 }) : l
+        );
       return [
         ...c,
-        {
+        repriceLine({
           key: `p${p.id}`,
           productId: p.id,
           description: p.name,
           unitPrice: round2(price),
-          quantity: 1,
+          quantity: startQty,
           unitLabel: "UNI",
-        },
+          costSnapshot: toNumber(p.costSnapshot, 0),
+          priceTiers: tiers,
+          minQuantity,
+        }),
       ];
     });
+
+    if (minQuantity > 0) {
+      toast.info(`Mínimo de ${minQuantity} un`, `"${p.name}" é vendido em lote.`);
+    }
   }, []);
 
   const setQty = useCallback((key: string, qty: number) => {
     setCart((c) =>
       c
-        .map((l) => (l.key === key ? { ...l, quantity: Math.max(0, round2(qty)) } : l))
+        .map((l) => (l.key === key ? repriceLine({ ...l, quantity: Math.max(0, round2(qty)) }) : l))
         .filter((l) => l.quantity > 0)
     );
   }, []);
@@ -300,8 +603,136 @@ export function PosClient({
     setDiscountInput("0");
     setReceivedInput("");
     setCustomerId("");
+    setSplitOn(false);
+    setSplitLines([]);
     clientRef.current = uid();
+    /* venda fechada: o rascunho perdeu a razão de existir */
+    try {
+      localStorage.removeItem(DRAFT_KEY);
+    } catch {}
   }, []);
+
+  /* ---------------- pagamento dividido ---------------- */
+  const addSplitLine = useCallback((method: string, amount: string) => {
+    setSplitLines((ls) => [...ls, { key: uid(), method, amount }]);
+  }, []);
+
+  const updateSplitLine = useCallback((key: string, patch: Partial<SplitLine>) => {
+    setSplitLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...patch } : l)));
+  }, []);
+
+  const removeSplitLine = useCallback(
+    (key: string) => setSplitLines((ls) => ls.filter((l) => l.key !== key)),
+    []
+  );
+
+  /* Ao ligar o split, começa com a forma já escolhida cobrindo tudo:
+     o caso comum é "metade nisso, metade naquilo". */
+  const toggleSplit = useCallback(() => {
+    setSplitOn((on) => {
+      if (!on) {
+        setSplitLines([{ key: uid(), method: payment, amount: "" }]);
+        setReceivedInput("");
+      } else {
+        setSplitLines([]);
+      }
+      return !on;
+    });
+  }, [payment]);
+
+  /* ---------------- últimas vendas ---------------- */
+  const loadRecent = useCallback(async () => {
+    setRecentLoading(true);
+    try {
+      const res = await fetch("/api/pdv/recent-sales?limit=20", { cache: "no-store" });
+      const json = await res.json();
+      if (!res.ok || !json.ok) throw new Error(json.error || "falha ao carregar");
+      setRecentSales(json.sales as RecentSale[]);
+    } catch (e) {
+      toast.error("Não foi possível carregar as vendas", e instanceof Error ? e.message : undefined);
+    } finally {
+      setRecentLoading(false);
+    }
+  }, []);
+
+  const openRecent = useCallback(() => {
+    setRecentOpen(true);
+    void loadRecent();
+  }, [loadRecent]);
+
+  /* Remonta o cupom a partir da venda gravada — inclusive de venda
+     antiga, já que os itens ficam em jsonb. */
+  const reprint = useCallback(
+    (s: RecentSale) => {
+      const rawItems = Array.isArray(s.items)
+        ? (s.items as {
+            productId: number | null;
+            description: string;
+            quantity: number | string;
+            unitPrice: number | string;
+            total?: number | string;
+          }[])
+        : [];
+      const items: CartLine[] = rawItems.map((it, i) => ({
+        key: `r${i}`,
+        productId: it.productId ?? null,
+        description: it.description,
+        quantity: toNumber(it.quantity, 0),
+        unitPrice: toNumber(it.unitPrice, 0),
+        unitLabel: "UNI",
+      }));
+
+      const cust = customersList.find((c) => c.id === s.customerId) || null;
+
+      setReceipt({
+        number: s.number,
+        soldAt: new Date(s.createdAt),
+        items,
+        subtotal: toNumber(s.subtotal, 0),
+        discount: toNumber(s.discount, 0),
+        fee: toNumber(s.cardFee, 0),
+        total: toNumber(s.total, 0),
+        payment: s.paymentMethod || "—",
+        splits: Array.isArray(s.payments)
+          ? (s.payments as { method: string; amount: number }[])
+          : null,
+        received: s.receivedAmount != null ? toNumber(s.receivedAmount, 0) : null,
+        change: s.changeAmount != null ? toNumber(s.changeAmount, 0) : null,
+        customer: cust,
+        sellerName: s.sellerName || "OPERADOR",
+        deliveryMode: s.deliveryMode || "",
+        deliveryDate: s.deliveryDate || "",
+        notes: s.notes || "",
+      });
+      setRecentOpen(false);
+    },
+    [customersList]
+  );
+
+  const confirmCancel = useCallback(
+    async (reason: string) => {
+      if (!cancelTarget) return;
+      try {
+        const res = await fetch("/api/crud/sales", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ op: "cancel", id: cancelTarget.id, reason }),
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error || "falha ao cancelar");
+        toast.success(
+          "Venda cancelada",
+          `${cancelTarget.number} · estoque e financeiro estornados`
+        );
+        setCancelTarget(null);
+        await loadRecent();
+        router.refresh();
+      } catch (e) {
+        toast.error("Não foi possível cancelar", e instanceof Error ? e.message : undefined);
+      }
+    },
+    [cancelTarget, loadRecent, router]
+  );
 
   /* ---------------- leitor de código de barras ---------------- */
   function onSearchKey(e: React.KeyboardEvent<HTMLInputElement>) {
@@ -321,30 +752,7 @@ export function PosClient({
     }
   }
 
-  /* ---------------- atalhos de teclado ---------------- */
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "F2") {
-        e.preventDefault();
-        searchRef.current?.focus();
-        searchRef.current?.select();
-      } else if (e.key === "F4") {
-        e.preventDefault();
-        setPayment((p) => PAYMENTS[(PAYMENTS.findIndex((x) => x.id === p) + 1) % PAYMENTS.length].id);
-      } else if (e.key === "F8") {
-        e.preventDefault();
-        setNewCustomerOpen(true);
-      } else if (e.key === "F9") {
-        e.preventDefault();
-        void checkout();
-      } else if (e.key === "Escape" && !receipt && !freeItemOpen && !cashOpen && !newCustomerOpen) {
-        setQ("");
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cart, total, payment, discountInput, receivedInput, receipt, freeItemOpen, cashOpen, newCustomerOpen]);
+
 
   /* ---------------- FINALIZAR VENDA (SEM REFRESH BLOQUEANTE) ---------------- */
   async function checkout(allowNegativeStock = false) {
@@ -358,10 +766,28 @@ export function PosClient({
     if (pdvConfig.requireCustomer && !customerId) {
       return toast.error("Cliente obrigatório", "Identifique o cliente antes de finalizar.");
     }
+    if (splitOn) {
+      const valid = splitParsed.filter((l) => l.value > 0);
+      if (valid.length === 0) {
+        return toast.error("Pagamento dividido vazio", "Informe ao menos um valor.");
+      }
+      if (!splitBalanced) {
+        return toast.error(
+          "Pagamento dividido não fecha",
+          splitRemaining > 0
+            ? `Faltam ${formatBRL(splitRemaining)} a distribuir.`
+            : `Há ${formatBRL(Math.abs(splitRemaining))} a mais que o total.`
+        );
+      }
+    }
     if (isCash && received <= 0) {
       return toast.error("Informe o valor recebido em dinheiro");
     }
-    if (missingCash) return toast.error("Valor recebido menor que o total");
+    if (missingCash) {
+      return toast.error(
+        splitOn ? "Recebido menor que a parcela em dinheiro" : "Valor recebido menor que o total"
+      );
+    }
 
     chargingLock.current = true;
     setCharging(true);
@@ -371,7 +797,25 @@ export function PosClient({
     const timeFormatted = now.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
     const finalDeliveryDate = deliveryDate.trim() || `${dateFormatted} Hora: ${timeFormatted}`;
     const cartSnapshot = [...cart];
-    const totalsSnapshot = { subtotal, discount, fee, total, payment, received, change };
+    /* Parcelas válidas, com o valor líquido; o servidor soma a taxa. */
+    const splitPayload = splitOn
+      ? splitParsed.filter((l) => l.value > 0).map((l) => ({ method: l.method, amount: l.value }))
+      : null;
+    const paymentLabel = splitPayload
+      ? splitPayload.map((p) => p.method).join(" + ")
+      : payment;
+    /* O desconto à vista entra como desconto normal: o servidor
+       recalcula o total pelo catálogo e não conhece a regra do PIX.
+       Sem somar aqui, a venda fecharia pelo valor cheio. */
+    const totalsSnapshot = {
+      subtotal,
+      discount: round2(discount + cashDiscount),
+      fee,
+      total: totalDue,
+      payment: paymentLabel,
+      received,
+      change,
+    };
 
     try {
       const res = await fetch("/api/crud/sales", {
@@ -393,11 +837,16 @@ export function PosClient({
           })),
           discount: totalsSnapshot.discount,
           discountMode: "value",
-          paymentMethod: payment,
+          shippingFee: shipping?.price ?? 0,
+          shippingService: shipping ? `${shipping.name} · ${shipping.carrier}` : null,
+          shippingServiceId: shipping?.serviceId ?? null,
+          paymentMethod: splitPayload ? undefined : payment,
+          payments: splitPayload ?? undefined,
           receivedAmount: isCash && received > 0 ? received : undefined,
           cashSessionId: session?.id ?? null,
           allowNegativeStock: allowNegativeStock || pdvConfig.allowNegativeStock,
           sellerName,
+          sellerId,
           deliveryMode,
           deliveryDate: finalDeliveryDate,
           notes,
@@ -426,7 +875,11 @@ export function PosClient({
         discount: totalsSnapshot.discount,
         fee: toNumber(row.cardFee, totalsSnapshot.fee),
         total: toNumber(row.total, totalsSnapshot.total),
-        payment,
+        payment: paymentLabel,
+        /* o servidor devolve as parcelas já com a taxa embutida */
+        splits: Array.isArray(row.payments)
+          ? (row.payments as { method: string; amount: number }[])
+          : splitPayload,
         received: isCash && received > 0 ? received : null,
         change: isCash && received > 0 ? change : null,
         customer: selectedCustomer,
@@ -450,6 +903,46 @@ export function PosClient({
       setCharging(false);
     }
   }
+
+  /* ---------------- atalhos de teclado ---------------- */
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "F2") {
+        e.preventDefault();
+        searchRef.current?.focus();
+        searchRef.current?.select();
+      } else if (e.key === "F4") {
+        e.preventDefault();
+        setPayment((p) => PAYMENTS[(PAYMENTS.findIndex((x) => x.id === p) + 1) % PAYMENTS.length].id);
+      } else if (e.key === "F5") {
+        /* F5 recarregaria a página no meio da venda — vira "dividir" */
+        e.preventDefault();
+        toggleSplit();
+      } else if (e.key === "F6") {
+        e.preventDefault();
+        openRecent();
+      } else if (e.key === "F8") {
+        e.preventDefault();
+        setNewCustomerOpen(true);
+      } else if (e.key === "F9") {
+        e.preventDefault();
+        void checkout();
+      } else if (
+        e.key === "Escape" &&
+        !receipt &&
+        !freeItemOpen &&
+        !cashOpen &&
+        !newCustomerOpen &&
+        !recentOpen &&
+        !cancelTarget
+      ) {
+        setQ("");
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cart, total, payment, discountInput, receivedInput, receipt, freeItemOpen, cashOpen, newCustomerOpen]);
 
   /* Quando o operador fecha o cupom ou clica em Nova Venda, atualiza o servidor em segundo plano */
   const handleCloseReceipt = () => {
@@ -512,6 +1005,9 @@ export function PosClient({
             <Button variant="outline" size="sm" icon="pencil" onClick={() => setFreeItemOpen(true)}>
               Item avulso
             </Button>
+            <Button variant="outline" size="sm" icon="clock" onClick={openRecent}>
+              Últimas vendas
+            </Button>
             <Button
               variant={session ? "soft" : "outline"}
               size="sm"
@@ -521,6 +1017,32 @@ export function PosClient({
               {session ? "Caixa aberto" : "Abrir caixa"}
             </Button>
           </div>
+
+          {/* CARRINHO RECUPERADO */}
+          {draftOffer && (
+            <div className="reveal mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2">
+              <Icon name="alert" size={15} className="shrink-0 text-amber-700" />
+              <p className="flex-1 text-[12.5px] leading-snug text-amber-900">
+                Uma venda não finalizada foi encontrada:{" "}
+                <strong>
+                  {draftOffer.cart.length}{" "}
+                  {draftOffer.cart.length === 1 ? "item" : "itens"}
+                </strong>{" "}
+                de{" "}
+                {new Date(draftOffer.savedAt).toLocaleTimeString("pt-BR", {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })}
+                . Deseja continuar de onde parou?
+              </p>
+              <Button size="sm" icon="refresh" onClick={() => restoreDraft(draftOffer)}>
+                Recuperar
+              </Button>
+              <Button size="sm" variant="ghost" onClick={discardDraft}>
+                Descartar
+              </Button>
+            </div>
+          )}
 
           <div className="reveal mb-4 flex flex-wrap gap-1.5">
             <button
@@ -534,7 +1056,7 @@ export function PosClient({
             >
               Tudo
             </button>
-            {productCats.map((c) => (
+            {catsComProduto.map((c) => (
               <button
                 key={c.id}
                 onClick={() => setCatFilter(String(c.id))}
@@ -561,7 +1083,18 @@ export function PosClient({
               {filtered.map((p) => {
                 const cat = productCats.find((c) => c.id === p.productCategoryId);
                 const inCart = cart.find((l) => l.productId === p.id);
-                const price = toNumber(p.finalPrice, 0);
+
+                /* Produto com faixa de preço é vendido por UNIDADE, e o
+                   `finalPrice` guarda o custo do LOTE — mostrar esse
+                   número no card faz todo adesivo aparecer por R$ 16,67,
+                   independente do tamanho. O que vale para o operador é
+                   o preço unitário da primeira faixa. */
+                const faixas = (p.priceTiers || [])
+                  .map((t) => ({ min: toNumber(t.minQuantity, 0), unit: toNumber(t.unitPrice, 0) }))
+                  .filter((t) => t.min > 0)
+                  .sort((a, b) => a.min - b.min);
+                const price = faixas.length ? faixas[0].unit : toNumber(p.finalPrice, 0);
+                const minFaixa = faixas.length ? faixas[0].min : 0;
                 const low = p.trackStock && toNumber(p.stock, 0) <= toNumber(p.minStock, 0);
                 return (
                   <button
@@ -590,6 +1123,11 @@ export function PosClient({
                         )}
                       >
                         {price > 0 ? formatBRL(price) : "sem preço"}
+                        {minFaixa > 1 && (
+                          <span className="ml-1 text-[10px] font-normal text-ink-400">
+                            /un · mín {minFaixa}
+                          </span>
+                        )}
                       </span>
                       {inCart && (
                         <span className="animate-pop-in flex h-6 min-w-6 items-center justify-center rounded-full bg-ink-900 px-1.5 font-mono text-[11px] font-semibold text-white tnum">
@@ -697,7 +1235,7 @@ export function PosClient({
                   <Icon name="receipt" size={26} className="mx-auto mb-2 text-ink-500" />
                   <p className="text-[12.5px] font-medium text-ink-300">Bipe ou toque nos produtos</p>
                   <p className="mt-0.5 font-mono text-[10px] text-ink-500">
-                    F2 buscar · F4 pagamento · F8 cliente · F9 finalizar
+                    F2 buscar · F4 pagamento · F5 dividir · F6 últimas · F8 cliente · F9 finalizar
                   </p>
                 </div>
               ) : (
@@ -713,7 +1251,25 @@ export function PosClient({
                         </p>
                         <p className="font-mono text-[10px] text-ink-400 tnum">
                           {formatBRL(l.unitPrice)} un
+                          {l.tierLabel && <span className="ml-1 text-cyan-400">· {l.tierLabel}</span>}
                         </p>
+                        {(l.minQuantity ?? 0) > 0 && l.quantity < (l.minQuantity ?? 0) && (
+                          <p className="font-mono text-[10px] font-semibold text-amber-400">
+                            mínimo {l.minQuantity} un
+                          </p>
+                        )}
+                        {(() => {
+                          /* Próxima faixa: transforma "leva mais que sai
+                             mais barato" em argumento na tela, em vez de
+                             deixar o operador descobrir por acaso. */
+                          const next = l.priceTiers?.find((t) => t.minQuantity > l.quantity);
+                          if (!next || l.quantity < (l.minQuantity ?? 0)) return null;
+                          return (
+                            <p className="font-mono text-[10px] text-emerald-400">
+                              {next.minQuantity}+ sai {formatBRL(next.unitPrice)} un
+                            </p>
+                          );
+                        })()}
                       </div>
                       <div className="flex items-center gap-1">
                         <button
@@ -780,7 +1336,8 @@ export function PosClient({
                     value={discountInput}
                     onChange={(e) => setDiscountInput(e.target.value)}
                     onFocus={(e) => e.target.select()}
-                    className="h-8 w-20 border-ink-700 bg-ink-850 text-right text-white"
+                    tone="dark"
+                    className="h-8 w-20 text-right"
                   />
                   {discount > 0 && (
                     <span className="ml-auto font-mono text-[10.5px] text-emerald-300 tnum">
@@ -788,6 +1345,16 @@ export function PosClient({
                     </span>
                   )}
                 </div>
+
+                {shippingFee > 0 && (
+                  <div className="flex items-center justify-between font-mono text-[10.5px] text-cyan-300 tnum">
+                    <span className="flex items-center gap-1">
+                      <Icon name="truck" size={11} />
+                      {shipping?.name} · {shipping?.deliveryLabel}
+                    </span>
+                    <span>+{formatBRL(shippingFee)}</span>
+                  </div>
+                )}
 
                 {fee > 0 && (
                   <div className="flex items-center justify-between font-mono text-[10.5px] text-amber-300 tnum">
@@ -798,38 +1365,192 @@ export function PosClient({
                   </div>
                 )}
 
+                {/* Desconto à vista: o preço embute o custo do cartão,
+                    então PIX e dinheiro devolvem essa diferença. */}
+                {cashDiscount > 0 && (
+                  <div className="flex items-center justify-between font-mono text-[10.5px] text-emerald-300 tnum">
+                    <span>desconto à vista ({(pixDiscountRate * 100).toFixed(2)}%)</span>
+                    <span>−{formatBRL(cashDiscount)}</span>
+                  </div>
+                )}
+
                 <div className="flex items-baseline justify-between border-t border-dashed border-ink-700 pt-2">
                   <span className="font-mono text-[11px] tracking-[0.18em] text-ink-300 uppercase">
                     Total
                   </span>
                   <span className="font-mono text-[28px] leading-none font-semibold text-cyan-300 tnum">
-                    {formatBRL(total)}
+                    {formatBRL(totalDue)}
                   </span>
                 </div>
+
+                {/* Parcelamento sem juros, quando o valor permite. */}
+                {canInstall && (
+                  <div className="flex items-center justify-between font-mono text-[10.5px] text-ink-400 tnum">
+                    <span>ou {installmentMax}x sem juros</span>
+                    <span>{formatBRL(installmentValue)}/mês</span>
+                  </div>
+                )}
+                {payment === "Crédito" && !splitOn && !canInstall && installmentMin > 0 && (
+                  <div className="font-mono text-[10px] text-ink-500">
+                    parcelamento a partir de {formatBRL(installmentMin)}
+                  </div>
+                )}
+
+                {/* Margem real desta venda — responde "vale a pena?" na
+                    hora, em vez de descobrir no fechamento do mês. */}
+                {saleMargin && (
+                  <div
+                    className={cn(
+                      "mt-1 flex items-center justify-between rounded-md px-2 py-1 font-mono text-[10px] tnum",
+                      saleMargin.belowFloor
+                        ? "bg-red-500/10 text-red-300"
+                        : "bg-emerald-500/10 text-emerald-300"
+                    )}
+                    title="Sobra depois do custo dos itens, imposto e taxa da forma de pagamento"
+                  >
+                    <span>
+                      {saleMargin.belowFloor ? "margem abaixo do piso" : "margem desta venda"}
+                    </span>
+                    <span>
+                      {(saleMargin.rate * 100).toFixed(1)}% · {formatBRL(saleMargin.profit)}
+                    </span>
+                  </div>
+                )}
               </div>
 
               {/* PAGAMENTO */}
-              <div className="mt-3 grid grid-cols-4 gap-1.5">
-                {PAYMENTS.map((p) => (
-                  <button
-                    key={p.id}
-                    onClick={() => setPayment(p.id)}
-                    className={cn(
-                      "focus-ring flex cursor-pointer flex-col items-center gap-1 rounded-lg border py-2 transition-all",
-                      payment === p.id
-                        ? "border-cyan-400 bg-cyan-400/10 text-cyan-300"
-                        : "border-ink-700 bg-white/[0.03] text-ink-400 hover:border-ink-500 hover:text-ink-200"
-                    )}
-                  >
-                    <Icon name={p.icon} size={15} />
-                    <span className="text-[10px] font-semibold">{p.label}</span>
-                  </button>
-                ))}
+              <div className="mt-3 flex items-center justify-between">
+                <span className="font-mono text-[10px] tracking-[0.14em] text-ink-400 uppercase">
+                  Pagamento
+                </span>
+                <button
+                  type="button"
+                  onClick={toggleSplit}
+                  className={cn(
+                    "focus-ring cursor-pointer rounded-md px-2 py-0.5 font-mono text-[10px] transition-colors",
+                    splitOn
+                      ? "bg-cyan-400/15 text-cyan-300"
+                      : "bg-white/5 text-ink-400 hover:bg-white/15 hover:text-white"
+                  )}
+                  title="Dividir o pagamento entre várias formas (F5)"
+                >
+                  {splitOn ? "✕ desfazer divisão" : "⇄ dividir"}
+                </button>
               </div>
+
+              {!splitOn ? (
+                <div className="mt-1.5 grid grid-cols-2 gap-1.5 sm:grid-cols-4">
+                  {PAYMENTS.map((p) => (
+                    <button
+                      key={p.id}
+                      onClick={() => setPayment(p.id)}
+                      className={cn(
+                        "focus-ring flex cursor-pointer flex-col items-center gap-1 rounded-lg border py-2 transition-all",
+                        payment === p.id
+                          ? "border-cyan-400 bg-cyan-400/10 text-cyan-300"
+                          : "border-ink-700 bg-white/[0.03] text-ink-400 hover:border-ink-500 hover:text-ink-200"
+                      )}
+                    >
+                      <Icon name={p.icon} size={15} />
+                      <span className="text-[10px] font-semibold">{p.label}</span>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="mt-1.5 space-y-1.5 rounded-lg border border-ink-700 bg-ink-850 p-2">
+                  {splitLines.map((line) => (
+                    <div key={line.key} className="flex items-center gap-1.5">
+                      <Select
+                        value={line.method}
+                        onChange={(e) => updateSplitLine(line.key, { method: e.target.value })}
+                        tone="dark"
+                        className="h-8 w-[104px] shrink-0 text-[11px]"
+                      >
+                        {PAYMENTS.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.label}
+                          </option>
+                        ))}
+                      </Select>
+                      <Input
+                        mono
+                        value={line.amount}
+                        onChange={(e) => updateSplitLine(line.key, { amount: e.target.value })}
+                        onFocus={(e) => e.target.select()}
+                        placeholder="0,00"
+                        tone="dark"
+                        className="h-8 flex-1 text-right"
+                      />
+                      <button
+                        type="button"
+                        onClick={() =>
+                          updateSplitLine(line.key, {
+                            amount: String(round2(toPositive(line.amount) + splitRemaining)),
+                          })
+                        }
+                        disabled={Math.abs(splitRemaining) < 0.005}
+                        className="focus-ring shrink-0 cursor-pointer rounded-md bg-white/5 px-1.5 py-1 font-mono text-[10px] text-cyan-300 transition-colors hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-30"
+                        title="Jogar o restante nesta linha"
+                      >
+                        resto
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => removeSplitLine(line.key)}
+                        disabled={splitLines.length <= 1}
+                        className="focus-ring shrink-0 cursor-pointer rounded-md bg-white/5 px-1.5 py-1 font-mono text-[10px] text-ink-400 transition-colors hover:bg-red-500/20 hover:text-red-300 disabled:cursor-not-allowed disabled:opacity-30"
+                        title="Remover parcela"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+
+                  <div className="flex items-center justify-between pt-0.5">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        addSplitLine(
+                          PAYMENTS.find((p) => !splitLines.some((l) => l.method === p.id))?.id ||
+                            "Dinheiro",
+                          splitRemaining > 0 ? String(splitRemaining) : ""
+                        )
+                      }
+                      disabled={splitLines.length >= 4}
+                      className="focus-ring cursor-pointer rounded-md bg-white/5 px-2 py-1 font-mono text-[10px] text-ink-300 transition-colors hover:bg-white/15 hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
+                    >
+                      + forma
+                    </button>
+                    <span
+                      className={cn(
+                        "font-mono text-[10.5px] tnum",
+                        splitBalanced ? "text-emerald-300" : "text-amber-300"
+                      )}
+                    >
+                      {splitBalanced
+                        ? "✓ divisão fecha"
+                        : splitRemaining > 0
+                          ? `faltam ${formatBRL(splitRemaining)}`
+                          : `sobra ${formatBRL(Math.abs(splitRemaining))}`}
+                    </span>
+                  </div>
+
+                  {splitFee > 0 && (
+                    <p className="border-t border-dashed border-ink-700 pt-1 text-right font-mono text-[10px] text-amber-300 tnum">
+                      taxa das parcelas +{formatBRL(splitFee)}
+                    </p>
+                  )}
+                </div>
+              )}
 
               {/* TROCO EM DINHEIRO */}
               {isCash && (
                 <div className="mt-3 rounded-lg border border-ink-700 bg-ink-850 p-2.5">
+                  {splitOn && (
+                    <p className="mb-1.5 font-mono text-[10px] text-ink-400">
+                      parcela em dinheiro: {formatBRL(cashPortion)}
+                    </p>
+                  )}
                   <div className="flex items-center gap-2">
                     <span className="text-[11px] text-ink-300">Recebido R$</span>
                     <Input
@@ -838,7 +1559,8 @@ export function PosClient({
                       onChange={(e) => setReceivedInput(e.target.value)}
                       onFocus={(e) => e.target.select()}
                       placeholder="0,00"
-                      className="h-8 flex-1 border-ink-700 bg-ink-900 text-right text-white"
+                      tone="dark"
+                        className="h-8 flex-1 text-right"
                     />
                   </div>
                   <div className="mt-2 flex flex-wrap gap-1">
@@ -852,7 +1574,7 @@ export function PosClient({
                       </button>
                     ))}
                     <button
-                      onClick={() => setReceivedInput(String(total))}
+                      onClick={() => setReceivedInput(String(cashPortion))}
                       className="focus-ring cursor-pointer rounded-md bg-white/5 px-2 py-0.5 font-mono text-[10px] text-cyan-300 transition-colors hover:bg-white/15"
                     >
                       exato
@@ -889,19 +1611,44 @@ export function PosClient({
                   <div className="mt-2 space-y-2 rounded-lg bg-white/[0.02] p-2.5 border border-ink-800 text-[11px]">
                     <div>
                       <label className="text-[10px] text-ink-400 block mb-1">Vendedor / Atendente:</label>
-                      <Input
-                        value={sellerName}
-                        onChange={(e) => handleSellerChange(e.target.value)}
-                        placeholder="Ex.: TIAGO SOUZA"
-                        className="h-7 border-ink-700 bg-ink-850 text-white text-[11px]"
-                      />
+                      {/* Com vendedores cadastrados, escolher da lista —
+                          é o que liga a venda ao extrato de comissão.
+                          Sem cadastro, segue o campo livre de sempre,
+                          para não travar quem ainda não cadastrou. */}
+                      {sellers.length > 0 ? (
+                        <Select
+                          value={sellerId ? String(sellerId) : ""}
+                          onChange={(e) => {
+                            const id = Number(e.target.value) || null;
+                            setSellerId(id);
+                            const v = sellers.find((s) => s.id === id);
+                            handleSellerChange(v ? v.nome : "OPERADOR");
+                          }}
+                          tone="dark"
+                          className="h-7 text-[11px]"
+                        >
+                          <option value="">— sem vendedor —</option>
+                          {sellers.map((s) => (
+                            <option key={s.id} value={String(s.id)}>{s.nome}</option>
+                          ))}
+                        </Select>
+                      ) : (
+                        <Input
+                          value={sellerName}
+                          onChange={(e) => handleSellerChange(e.target.value)}
+                          placeholder="Ex.: TIAGO SOUZA"
+                          tone="dark"
+                          className="h-7 text-[11px]"
+                        />
+                      )}
                     </div>
                     <div>
                       <label className="text-[10px] text-ink-400 block mb-1">Situação / Entrega:</label>
                       <Select
                         value={deliveryMode}
                         onChange={(e) => setDeliveryMode(e.target.value)}
-                        className="h-7 border-ink-700 bg-ink-850 text-white text-[11px]"
+                        tone="dark"
+                        className="h-7 text-[11px]"
                       >
                         {DELIVERY_OPTIONS.map((opt) => (
                           <option key={opt} value={opt}>
@@ -916,7 +1663,8 @@ export function PosClient({
                         value={deliveryDate}
                         onChange={(e) => setDeliveryDate(e.target.value)}
                         placeholder="Deixe em branco para Data/Hora da venda"
-                        className="h-7 border-ink-700 bg-ink-850 text-white text-[11px]"
+                        tone="dark"
+                        className="h-7 text-[11px]"
                       />
                     </div>
                     <div>
@@ -925,9 +1673,30 @@ export function PosClient({
                         value={notes}
                         onChange={(e) => setNotes(e.target.value)}
                         placeholder="Ex.: Não deixe de aproveitar nossas promoções!"
-                        className="h-7 border-ink-700 bg-ink-850 text-white text-[11px]"
+                        tone="dark"
+                        className="h-7 text-[11px]"
                       />
                     </div>
+
+                    {/* Frete SuperFrete — só faz sentido quando há entrega */}
+                    {deliveryMode.toLowerCase().includes("entrega") && (
+                      <div className="rounded-lg border border-ink-700 bg-ink-850 p-1.5 [&_.bg-paper-50]:!bg-transparent [&_.border-paper-200]:!border-ink-700 [&_.text-ink-600]:!text-ink-300 [&_.text-ink-400]:!text-ink-500 [&_.bg-white]:!bg-ink-900 [&_.text-ink-900]:!text-white [&_input]:!border-ink-700 [&_input]:!bg-ink-900 [&_input]:!text-white">
+                        {selectedCustomer ? (
+                          <ShippingQuote
+                            compact
+                            cep={String(selectedCustomer.cep || "")}
+                            items={cart.map((l) => ({ productId: l.productId, quantity: l.quantity }))}
+                            declaredValue={subtotal}
+                            selectedServiceId={shipping?.serviceId ?? null}
+                            onSelect={setShipping}
+                          />
+                        ) : (
+                          <p className="rounded-md bg-amber-500/10 px-2 py-1.5 font-mono text-[10px] text-amber-200">
+                            Identifique o cliente para cotar o frete
+                          </p>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -947,12 +1716,13 @@ export function PosClient({
                 disabled={
                   cart.length === 0 ||
                   missingCash ||
+                  (splitOn && !splitBalanced) ||
                   (pdvConfig.requireOpenCash && !session) ||
                   (pdvConfig.requireCustomer && !customerId) ||
                   (isCash && received <= 0)
                 }
               >
-                Finalizar Venda · {formatBRL(total)}
+                Finalizar Venda · {formatBRL(totalDue)}
               </Button>
             </div>
           </div>
@@ -987,8 +1757,119 @@ export function PosClient({
         </p>
       </Modal>
 
+      {/* ─────────── MODAL ÚLTIMAS VENDAS ─────────── */}
+      <Modal
+        open={recentOpen}
+        onClose={() => setRecentOpen(false)}
+        title="Últimas vendas (24h)"
+        width="max-w-3xl"
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setRecentOpen(false)}>
+              Fechar
+            </Button>
+            <Button variant="outline" icon="refresh" loading={recentLoading} onClick={loadRecent}>
+              Atualizar
+            </Button>
+          </>
+        }
+      >
+        {recentLoading && recentSales.length === 0 ? (
+          <p className="py-6 text-center text-[13px] text-ink-500">Carregando…</p>
+        ) : recentSales.length === 0 ? (
+          <p className="py-6 text-center text-[13px] text-ink-500">
+            Nenhuma venda nas últimas 24 horas.
+          </p>
+        ) : (
+          <div className="max-h-[60vh] overflow-x-auto overflow-y-auto">
+            <table className="w-full text-[12.5px]">
+              <thead className="sticky top-0 bg-paper-50 text-left font-mono text-[10px] tracking-wider text-ink-500 uppercase">
+                <tr>
+                  <th className="px-2 py-1.5">Cupom</th>
+                  <th className="px-2 py-1.5">Hora</th>
+                  <th className="px-2 py-1.5">Cliente</th>
+                  <th className="px-2 py-1.5">Pgto.</th>
+                  <th className="px-2 py-1.5 text-right">Total</th>
+                  <th className="px-2 py-1.5 text-right">Ações</th>
+                </tr>
+              </thead>
+              <tbody>
+                {recentSales.map((s) => {
+                  const canceled = s.status === "cancelada";
+                  return (
+                    <tr
+                      key={s.id}
+                      className={cn(
+                        "border-t border-paper-200",
+                        canceled && "bg-red-50/60 text-ink-400"
+                      )}
+                    >
+                      <td className="px-2 py-1.5 font-mono">
+                        {s.number}
+                        {canceled && (
+                          <span className="ml-1.5 rounded bg-red-100 px-1 py-px text-[9.5px] font-semibold text-red-700 uppercase">
+                            cancelada
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-2 py-1.5 font-mono text-ink-500">
+                        {new Date(s.createdAt).toLocaleTimeString("pt-BR", {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                      </td>
+                      <td className="max-w-[160px] truncate px-2 py-1.5">
+                        {s.customerName || "—"}
+                      </td>
+                      <td className="px-2 py-1.5 text-[11px] text-ink-500">
+                        {s.paymentMethod || "—"}
+                      </td>
+                      <td
+                        className={cn(
+                          "px-2 py-1.5 text-right font-mono tnum",
+                          canceled && "line-through"
+                        )}
+                      >
+                        {formatBRL(toNumber(s.total, 0))}
+                      </td>
+                      <td className="px-2 py-1.5 text-right whitespace-nowrap">
+                        <button
+                          type="button"
+                          onClick={() => reprint(s)}
+                          className="focus-ring cursor-pointer rounded-md bg-ink-900/5 px-2 py-1 font-mono text-[10px] text-ink-700 transition-colors hover:bg-ink-900 hover:text-white"
+                        >
+                          reimprimir
+                        </button>
+                        {!canceled && (
+                          <button
+                            type="button"
+                            onClick={() => setCancelTarget(s)}
+                            className="focus-ring ml-1 cursor-pointer rounded-md bg-red-500/10 px-2 py-1 font-mono text-[10px] text-red-700 transition-colors hover:bg-red-600 hover:text-white"
+                          >
+                            cancelar
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Modal>
+
+      {/* ─────────── MODAL CANCELAR VENDA ─────────── */}
+      <CancelSaleModal
+        key={cancelTarget ? `cancel-${cancelTarget.id}` : "cancel-closed"}
+        sale={cancelTarget}
+        onClose={() => setCancelTarget(null)}
+        onConfirm={confirmCancel}
+      />
+
       {/* ─────────── MODAL CADASTRAR NOVO CLIENTE RÁPIDO ─────────── */}
       <QuickCustomerModal
+        key={newCustomerOpen ? "customer-open" : "customer-closed"}
         open={newCustomerOpen}
         onClose={() => setNewCustomerOpen(false)}
         onCreated={(newCust) => {
@@ -1000,6 +1881,7 @@ export function PosClient({
 
       {/* ─────────── MODAL ITEM AVULSO ─────────── */}
       <FreeItemModal
+        key={freeItemOpen ? "free-open" : "free-closed"}
         open={freeItemOpen}
         onClose={() => setFreeItemOpen(false)}
         onAdd={(description, unitPrice, quantity) => {
@@ -1013,6 +1895,7 @@ export function PosClient({
 
       {/* ─────────── MODAL CAIXA ─────────── */}
       <CashModal
+        key={cashOpen ? "cash-open" : "cash-closed"}
         open={cashOpen}
         onClose={() => setCashOpen(false)}
         session={session}
@@ -1044,8 +1927,17 @@ export function PosClient({
                 onClick={() => {
                   if (!receipt) return;
                   const text = buildTextReceipt(receipt, company);
-                  const phone = receipt.customer?.whatsapp || receipt.customer?.phone || "";
-                  const cleanPhone = phone.replace(/\D/g, "");
+
+                  /* Respeita o "não enviar WhatsApp" do cadastro: sem
+                     destinatário, o operador decide no app. */
+                  if (isWhatsAppBlocked(receipt.customer)) {
+                    toast.info(
+                      "Cliente não aceita WhatsApp",
+                      "O cupom abrirá sem destinatário — confirme outro canal."
+                    );
+                  }
+
+                  const cleanPhone = whatsappNumber(receipt.customer);
                   const url = cleanPhone
                     ? `https://wa.me/55${cleanPhone}?text=${encodeURIComponent(text)}`
                     : `https://wa.me/?text=${encodeURIComponent(text)}`;
@@ -1053,6 +1945,19 @@ export function PosClient({
                 }}
               >
                 WhatsApp
+              </Button>
+
+              <Button
+                variant="outline"
+                size="sm"
+                icon="printer"
+                title="Imprime em texto puro: máxima nitidez na bobina térmica"
+                onClick={() => {
+                  if (!receipt) return;
+                  printPlainReceipt(buildTextReceipt(receipt, company));
+                }}
+              >
+                Nítido
               </Button>
 
               <Button
@@ -1076,9 +1981,19 @@ export function PosClient({
         )}
       </Drawer>
 
-      {/* CONTAINER EXCLUSIVO DE IMPRESSÃO TÉRMICA (ESCONDIDO NA TELA, REVELADO NO PRINT) */}
+      {/* CONTAINER EXCLUSIVO DE IMPRESSÃO TÉRMICA (ESCONDIDO NA TELA, REVELADO NO PRINT)
+          `--receipt-weight` é lido pelo @media print em globals.css: permite
+          calibrar a intensidade por impressora sem tocar no código. */}
       {receipt && (
-        <div id="receipt-print" className="hidden">
+        <div
+          id="receipt-print"
+          className="hidden"
+          style={
+            {
+              "--receipt-weight": String(pdvConfig.receiptBoldness ?? 600),
+            } as React.CSSProperties
+          }
+        >
           <ThermalReceipt receipt={receipt} company={company} isPrint />
         </div>
       )}
@@ -1105,6 +2020,30 @@ function ThermalReceipt({
 
   const c = receipt.customer;
 
+  /* Cidade/UF da empresa, vazio quando nenhum dos dois está preenchido. */
+  const cityState = [company.city, company.state].filter(Boolean).join(" -");
+
+  /* "BAIRRO - CIDADE/UF" numa linha só: o bairro sozinho desperdiçava
+     uma linha inteira da bobina e separava o endereço ao meio. */
+  const cityLine = c
+    ? [c.district, [c.city, c.state].filter(Boolean).join("/")].filter(Boolean).join(" - ")
+    : "";
+
+  /* Telefone e WhatsApp rotulados. Quando são o mesmo número, imprime
+     uma linha só — repetir o mesmo dígito duas vezes confunde e gasta
+     bobina. A comparação ignora máscara: "(21) 99999-1111" e
+     "21999991111" são o mesmo telefone. */
+  const onlyDigits = (v: string | null | undefined) => String(v || "").replace(/\D/g, "");
+  const phoneRaw = c?.phone || "";
+  const whatsRaw = c?.whatsapp || "";
+  const sameNumber =
+    !!phoneRaw && !!whatsRaw && onlyDigits(phoneRaw) === onlyDigits(whatsRaw);
+
+  /* Mesmo número nos dois campos → uma linha "Tel/WhatsApp". */
+  const phoneCaption = sameNumber ? "Tel/WhatsApp" : "Tel";
+  const phoneLabel = phoneRaw;
+  const whatsLabel = sameNumber ? "" : whatsRaw;
+
   return (
     <div
       className={cn(
@@ -1115,35 +2054,52 @@ function ThermalReceipt({
         fontFamily: "'IBM Plex Mono', 'Courier New', Courier, monospace",
       }}
     >
-      {/* ── 1. CABEÇALHO DA EMPRESA ── */}
-      <div className="text-left font-bold text-[12px] uppercase tracking-tight">
-        {company.name || "VTDIGITAL ART STUDIO"}
-      </div>
+      {/* ── 1. CABEÇALHO DA EMPRESA ──
+          Sem valores de exemplo: um campo vazio no Painel deve sumir do
+          cupom, nunca ser substituído pelos dados de outra empresa
+          (o layout nasceu com VTDIGITAL fixo no código). */}
+      {company.name && (
+        <div className="text-left font-bold text-[12px] uppercase tracking-tight">
+          {company.name}
+        </div>
+      )}
 
-      <div className="text-left text-[11px] uppercase">
-        {company.street || "RUA ARAQUEM 910"}
-      </div>
+      {company.street && (
+        <div className="text-left text-[11px] uppercase">{company.street}</div>
+      )}
 
-      <div className="flex justify-between items-baseline text-[11px] uppercase">
-        <span>{company.district || "BANGU"}</span>
-        <span>{company.phone || "(21) 2038-3504"}</span>
-      </div>
+      {(company.district || company.phone) && (
+        <div className="flex justify-between items-baseline text-[11px] uppercase">
+          <span>{company.district}</span>
+          <span>{company.phone}</span>
+        </div>
+      )}
 
-      <div className="flex justify-between items-baseline text-[11px] uppercase">
-        <span className="truncate max-w-[210px]">{company.email || "contato.vt@vtdigital.com.br"}</span>
-        <span>{company.phone2 || "(21)97886-9414"}</span>
-      </div>
+      {(company.email || company.phone2) && (
+        <div className="flex justify-between items-baseline text-[11px] uppercase">
+          <span className="truncate max-w-[210px]">{company.email}</span>
+          <span>{company.phone2}</span>
+        </div>
+      )}
 
-      <div className="flex justify-between items-baseline text-[11px] uppercase">
-        <span>
-          {[company.city, company.state].filter(Boolean).join(" -") || "RIO DE JANEIRO -RJ"}
-        </span>
-        <span>{company.document || "30.189.224/0001-54"}</span>
-      </div>
+      {(cityState || company.document) && (
+        <div className="flex justify-between items-baseline text-[11px] uppercase">
+          <span>{cityState}</span>
+          <span>{company.document}</span>
+        </div>
+      )}
 
-      <div className="text-left text-[11px] lowercase">
-        {company.website || "http://www.vtdigital.com.br"}
-      </div>
+      {/* Inscrição estadual do emitente: exigimos a do cliente no A4,
+          omitir a própria seria incoerente. */}
+      {company.stateRegistration && (
+        <div className="text-left text-[11px] uppercase">
+          IE {company.stateRegistration}
+        </div>
+      )}
+
+      {company.website && (
+        <div className="text-left text-[11px] lowercase">{company.website}</div>
+      )}
 
       {/* DIVISOR DA EMPRESA */}
       <div className="my-1.5 border-b border-dashed border-black" />
@@ -1155,10 +2111,30 @@ function ThermalReceipt({
 
       <div className="my-1.5 border-b border-dashed border-black" />
 
-      {/* ── 3. DADOS DO CLIENTE (SE HOUVER) ── */}
+      {/* ── 3. DADOS DO CLIENTE (SE HOUVER) ──
+          O bairro ficava sozinho numa linha, dividindo espaço com o
+          telefone — quebrava a leitura do endereço. Agora segue o padrão
+          de correspondência brasileiro: logradouro, depois
+          "bairro - cidade/UF", depois CEP. Telefones vão rotulados,
+          em linhas próprias. */}
       {c && (
         <>
-          <div className="text-left font-bold text-[11.5px] uppercase">{c.name}</div>
+          {/* PJ: nome fantasia é como o cliente se reconhece; a razão
+              social vai na linha seguinte, para o cupom servir de
+              comprovante. */}
+          <div className="text-left font-bold text-[11.5px] uppercase">
+            {c.tradeName || c.name}
+          </div>
+
+          {c.tradeName && c.tradeName !== c.name && (
+            <div className="text-left text-[11px] uppercase">{c.name}</div>
+          )}
+
+          {c.document && <div className="text-left text-[11px]">{formatDocumentAuto(String(c.document))}</div>}
+
+          {c.contactName && (
+            <div className="text-left text-[11px] uppercase">A/C: {c.contactName}</div>
+          )}
 
           {(c.street || c.number) && (
             <div className="text-left text-[11px] uppercase">
@@ -1166,17 +2142,19 @@ function ThermalReceipt({
             </div>
           )}
 
-          {c.document && <div className="text-left text-[11px]">{c.document}</div>}
+          {cityLine && <div className="text-left text-[11px] uppercase">{cityLine}</div>}
 
-          <div className="flex justify-between items-baseline text-[11px] uppercase">
-            <span>{c.district || "—"}</span>
-            <span>{c.phone || c.whatsapp || ""}</span>
-          </div>
+          {c.cep && <div className="text-left text-[11px] uppercase">CEP: {c.cep}</div>}
 
-          <div className="text-left text-[11px] uppercase">
-            {[c.city, c.state].filter(Boolean).join(" - ")}{" "}
-            {c.cep ? `Cep: ${c.cep}` : ""}
-          </div>
+          {phoneLabel && (
+            <div className="text-left text-[11px] uppercase">
+              {phoneCaption}: {phoneLabel}
+            </div>
+          )}
+
+          {whatsLabel && (
+            <div className="text-left text-[11px] uppercase">WhatsApp: {whatsLabel}</div>
+          )}
 
           <div className="my-1.5 border-b border-dashed border-black" />
         </>
@@ -1220,36 +2198,31 @@ function ThermalReceipt({
 
       <div className="my-1.5 border-b border-dashed border-black" />
 
-      {/* ── 6. BLOCO DE TOTAIS ── */}
+      {/* ── 6. BLOCO DE TOTAIS ──
+          Três colunas, como no cupom antigo: rótulo à esquerda, "R$"
+          numa coluna própria no meio e o número alinhado à direita.
+          Antes era `justify-between` com "R$ 12,49" grudado num bloco
+          só, e os centavos não alinhavam entre as linhas. */}
       <div className="space-y-0.5 font-bold text-[11.5px] uppercase">
-        <div className="flex justify-between">
-          <span>VALOR PRODUTOS</span>
-          <span>R$ {formatNum(receipt.subtotal)}</span>
-        </div>
-
-        <div className="flex justify-between">
-          <span>VALOR DESCONTO</span>
-          <span>R$ {formatNum(receipt.discount)}</span>
-        </div>
-
-        <div className="flex justify-between text-[12.5px] font-extrabold">
-          <span>VALOR TOTAL</span>
-          <span>R$ {formatNum(receipt.total)}</span>
-        </div>
+        <TotalRow label="VALOR PRODUTOS" value={formatNum(receipt.subtotal)} />
+        <TotalRow label="VALOR DESCONTO" value={formatNum(receipt.discount)} />
+        {/* O antigo destaca o total espaçando as letras, não aumentando
+            o corpo — numa térmica de 80mm aumentar a fonte estoura a
+            linha. Mesmo recurso aqui. */}
+        <TotalRow
+          /* espaços não-quebráveis: o HTML colapsa espaço normal e as
+             palavras saíam grudadas ("V A L O R T O T A L") na foto do
+             cupom impresso */
+          label={"V A L O R" + "\u00a0\u00a0" + "T O T A L"}
+          value={formatNum(receipt.total)}
+        />
       </div>
 
       <div className="my-1 border-b-2 border-black" />
 
       <div className="space-y-0.5 font-bold text-[11.5px] uppercase">
-        <div className="flex justify-between">
-          <span>VALOR PAGO</span>
-          <span>R$ {formatNum(receipt.received || receipt.total)}</span>
-        </div>
-
-        <div className="flex justify-between">
-          <span>VALOR TROCO</span>
-          <span>R$ {formatNum(receipt.change || 0)}</span>
-        </div>
+        <TotalRow label="VALOR PAGO" value={formatNum(receipt.received || receipt.total)} />
+        <TotalRow label="VALOR TROCO" value={formatNum(receipt.change || 0)} />
       </div>
 
       <div className="my-1.5 border-b border-dashed border-black" />
@@ -1276,34 +2249,71 @@ function ThermalReceipt({
               : receipt.payment.toUpperCase()}
         </p>
 
+        {receipt.splits && receipt.splits.length > 1 && (
+          <div className="font-mono text-[10.5px]">
+            {receipt.splits.map((s, i) => (
+              <p key={`${s.method}-${i}`} className="flex justify-between">
+                <span>{s.method}</span>
+                <span>R$ {formatNum(Number(s.amount) || 0)}</span>
+              </p>
+            ))}
+          </div>
+        )}
+
         {receipt.fee > 0 && (
           <p className="font-mono text-[10px]">
             Taxa cartão embutida: R$ {formatNum(receipt.fee)}
           </p>
         )}
 
-        {(receipt.notes || company.receiptFooter) && (
-          <>
-            <p className="mt-2 border-t border-dotted border-black pt-1 font-semibold text-[10.5px]">
-              Observações
-            </p>
-            <p className="leading-snug">
-              {receipt.notes || company.receiptFooter}
-            </p>
-          </>
-        )}
+        {/* Observações do operador.
+
+            O rodapé padrão saía DUAS vezes no mesmo cupom (visível na
+            foto da comparação): o campo de observações do PDV já nasce
+            preenchido com `receiptFooter`, e o bloco final imprimia o
+            mesmo texto de novo. Aqui só entra o que o operador de fato
+            escreveu, e só quando difere do rodapé padrão. */}
+        {(() => {
+          const obs = (receipt.notes || "").trim();
+          const rodape = (company.receiptFooter || "").trim();
+          if (!obs || obs === rodape) return null;
+          return (
+            <>
+              <p className="mt-2 border-t border-dotted border-black pt-1 font-semibold text-[10.5px]">
+                Observações
+              </p>
+              <p className="leading-snug">{obs}</p>
+            </>
+          );
+        })()}
 
         {company.pixKey && receipt.payment === "PIX" && (
           <p className="mt-1 font-mono text-[10px]">PIX: {company.pixKey}</p>
         )}
 
-        <p className="mt-2 text-center text-[10px] leading-snug">
+        {/* Despedida e identificação: à ESQUERDA, como no cupom antigo.
+            Centralizar era invenção nossa — na bobina de 80mm o texto
+            centralizado quebra o alinhamento de tudo que vem acima. */}
+        <p className="mt-2 text-left text-[11px] leading-snug">
           {company.receiptFooter || "Agradecemos a preferência!"}
         </p>
-        <p className="text-center text-[9px] uppercase tracking-wider">
+        <p className="text-left text-[10px] uppercase tracking-wider">
           Documento não fiscal · {receipt.number}
         </p>
       </div>
+    </div>
+  );
+}
+
+/* Linha de total em 3 colunas (rótulo · R$ · valor), espelhando o
+   cupom do sistema antigo. A coluna do "R$" é fixa para que todos os
+   valores fiquem alinhados pela vírgula. */
+function TotalRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-baseline">
+      <span className="flex-1">{label}</span>
+      <span className="w-8 shrink-0">R$</span>
+      <span className="w-[74px] shrink-0 text-right tnum">{value}</span>
     </div>
   );
 }
@@ -1320,13 +2330,76 @@ function formatQty(v: number): string {
 }
 
 /* Gera a versão em texto puro para copiar ou enviar via WhatsApp */
+/**
+ * Impressão em MODO TEXTO — a mais nítida possível numa térmica.
+ *
+ * O caminho normal (`window.print()`) manda o navegador rasterizar a
+ * página: ele desenha o texto com antialiasing, e como a cabeça térmica
+ * só sabe "queima / não queima", os pixels cinzentos das bordas viram
+ * pontos fracos. O resultado é o cupom lavado da foto do usuário.
+ *
+ * Aqui abrimos uma janela com o cupom já pronto em texto puro
+ * (`buildTextReceipt`, o mesmo do WhatsApp) dentro de um <pre>, em preto
+ * pleno e sem suavização. Menos bonito — sem alinhamento em colunas
+ * proporcionais — e muito mais legível na bobina.
+ */
+function printPlainReceipt(text: string) {
+  const win = window.open("", "_blank", "width=380,height=650");
+  if (!win) {
+    toast.error(
+      "Pop-up bloqueado",
+      "Libere pop-ups deste site para usar a impressão nítida."
+    );
+    return;
+  }
+
+  /* `buildTextReceipt` marca negrito com *asteriscos* (sintaxe do
+     WhatsApp). No papel isso vira sujeira: removemos os delimitadores e
+     destacamos a linha em maiúsculas, que a térmica renderiza bem. */
+  const printable = text.replace(/\*(.+?)\*/g, (_m, inner: string) => inner.toUpperCase());
+
+  /* escapa o texto: nome de cliente com & ou < quebraria o HTML */
+  const safe = printable
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+
+  win.document.write(`<!doctype html>
+<html lang="pt-BR"><head><meta charset="utf-8"><title>Cupom</title>
+<style>
+  @page { size: 80mm auto; margin: 0; }
+  html, body { margin: 0; padding: 0; background: #fff; }
+  pre {
+    margin: 0;
+    padding: 2mm 3mm;
+    width: 72mm;
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 12px;
+    line-height: 1.3;
+    font-weight: 700;
+    color: #000;
+    -webkit-font-smoothing: none;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+</style></head>
+<body><pre>${safe}</pre></body></html>`);
+  win.document.close();
+  win.focus();
+  /* dá um tick para a fonte carregar antes do diálogo de impressão */
+  setTimeout(() => {
+    win.print();
+    win.close();
+  }, 250);
+}
+
 function buildTextReceipt(r: ReceiptData, comp: PosCompany): string {
   const d = r.soldAt;
   const dateFormatted = d.toLocaleDateString("pt-BR");
   const timeFormatted = d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
 
   const lines = [
-    `*${comp.name || "PrintFlow"}*`,
+    `*${comp.name || "VTDIGITAL"}*`,
     comp.address,
     `Tel: ${[comp.phone, comp.phone2].filter(Boolean).join(" / ")}`,
     "--------------------------------",
@@ -1338,9 +2411,16 @@ function buildTextReceipt(r: ReceiptData, comp: PosCompany): string {
   if (r.customer) {
     lines.push(`CLIENTE: ${r.customer.name}`);
     if (r.customer.document) lines.push(`DOC: ${r.customer.document}`);
-    if (r.customer.phone || r.customer.whatsapp) {
-      lines.push(`TEL: ${r.customer.whatsapp || r.customer.phone}`);
-    }
+
+    /* Mesmos rótulos do cupom impresso: telefone e WhatsApp separados,
+       fundidos numa linha quando o número é o mesmo. */
+    const digits = (v: string | null) => String(v || "").replace(/\D/g, "");
+    const tel = r.customer.phone || "";
+    const zap = r.customer.whatsapp || "";
+    const same = !!tel && !!zap && digits(tel) === digits(zap);
+    if (tel) lines.push(`${same ? "TEL/WHATSAPP" : "TEL"}: ${tel}`);
+    if (zap && !same) lines.push(`WHATSAPP: ${zap}`);
+
     lines.push("--------------------------------");
   }
 
@@ -1358,6 +2438,11 @@ function buildTextReceipt(r: ReceiptData, comp: PosCompany): string {
   if (r.fee > 0) lines.push(`TAXA CARTÃO: R$ ${formatNum(r.fee)}`);
   lines.push(`*TOTAL: R$ ${formatNum(r.total)}*`);
   lines.push(`PAGAMENTO: ${r.payment}`);
+  if (r.splits && r.splits.length > 1) {
+    for (const s of r.splits) {
+      lines.push(`  ${s.method}: R$ ${formatNum(Number(s.amount) || 0)}`);
+    }
+  }
   if (r.received != null) lines.push(`RECEBIDO: R$ ${formatNum(r.received)}`);
   if (r.change != null && r.change > 0) lines.push(`TROCO: R$ ${formatNum(r.change)}`);
   if (r.payment === "PIX" && comp.pixKey) lines.push(`CHAVE PIX: ${comp.pixKey}`);
@@ -1393,27 +2478,18 @@ function QuickCustomerModal({
   const [street, setStreet] = useState("");
   const [number, setNumber] = useState("");
   const [complement, setComplement] = useState("");
+  const [erros, setErros] = useState<ErrosCadastro>({});
+  /* Motivo da dispensa de CPF — o escape da regra de documento
+     obrigatório. Só aparece quando o campo está vazio. */
+  const [docWaiver, setDocWaiver] = useState("");
   const [district, setDistrict] = useState("");
   const [city, setCity] = useState("");
   const [state, setState] = useState("");
   const [loading, setLoading] = useState(false);
   const [fetchingCep, setFetchingCep] = useState(false);
 
-  useEffect(() => {
-    if (open) {
-      setName("");
-      setTradeName("");
-      setDocument("");
-      setPhone("");
-      setCep("");
-      setStreet("");
-      setNumber("");
-      setComplement("");
-      setDistrict("");
-      setCity("");
-      setState("");
-    }
-  }, [open]);
+  /* O reset ao abrir é feito pelo `key` no componente pai: React
+     remonta e o estado nasce limpo, sem setState dentro de effect. */
 
   /* Autopreenchimento ViaCEP */
   const handleCepBlur = async () => {
@@ -1437,7 +2513,21 @@ function QuickCustomerModal({
   };
 
   const handleSave = async () => {
-    if (name.trim().length < 2) return toast.error("Informe o nome do cliente");
+    /* No balcão o operador digita rápido e com o cliente esperando.
+       Vale conferir aqui: CPF errado só reaparece na hora de emitir
+       documento, quando a venda já foi. */
+    const e = validaClienteRapido({ name, document, phone, cep, state });
+    /* CPF é obrigatório também no balcão (regra do dono). O escape de
+       boa-fé mantém a venda andando quando o cliente não tem o
+       documento na mão — mas exige o motivo por escrito. */
+    if (!document.replace(/\D/g, "") && docWaiver.trim().length < 3) {
+      e.document = "CPF é obrigatório — ou diga o motivo abaixo";
+    }
+    setErros(e);
+    if (!semErros(e)) {
+      setTimeout(focarPrimeiroErro, 0);
+      return toast.error(Object.values(e)[0] || "Confira os campos");
+    }
     setLoading(true);
     try {
       const payload = {
@@ -1454,6 +2544,10 @@ function QuickCustomerModal({
         city: city.trim() || null,
         state: state.trim() || null,
         status: "ativo",
+        /* Cadastro rápido no meio do atendimento: documento fica
+           opcional aqui (a tela de Clientes & CRM exige). */
+        quickEntry: true,
+        documentWaiverReason: docWaiver.trim() || null,
       };
 
       const res = await fetch("/api/crud/customers", {
@@ -1508,44 +2602,57 @@ function QuickCustomerModal({
       }
     >
       <div className="space-y-3 text-[12.5px]">
-        <Field label="Nome Completo / Razão Social *">
+        <Field label="Nome Completo / Razão Social *" erro={erros.name}>
           <Input
             value={name}
-            onChange={(e) => setName(e.target.value)}
+            onChange={(e) => { setName(e.target.value); setErros((x) => (x.name ? { ...x, name: "" } : x)); }}
             placeholder="Ex.: RAPHAELA PINHEIRO"
             autoFocus
           />
         </Field>
 
         <div className="grid grid-cols-2 gap-2.5">
-          <Field label="CPF / CNPJ">
+          <Field label="CPF / CNPJ" erro={erros.document}>
             <Input
               mono
               value={document}
-              onChange={(e) => setDocument(e.target.value)}
+              onChange={(e) => { setDocument(formatDocumentAuto(e.target.value)); setErros((x) => (x.document ? { ...x, document: "" } : x)); }}
               placeholder="000.000.000-00"
+              inputMode="numeric"
             />
           </Field>
-          <Field label="Telefone / WhatsApp">
+          <Field label="Telefone / WhatsApp" erro={erros.phone}>
             <Input
               mono
               value={phone}
-              onChange={(e) => setPhone(e.target.value)}
+              onChange={(e) => { setPhone(formatPhone(e.target.value)); setErros((x) => (x.phone ? { ...x, phone: "" } : x)); }}
               placeholder="(21) 99690-2449"
+              inputMode="tel"
             />
           </Field>
         </div>
 
+        {!document.replace(/\D/g, "") && (
+          <Field label="Cliente está sem o CPF agora?" hint="Escreva o motivo para concluir mesmo assim">
+            <Input
+              value={docWaiver}
+              onChange={(e) => { setDocWaiver(e.target.value); setErros((x) => (x.document ? { ...x, document: "" } : x)); }}
+              placeholder="Ex.: vai trazer depois — cliente conhecido"
+            />
+          </Field>
+        )}
+
         <div className="border-t border-paper-200 pt-2 space-y-2">
           <p className="font-semibold text-ink-800 text-[11.5px]">Endereço (impresso no cupom)</p>
-          <div className="grid grid-cols-3 gap-2">
-            <Field label="CEP" hint={fetchingCep ? "buscando..." : undefined}>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+            <Field label="CEP" hint={fetchingCep ? "buscando..." : undefined} erro={erros.cep}>
               <Input
                 mono
                 value={cep}
-                onChange={(e) => setCep(e.target.value)}
+                onChange={(e) => { setCep(formatCEP(e.target.value)); setErros((x) => (x.cep ? { ...x, cep: "" } : x)); }}
                 onBlur={handleCepBlur}
                 placeholder="21863-090"
+                inputMode="numeric"
               />
             </Field>
             <div className="col-span-2">
@@ -1592,11 +2699,13 @@ function QuickCustomerModal({
                 placeholder="RIO DE JANEIRO"
               />
             </Field>
-            <Field label="UF">
+            <Field label="UF" erro={erros.state}>
               <Input
+                mono
                 value={state}
-                onChange={(e) => setState(e.target.value)}
+                onChange={(e) => { setState(e.target.value.toUpperCase().slice(0, 2)); setErros((x) => (x.state ? { ...x, state: "" } : x)); }}
                 placeholder="RJ"
+                maxLength={2}
               />
             </Field>
           </div>
@@ -1609,6 +2718,93 @@ function QuickCustomerModal({
 /* ==================================================================
    MODAL DE ITEM AVULSO
    ================================================================== */
+
+/* ------------------------------------------------------------------ */
+/*  CANCELAR VENDA                                                     */
+/* ------------------------------------------------------------------ */
+function CancelSaleModal({
+  sale,
+  onClose,
+  onConfirm,
+}: {
+  sale: RecentSale | null;
+  onClose: () => void;
+  onConfirm: (reason: string) => Promise<void>;
+}) {
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const valid = reason.trim().length >= 3;
+
+  async function submit() {
+    if (!valid || busy) return;
+    setBusy(true);
+    try {
+      await onConfirm(reason.trim());
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal
+      open={!!sale}
+      onClose={onClose}
+      title={sale ? `Cancelar venda ${sale.number}` : "Cancelar venda"}
+      width="max-w-md"
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>
+            Voltar
+          </Button>
+          <Button variant="danger" icon="trash" loading={busy} disabled={!valid} onClick={submit}>
+            Confirmar cancelamento
+          </Button>
+        </>
+      }
+    >
+      {sale && (
+        <>
+          <div className="mb-3 rounded-lg border border-paper-200 bg-paper-50 px-3 py-2 font-mono text-[12px]">
+            <p className="flex justify-between">
+              <span className="text-ink-500">Total</span>
+              <span className="font-semibold tnum">{formatBRL(toNumber(sale.total, 0))}</span>
+            </p>
+            <p className="flex justify-between">
+              <span className="text-ink-500">Pagamento</span>
+              <span>{sale.paymentMethod || "—"}</span>
+            </p>
+            {sale.customerName && (
+              <p className="flex justify-between">
+                <span className="text-ink-500">Cliente</span>
+                <span className="max-w-[180px] truncate">{sale.customerName}</span>
+              </p>
+            )}
+          </div>
+
+          <label className="mb-1 block text-[11px] font-semibold text-ink-600">
+            Motivo do cancelamento
+          </label>
+          <Input
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder="Ex.: cliente desistiu da compra"
+            autoFocus
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void submit();
+            }}
+          />
+          <p className="mt-1 text-[10.5px] text-ink-400">Mínimo de 3 caracteres.</p>
+
+          <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-[12px] leading-relaxed text-amber-800">
+            O estoque dos itens volta para a prateleira e a receita é estornada no Financeiro. A
+            operação fica registrada — a venda não é apagada.
+          </p>
+        </>
+      )}
+    </Modal>
+  );
+}
 
 function FreeItemModal({
   open,
@@ -1623,13 +2819,7 @@ function FreeItemModal({
   const [price, setPrice] = useState("");
   const [qty, setQty] = useState("1");
 
-  useEffect(() => {
-    if (open) {
-      setDescription("");
-      setPrice("");
-      setQty("1");
-    }
-  }, [open]);
+  /* reset via `key` no pai (ver comentário acima) */
 
   function submit() {
     const value = toPositive(price);
@@ -1722,18 +2912,11 @@ function CashModal({
     difference: number;
   } | null>(null);
 
+  /* Campos nascem limpos pelo `key` no pai. Aqui o efeito faz só o
+     que é legítimo: buscar o resumo da gaveta no servidor. */
   useEffect(() => {
     if (!open) return;
-    setAmount("");
-    setReason("");
-    setCounted("");
-    setResult(null);
-    setOperator(operatorDefault || "");
-    if (session) {
-      void loadSummary();
-    } else {
-      setSummary(null);
-    }
+    if (session) void loadSummary();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, session?.id]);
 

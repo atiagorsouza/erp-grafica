@@ -75,9 +75,29 @@ export async function deleteProduct(id: number) {
   await db.delete(products).where(eq(products.id,id)); return {ok:true as const};
 }
 
-const pricingSchema = z.object({ type: z.enum(["dtf_uv","dtf_textil","lona","adesivo"]), categoryId: z.coerce.number().int().positive().nullable().optional(), label: z.string().trim().min(1), unitCost: finite.min(0).default(0), unit: z.string().trim().default("unidade"), widthCm: finite.min(0).nullable().optional(), heightCm: finite.min(0).nullable().optional(), minQty: finite.min(0.0001).default(1), notes: z.string().trim().nullable().optional(), active: z.boolean().default(true) });
-export async function savePricingTable(raw:unknown,id?:number){ const p=parse(pricingSchema,raw); if("error" in p)return p; const d=p.data; const data:any={...d,categoryId:d.categoryId||null,unitCost:dec(d.unitCost),widthCm:d.widthCm==null?null:dec(d.widthCm,2),heightCm:d.heightCm==null?null:dec(d.heightCm,2),minQty:dec(d.minQty,3),notes:nullable(d.notes)}; if(id){const [row]=await db.update(pricingTables).set(data).where(eq(pricingTables.id,id)).returning(); return {ok:true as const,row};} const [row]=await db.insert(pricingTables).values(data).returning(); return {ok:true as const,row}; }
-export async function deletePricingTable(id:number){ await db.update(pricingTables).set({active:false}).where(eq(pricingTables.id,id)); return {ok:true as const}; }
+/* --------------------------------------------------------------------
+ * TABELAS DE PREÇO — caminho único (v3.41.0)
+ *
+ * Este arquivo tinha uma segunda implementação de `savePricingTable`
+ * que gravava direto em `pricing_tables` SEM as validações do módulo
+ * oficial: aceitava lona sem dimensão (deixando o cálculo de m² com
+ * área zero), permitia descrição duplicada e não normalizava a
+ * unidade. Não estava plugada em rota nenhuma, mas estava exportada —
+ * qualquer código novo que a importasse furava as três regras.
+ *
+ * Reexportamos o módulo validado para que exista UMA porta só.
+ * ------------------------------------------------------------------ */
+export {
+  createPricingTable,
+  updatePricingTable,
+  archivePricingTable as deletePricingTable,
+} from "@/lib/pricing-tables";
+
+export async function savePricingTable(raw: unknown, id?: number) {
+  const { createPricingTable, updatePricingTable } = await import("@/lib/pricing-tables");
+  return id ? updatePricingTable(id, raw) : createPricingTable(raw);
+}
+
 
 const serviceSchema = z.object({ name:z.string().trim().min(2), categoryId:z.coerce.number().int().positive().nullable().optional(), type:z.enum(["proprio","terceirizado"]).default("proprio"), baseCost:finite.min(0).default(0), estimatedHours:finite.min(0).default(0), becomesProduct:z.boolean().default(false), partner:z.string().trim().nullable().optional(), description:z.string().trim().nullable().optional() });
 export async function saveService(raw:unknown,id?:number){ const p=parse(serviceSchema,raw); if("error" in p)return p; const d=p.data; const data={...d,categoryId:d.categoryId||null,baseCost:dec(d.baseCost),estimatedHours:dec(d.estimatedHours,2),partner:nullable(d.partner),description:nullable(d.description)}; if(id){const [row]=await db.update(services).set(data).where(eq(services.id,id)).returning(); return {ok:true as const,row};} const [row]=await db.insert(services).values(data).returning(); return {ok:true as const,row}; }

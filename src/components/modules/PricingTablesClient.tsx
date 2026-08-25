@@ -34,10 +34,14 @@ export function PricingTablesClient({ tables }: { tables: Row[] }) {
         type: form.type,
         label: form.label,
         unitCost: form.unitCost || "0",
+        sellPrice: form.sellPrice || "0",
         unit: form.unit || "unidade",
         widthCm: form.widthCm || null,
         heightCm: form.heightCm || null,
         minQty: form.minQty || "1",
+        piecesPerSheet: form.piecesPerSheet || "1",
+        minCharge: form.minCharge || "0",
+        minChargeSell: form.minChargeSell || "0",
         notes: form.notes || null,
         active: form.active !== "false",
       };
@@ -85,8 +89,8 @@ export function PricingTablesClient({ tables }: { tables: Row[] }) {
                 <table className="w-full min-w-[640px] text-left">
                   <thead>
                     <tr className="border-b border-paper-200">
-                      {["Descrição", "Área útil", "Mínimo", "Unidade", "", "Preço"].map((h, i) => (
-                        <th key={i} className={cn("px-5 py-2.5 font-mono text-[10px] font-semibold tracking-[0.14em] text-ink-400 uppercase", i === 5 && "text-right")}>{h}</th>
+                      {["Descrição", "Área útil", "Mínimo", "Unidade", "", "Custo", "Venda"].map((h, i) => (
+                        <th key={i} className={cn("px-5 py-2.5 font-mono text-[10px] font-semibold tracking-[0.14em] text-ink-400 uppercase", i >= 5 && "text-right")}>{h}</th>
                       ))}
                     </tr>
                   </thead>
@@ -100,28 +104,46 @@ export function PricingTablesClient({ tables }: { tables: Row[] }) {
                         <td className="px-5 py-3 font-mono text-[11.5px] text-ink-500 tnum">
                           {r.widthCm && r.heightCm ? `${Number(r.widthCm)}×${Number(r.heightCm)}cm` : "—"}
                         </td>
-                        <td className="px-5 py-3"><Badge tone="neutral">{Number(r.minQty || 1)}+</Badge></td>
+                        <td className="px-5 py-3">
+                          {Number(r.piecesPerSheet || 1) > 1 ? (
+                            <Badge tone="cyan">{Number(r.piecesPerSheet)}/folha</Badge>
+                          ) : Number(r.minCharge || 0) > 0 ? (
+                            <Badge tone="amber">mín {formatMoney(Number(r.minCharge))}</Badge>
+                          ) : (
+                            <Badge tone="neutral">{Number(r.minQty || 1)}+</Badge>
+                          )}
+                        </td>
                         <td className="px-5 py-3 font-mono text-[11px] text-ink-500 uppercase">{String(r.unit)}</td>
                         <td className="px-2 py-3">
                           <span className="flex gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
                             <IconButton size="sm" name="pencil" label="Editar" onClick={() => {
-                              setForm({ type: String(r.type), label: String(r.label), unitCost: String(r.unitCost), unit: String(r.unit), widthCm: String(r.widthCm || ""), heightCm: String(r.heightCm || ""), minQty: String(r.minQty || 1), notes: String(r.notes || ""), active: String(r.active ?? true) });
+                              setForm({ type: String(r.type), label: String(r.label), unitCost: String(r.unitCost), sellPrice: String(r.sellPrice ?? 0), unit: String(r.unit), widthCm: String(r.widthCm || ""), heightCm: String(r.heightCm || ""), minQty: String(r.minQty || 1), piecesPerSheet: String(r.piecesPerSheet ?? 1), minCharge: String(r.minCharge ?? 0), minChargeSell: String(r.minChargeSell ?? 0), notes: String(r.notes || ""), active: String(r.active ?? true) });
                               setModal({ edit: r });
                             }} />
                             <IconButton size="sm" name="trash" label="Arquivar" tone="danger" onClick={async () => { if (confirm("Arquivar linha da tabela?")) { await mutate("pricing-tables", "delete", { reason: "Arquivada" }, Number(r.id)); refresh(); } }} />
                           </span>
                         </td>
                         <td className="px-5 py-3 text-right">
-                          <span className="font-mono text-[15px] font-semibold tnum" style={{ color: String(t.color).startsWith("var") ? "var(--color-proc-c-strong)" : t.color }}>
-                            {formatMoney(Number(r.unitCost || 0))}
-                          </span>
+                          <span className="font-mono text-[13px] text-ink-600 tnum">{formatMoney(Number(r.unitCost || 0))}</span>
                           <span className="ml-1 font-mono text-[10px] text-ink-400">/{String(r.unit)}</span>
+                        </td>
+                        <td className="px-5 py-3 text-right">
+                          {Number(r.sellPrice || 0) > 0 ? (
+                            <>
+                              <span className="font-mono text-[15px] font-semibold tnum" style={{ color: String(t.color).startsWith("var") ? "var(--color-proc-c-strong)" : t.color }}>
+                                {formatMoney(Number(r.sellPrice))}
+                              </span>
+                              <span className="ml-1 font-mono text-[10px] text-ink-400">/{String(r.unit)}</span>
+                            </>
+                          ) : (
+                            <span className="font-mono text-[10px] text-ink-400">só compõe</span>
+                          )}
                         </td>
                       </tr>
                     ))}
                     {rows.length === 0 && (
                       <tr>
-                        <td colSpan={6} className="px-5 py-8 text-center text-[12px] text-ink-400">
+                        <td colSpan={7} className="px-5 py-8 text-center text-[12px] text-ink-400">
                           <Icon name="sheets" size={20} className="mx-auto mb-2 text-ink-300" />
                           Nenhuma linha nesta tabela.
                         </td>
@@ -139,7 +161,8 @@ export function PricingTablesClient({ tables }: { tables: Row[] }) {
         footer={<><Button variant="ghost" onClick={() => setModal(null)}>Cancelar</Button><Button loading={saving} icon="check" onClick={() => save(modal?.edit ? Number(modal.edit.id) : undefined)}>Salvar</Button></>}>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Field label="Descrição" required className="sm:col-span-2"><Input value={form.label || ""} onChange={set("label")} placeholder='Ex.: "A4 (área útil 22x28cm)"' /></Field>
-          <Field label="Preço (R$)"><Input mono value={form.unitCost || ""} onChange={set("unitCost")} /></Field>
+          <Field label="Custo (R$)" hint="o que você paga ao fornecedor"><Input mono value={form.unitCost || ""} onChange={set("unitCost")} /></Field>
+          <Field label="Preço de venda (R$)" hint="0 = não vende avulso, só compõe produto"><Input mono value={form.sellPrice || ""} onChange={set("sellPrice")} /></Field>
           <Field label="Unidade">
             <select value={form.unit || "unidade"} onChange={set("unit")} className="focus-ring h-9.5 w-full cursor-pointer rounded-lg border border-paper-300 bg-white px-3 text-[13px]">
               {["unidade", "metro", "m2", "folha"].map((u) => <option key={u}>{u}</option>)}
@@ -148,6 +171,15 @@ export function PricingTablesClient({ tables }: { tables: Row[] }) {
           <Field label="Largura útil (cm)"><Input mono value={form.widthCm || ""} onChange={set("widthCm")} /></Field>
           <Field label="Altura útil (cm)"><Input mono value={form.heightCm || ""} onChange={set("heightCm")} /></Field>
           <Field label="Quantidade mínima"><Input mono value={form.minQty || "1"} onChange={set("minQty")} /></Field>
+          <Field label="Peças por folha" hint="DTF: quantas cabem na folha comprada (1 = folha inteira)">
+            <Input mono value={form.piecesPerSheet || "1"} onChange={set("piecesPerSheet")} placeholder="6" />
+          </Field>
+          <Field label="Mínimo de custo (R$)" hint="o piso que o fornecedor cobra por peça">
+            <Input mono value={form.minCharge || ""} onChange={set("minCharge")} placeholder="26,00" />
+          </Field>
+          <Field label="Mínimo de venda (R$)" hint="seu piso ao cliente — com margem">
+            <Input mono value={form.minChargeSell || ""} onChange={set("minChargeSell")} placeholder="60,00" />
+          </Field>
           <Field label="Observações"><Input value={form.notes || ""} onChange={set("notes")} placeholder="Desconto volume…" /></Field>
         </div>
       </Modal>

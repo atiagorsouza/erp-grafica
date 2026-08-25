@@ -25,6 +25,36 @@ async function main() {
   try {
     await client.query("BEGIN");
 
+    /* v3.18.0 — um documento, um cliente.
+       Bases antigas podem ter duplicatas (a checagem era só no código).
+       Mantemos o cadastro mais antigo com o documento e movemos o dos
+       demais para as observações — nenhum cliente é apagado e nada de
+       histórico se perde; depois o índice pode ser criado. */
+    const dupes = await client.query(`
+      UPDATE customers c SET
+        notes = concat_ws(E'\\n', nullif(c.notes,''),
+                'DOCUMENTO DUPLICADO NA MIGRACAO: ' || c.document ||
+                ' (ja usado no cadastro #' || k.keep_id || ')'),
+        document = NULL,
+        updated_at = now()
+      FROM (
+        SELECT regexp_replace(document,'\\D','','g') AS d, MIN(id) AS keep_id
+          FROM customers
+         WHERE coalesce(document,'') <> ''
+         GROUP BY 1 HAVING count(*) > 1
+      ) k
+      WHERE regexp_replace(c.document,'\\D','','g') = k.d
+        AND c.id <> k.keep_id
+    `);
+    if (dupes.rowCount > 0) {
+      console.log(`⚠️  ${dupes.rowCount} cadastro(s) com documento duplicado — documento movido para observações.`);
+    }
+
+    await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS customers_document_unique_idx
+        ON customers (document) WHERE coalesce(document,'') <> ''
+    `);
+
     const sourceFix = await client.query(`
       UPDATE crm_leads
          SET source = 'balcao', updated_at = NOW()

@@ -10,7 +10,12 @@ import {
   pgEnum,
   date,
   uniqueIndex,
+  index,
 } from "drizzle-orm/pg-core";
+/* Tipo só para a auto-referência de item_categories.parent_id: sem
+   ele o TypeScript entra em recursão infinita ao inferir a tabela. */
+import type { AnyPgColumn } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 /* ------------------------------------------------------------------ */
 /*  CONTROL PANEL / SETTINGS                                          */
@@ -72,6 +77,24 @@ export const itemCategories = pgTable("item_categories", {
   icon: text("icon").default("📁"),
   color: text("color").default("#06b6d4"),
   order: integer("order").default(0),
+  /* ── Dois níveis (v3.58.0) ──────────────────────────────────────
+     A tabela era plana. O dono desenhou a estrutura dele em Mestre →
+     Subcategoria ("Gráfica Rápida" → "Serviços de Balcão"), que é
+     como ele pensa o negócio — e como o cliente pergunta.
+
+     `parentId` nulo = categoria mestre. Preenchido = subcategoria.
+
+     Só DOIS níveis, de propósito: com três, ninguém acha nada e a
+     tela vira árvore de explorador de arquivos. Se um dia precisar
+     de mais profundidade, o certo é rever o desenho, não empilhar.
+
+     ON DELETE SET NULL: apagar a mestre não apaga as filhas — elas
+     sobem para a raiz e ficam visíveis para serem reorganizadas.
+     Perder categoria em cascata seria perder o trabalho de
+     classificar. */
+  parentId: integer("parent_id").references((): AnyPgColumn => itemCategories.id, {
+    onDelete: "set null",
+  }),
   createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
 });
 
@@ -93,6 +116,11 @@ export const customers = pgTable("customers", {
   name: text("name").notNull(), // nome (PF) ou razão social (PJ)
   tradeName: text("trade_name"), // nome fantasia
   document: text("document"), // CPF ou CNPJ
+  /* Escape de boa-fé: CPF é obrigatório, mas o balcão não pode parar
+     quando o cliente não tem o documento na mão. Preenchido, dispensa
+     a trava e deixa registrado QUEM decidiu e POR QUÊ. */
+  documentWaiverReason: text("document_waiver_reason"),
+  documentWaiverAt: timestamp("document_waiver_at", { mode: "date" }),
   // contato
   email: text("email"),
   phone: text("phone"),
@@ -111,21 +139,70 @@ export const customers = pgTable("customers", {
   state: text("state"),
   // PF
   rg: text("rg"),
+  /* órgão emissor do RG (DETRAN-RJ, SSP-SP...) — pedido na ficha de cliente */
+  rgIssuer: text("rg_issuer"),
   birthDate: date("birth_date", { mode: "string" }),
   gender: text("gender"),
+  maritalStatus: text("marital_status"), // solteiro, casado, divorciado, viuvo, uniao_estavel
   // PJ
   stateRegistration: text("state_registration"), // inscricao estadual
   municipalRegistration: text("municipal_registration"), // inscricao municipal
   legalNature: text("legal_nature"), // natureza juridica
   taxRegime: text("tax_regime"), // regime tributario
+  companySize: text("company_size"), // MEI, ME, EPP, demais
+  foundedAt: date("founded_at", { mode: "string" }), // data de fundação
   // comercial
+  /* de onde veio o cliente: whatsapp, indicacao, instagram, balcao... */
+  origin: text("origin"),
+  /* LGPD: cliente que pediu para não receber mensagem automática */
+  whatsappOptOut: boolean("whatsapp_opt_out").default(false).notNull(),
+  /* ── Marketing é OUTRA coisa (v3.54.0) ─────────────────────────
+     `whatsappOptOut` cobre TUDO, inclusive aviso de "seu pedido está
+     pronto". Marketing precisa de consentimento próprio: quem aceita
+     receber aviso de pedido não aceitou receber promoção.
+
+     Sem opt-in explícito, o cliente NÃO entra em campanha — nem que
+     esteja cadastrado e tenha conversado ontem. */
+  marketingOptIn: boolean("marketing_opt_in").default(false).notNull(),
+  /* Quando e por onde consentiu — a LGPD pede saber. */
+  marketingOptInAt: timestamp("marketing_opt_in_at", { mode: "date" }),
+  marketingOptInSource: text("marketing_opt_in_source"),
+  /* Telefone canônico em E.164 ("5521988887777") — é por aqui que o
+     WhatsApp encontra o cliente. Os campos phone/whatsapp guardam a
+     grafia bonita para exibir; este guarda a chave para COMPARAR.
+     Preenchido por `toE164BR()` em lib/phone.ts. Sem ele o bot cria
+     um cliente novo a cada mensagem, porque "(21) 98888-7777" e
+     "21988887777" são strings diferentes para o banco. */
+  phoneE164: text("phone_e164"),
   status: customerStatusEnum("status").default("lead").notNull(),
   creditLimit: numeric("credit_limit", { precision: 12, scale: 2 }).default("0"),
   tags: text("tags"),
   notes: text("notes"),
   createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
-});
+}, (table) => [
+  /* Um documento, um cliente. A checagem de duplicata em `lib/crm.ts`
+     é um SELECT seguido de INSERT — mesmo TOCTOU que duplicou pedidos
+     na v3.16.0. Com a importação de PDF em lote o risco cresce.
+     Índice sobre os dígitos, para que "034.460.327-03" e "03446032703"
+     colidam. Parcial: documento é opcional e vazios não colidem. */
+  uniqueIndex("customers_document_unique_idx")
+    .on(table.document)
+    .where(sql`coalesce(document, '') <> ''`),
+  /* Um telefone, um cliente. O bot do WhatsApp faz "achou? usa : cria",
+     e duas mensagens quase simultâneas do mesmo número passariam as
+     duas pela checagem antes de qualquer INSERT — o mesmo TOCTOU do
+     documento. Aqui é pior: acontece sozinho, sem ninguém clicando.
+     Parcial porque telefone é opcional e vazios não podem colidir. */
+  uniqueIndex("customers_phone_e164_unique_idx")
+    .on(table.phoneE164)
+    .where(sql`coalesce(phone_e164, '') <> ''`),
+  /* Busca de cliente por nome/fantasia — é a mais usada do sistema.
+     Sem isto, cada tecla digitada varre a tabela inteira. */
+  index("customers_created_idx").on(table.createdAt),
+  index("customers_name_busca_idx").using("btree", sql`lower(name) text_pattern_ops`),
+  index("customers_trade_busca_idx").using("btree", sql`lower(coalesce(trade_name, '')) text_pattern_ops`),
+]);
 
 /* ------------------------------------------------------------------ */
 /*  CRM COMERCIAL — PIPELINE, LEADS E HISTÓRICO DE RELACIONAMENTO      */
@@ -233,6 +310,18 @@ export const printers = pgTable("printers", {
   maxFormat: text("max_format").default("A4"),
   /** 3D: volume de construção (ex: 220x220x250mm) — não usa formato de papel */
   buildVolume: text("build_volume"),
+  /* --------------------------------------------------------------
+   * TEMPO DE MÁQUINA (v3.39.0)
+   *
+   * Em impressão 3D e recorte o insumo é barato e o TEMPO é o custo
+   * real. Uma peça de 50 g gasta R$ 6,17 de filamento — e ocupa a
+   * Bambu Lab por 8 horas. Sem cobrar a hora, o motor precificava a
+   * peça em R$ 6,17 e a máquina trabalhava de graça o dia inteiro.
+   *
+   * Zerado, nada muda: as impressoras que cobram por página seguem
+   * exatamente como antes.
+   * ------------------------------------------------------------- */
+  hourlyRate: numeric("hourly_rate", { precision: 12, scale: 4 }).default("0"),
   notes: text("notes"),
   createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
 });
@@ -256,6 +345,22 @@ export const printFormats = pgTable("print_formats", {
   /** custo comercial interno da impressão por folha; 0 usa cálculo técnico de consumíveis */
   printCostOverride: numeric("print_cost_override", { precision: 12, scale: 4 }).default("0"),
   isPhoto: boolean("is_photo").default(false),
+  /* --------------------------------------------------------------
+   * TÉRMICA — geometria do rolo (v3.36.0)
+   *
+   * Etiqueta não tem rendimento fixo: o ribbon avança o COMPRIMENTO
+   * da etiqueta mais o gap, e o rolo pode ter várias colunas lado a
+   * lado. Uma 100x30 em 3 colunas rende 7.125 etiquetas por ribbon
+   * de 76 m; uma 100x150 em coluna única rende 500 — 14× de
+   * diferença. Sem esses campos o custo por etiqueta era um chute
+   * herdado da categoria.
+   *
+   * `feedMm` = avanço por linha (altura da etiqueta + gap).
+   * `columns` = etiquetas lado a lado na largura do rolo.
+   * Zerados, o motor cai no comportamento antigo (areaFactor).
+   * ------------------------------------------------------------- */
+  feedMm: numeric("feed_mm", { precision: 8, scale: 2 }).default("0"),
+  columns: integer("columns").default(1),
   createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
 });
 
@@ -265,12 +370,49 @@ export const printFormats = pgTable("print_formats", {
 export const materials = pgTable("materials", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(), // Papel A4 75g, Papel Cartolina, Vinil, TNT...
+  /** código interno do insumo, se a gráfica usar um */
+  sku: text("sku"),
+  /* Código de barras da embalagem (EAN/UPC/DUN).
+     Com o leitor na mão, cadastrar e conferir estoque deixa de ser
+     digitação: bipa e o campo preenche. É o mesmo caminho que o PDV
+     já usa para produtos. */
+  barcode: text("barcode"),
   categoryId: integer("category_id").references(() => itemCategories.id, {
     onDelete: "set null",
   }),
   unit: text("unit").default("unidade"), // folha, metro, kg, unidade
   unitCost: numeric("unit_cost", { precision: 12, scale: 4 }).default("0"),
+  /* --------------------------------------------------------------
+   * EMBALAGEM DE COMPRA (v3.31.0)
+   *
+   * O insumo é COMPRADO em embalagem fechada (resma de 500 folhas,
+   * pacote de 100 fotos, bobina de 300 m) mas é CONSUMIDO na unidade
+   * (folha, foto, metro). Antes disso o usuário tinha que dividir na
+   * calculadora e digitar o custo unitário à mão — e qualquer reajuste
+   * de preço exigia refazer a conta, com erro de arredondamento
+   * entrando direto na precificação de todos os produtos.
+   *
+   * Agora `unitCost` é DERIVADO: packCost / packQuantity. Quando a
+   * embalagem não é informada (packQuantity = 0) o campo continua
+   * sendo digitado direto, então todo o cadastro legado segue válido.
+   * ------------------------------------------------------------- */
+  /** rótulo da embalagem: "Resma 500 folhas", "Pacote 100 un" */
+  packName: text("pack_name"),
+  /** quantas unidades base vêm na embalagem — 0/null = não usa embalagem */
+  packQuantity: numeric("pack_quantity", { precision: 12, scale: 3 }).default("0"),
+  /** preço pago na embalagem fechada */
+  packCost: numeric("pack_cost", { precision: 12, scale: 4 }).default("0"),
+  /* Fornecedor como TEXTO — legado. Continua sendo gravado e exibido
+     para não perder o que já foi digitado em centenas de materiais.
+     O cadastro de verdade é `supplierId`; este campo vira só o nome
+     de quem ainda não foi vinculado. */
   supplier: text("supplier"),
+  /** fornecedor cadastrado: liga o insumo a CNPJ, contato e prazo.
+      A referência é preguiçosa (arrow) porque `suppliers` só é
+      declarada mais abaixo neste arquivo. */
+  supplierId: integer("supplier_id").references((): AnyPgColumn => suppliers.id, {
+    onDelete: "set null",
+  }),
   stock: numeric("stock", { precision: 12, scale: 3 }).default("0"),
   minStock: numeric("min_stock", { precision: 12, scale: 3 }).default("0"),
   notes: text("notes"),
@@ -303,6 +445,37 @@ export const stockMovements = pgTable("stock_movements", {
   notes: text("notes"),
   automatic: boolean("automatic").default(false), // gerado pelo sistema (venda/produção)
   createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+}, (table) => [
+  index("stock_movements_created_idx").on(table.createdAt),
+  index("stock_movements_material_idx").on(table.materialId),
+]);
+
+/* ------------------------------------------------------------------ */
+/*  VENDEDORES E COMISSÃO                                              */
+/* ------------------------------------------------------------------ */
+/**
+ * Quem vende. Antes existia só `seller_name` como texto livre em
+ * orçamentos, pedidos e vendas — então "Tiago", "tiago" e "TIAGO "
+ * viravam três vendedores diferentes, e não havia como somar o que
+ * cada um vendeu nem quanto tinha a receber.
+ *
+ * O texto continua sendo gravado junto (o histórico não se perde e
+ * quem não for vinculado ainda aparece), mas o vínculo de verdade é
+ * o `sellerId`.
+ */
+export const sellers = pgTable("sellers", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  /** apelido curto que aparece no PDV e no cupom */
+  nickname: text("nickname"),
+  document: text("document"),
+  phone: text("phone"),
+  email: text("email"),
+  /** percentual de comissão deste vendedor — 3 = 3% */
+  commissionRate: numeric("commission_rate", { precision: 6, scale: 3 }).default("0"),
+  active: boolean("active").default(true).notNull(),
+  notes: text("notes"),
+  createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
 });
 
 /* ------------------------------------------------------------------ */
@@ -313,6 +486,8 @@ export const suppliers = pgTable("suppliers", {
   name: text("name").notNull(),
   tradeName: text("trade_name"),
   document: text("document"),
+  /** inscrição estadual — nota de compra com IE errada volta */
+  stateRegistration: text("state_registration"),
   contactName: text("contact_name"),
   email: text("email"),
   phone: text("phone"),
@@ -369,10 +544,60 @@ export const pricingTables = pgTable("pricing_tables", {
   }),
   label: text("label").notNull(),          // "A4 (22x28cm)", "A3 (28x42cm)", "1 Metro Linear", "m² Lona 440g"
   unitCost: numeric("unit_cost", { precision: 12, scale: 4 }).default("0"),  // R$ por unidade
+  /* --------------------------------------------------------------
+   * CUSTO × VENDA (v3.42.0)
+   *
+   * A mesma linha serve a dois usos que o usuário faz na prática:
+   *
+   *   1. VENDER DIRETO no PDV  → precisa de preço final ao cliente
+   *   2. COMPOR PRODUTO (caneca na UV, camisa têxtil) → entra como
+   *      custo, e a margem do produto é aplicada por cima
+   *
+   * Com um campo só, um dos dois estaria sempre errado: vender pelo
+   * custo é prejuízo, compor produto pelo preço de venda cobra margem
+   * duas vezes.
+   *
+   * `unitCost` = o que você paga ao fornecedor.
+   * `sellPrice` = o que você cobra do cliente. Zerado, o PDV não
+   * oferece a linha para venda avulsa (só serve para compor).
+   * ------------------------------------------------------------- */
+  sellPrice: numeric("sell_price", { precision: 12, scale: 4 }).default("0"),
   unit: text("unit").default("unidade"),    // unidade, metro, m2, folha
   widthCm: numeric("width_cm", { precision: 8, scale: 2 }),   // largura útil em cm (28cm para metro linear)
   heightCm: numeric("height_cm", { precision: 8, scale: 2 }), // altura útil em cm
   minQty: numeric("min_qty", { precision: 10, scale: 3 }).default("1"),
+  /* --------------------------------------------------------------
+   * FOLHA FECHADA E MÍNIMO EM REAIS (v3.43.0)
+   *
+   * Dois modelos de cobrança que os fornecedores usam de verdade:
+   *
+   * 1. DTF (UV e têxtil) — folha de tamanho FIXO e preço FIXO. O que
+   *    varia é quantas peças cabem: a 20×28 custa R$ 23,22 e comporta
+   *    6 canecas (R$ 3,87 cada). A folha é INDIVISÍVEL: 8 canecas
+   *    consomem 2 folhas, e a sobra é perda.
+   *    → `piecesPerSheet` = quantas peças cabem.
+   *
+   * 2. Lona/Vinil — preço por m², mas com MÍNIMO EM REAIS por peça
+   *    (banner R$ 26, vinil R$ 30). Um adesivo de 30×30 cm dá 0,09 m²
+   *    = R$ 4,05, mas o fornecedor cobra os R$ 26.
+   *    → `minCharge` = piso em reais.
+   *
+   * O `minQty` continua sendo mínimo de QUANTIDADE; estes dois campos
+   * cobrem o que ele não conseguia expressar. Zerados, o
+   * comportamento é o anterior.
+   * ------------------------------------------------------------- */
+  /**
+   * DTF: peças que cabem na folha — REFERÊNCIA, não regra fixa.
+   *
+   * Quantas peças cabem depende do TAMANHO DA ESTAMPA, não da folha:
+   * na mesma 20×28 cabem 6 canecas ou 30 chaveiros. Este valor é só o
+   * padrão sugerido; o produto e a linha de venda podem sobrescrever.
+   */
+  piecesPerSheet: numeric("pieces_per_sheet", { precision: 10, scale: 3 }).default("1"),
+  /** piso de CUSTO em R$ por peça — o mínimo que o fornecedor cobra */
+  minCharge: numeric("min_charge", { precision: 12, scale: 4 }).default("0"),
+  /** piso de VENDA em R$ por peça — seu mínimo ao cliente, com margem */
+  minChargeSell: numeric("min_charge_sell", { precision: 12, scale: 4 }).default("0"),
   notes: text("notes"),
   active: boolean("active").default(true),
   createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
@@ -390,6 +615,8 @@ export const finishingItems = pgTable("finishing_items", {
   unit: text("unit").default("unidade"),
   unitCost: numeric("unit_cost", { precision: 12, scale: 4 }).default("0"),
   description: text("description"),
+  /** ver comentário em `services.archivedAt` (v3.46.1) */
+  archivedAt: timestamp("archived_at", { mode: "date" }),
   createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
 });
 
@@ -410,6 +637,12 @@ export const services = pgTable("services", {
   becomesProduct: boolean("becomes_product").default(false),
   partner: text("partner"), // empresa terceirizada
   description: text("description"),
+  /* Arquivado = fora das listas de seleção, mas preservado no histórico.
+     Até a v3.46.0 o estado era marcado escrevendo "ARQUIVADO:" dentro de
+     `description` — e nada filtrava por isso, então o serviço arquivado
+     continuava aparecendo para uso. Estado em campo de texto livre também
+     quebrava se alguém escrevesse a palavra numa observação legítima. */
+  archivedAt: timestamp("archived_at", { mode: "date" }),
   createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
 });
 
@@ -452,14 +685,67 @@ export const products = pgTable("products", {
   baseServiceId: integer("base_service_id").references(() => services.id, {
     onDelete: "set null",
   }),
+  /* --------------------------------------------------------------
+   * LINHA DE TABELA COMO INSUMO (v3.42.0)
+   *
+   * "componho produtos como caneca na UV e camisa têxtil": o produto
+   * usa uma linha de tabela terceirizada como CUSTO, e a margem do
+   * produto é aplicada por cima. Entra pelo `unitCost` da linha —
+   * nunca pelo `sellPrice`, senão a margem seria cobrada duas vezes.
+   * ------------------------------------------------------------- */
+  basePricingTableId: integer("base_pricing_table_id").references(
+    () => pricingTables.id,
+    { onDelete: "set null" }
+  ),
+  /** quantidade da linha por unidade do produto (m², metros, peças) */
+  basePricingTableQty: numeric("base_pricing_table_qty", { precision: 10, scale: 3 }).default("1"),
+  /**
+   * Quantas peças DESTE produto cabem na folha (v3.44.0).
+   *
+   * Sobrescreve o padrão da tabela: a estampa da caneca rende 6 por
+   * folha, a do chaveiro rende 30 — mesma folha, mesmo preço. Zerado,
+   * usa o valor de referência da linha da tabela.
+   */
+  basePricingTablePieces: numeric("base_pricing_table_pieces", { precision: 10, scale: 3 }).default("0"),
   // receita de produção por tiragem
   calculationMode: text("calculation_mode").default("unit").notNull(), // unit, batch
   defaultQuantity: numeric("default_quantity", { precision: 12, scale: 3 }).default("1"),
   piecesPerSheet: numeric("pieces_per_sheet", { precision: 12, scale: 3 }).default("1"),
   printSides: integer("print_sides").default(1),
+  /** minutos de máquina por unidade — 3D/recorte cobram tempo (v3.39.0) */
+  machineMinutes: numeric("machine_minutes", { precision: 10, scale: 2 }).default("0"),
+  /* ── Prazo de ENTREGA (não confundir com machineMinutes) ─────────
+     machineMinutes é tempo de máquina e entra no CUSTO. Isto aqui é
+     a PROMESSA ao cliente, em dias úteis.
+
+     Uma peça 3D leva 6 h de impressora mas o cliente recebe em 4
+     dias: tem fila na frente, modelagem antes e cura depois.
+
+     Três parcelas porque o que estoura prazo quase nunca é a
+     máquina — é a arte (depende do cliente aprovar) e o acabamento
+     (tempo físico: cola seca, verniz cura).
+
+     leadTimeSerial: item que só começa depois que os outros
+     terminam (encadernar exige capa e miolo prontos). Soma por cima
+     do maior em vez de correr em paralelo. */
+  leadTimeCreation: integer("lead_time_creation").default(0).notNull(),
+  leadTimeProduction: integer("lead_time_production").default(1).notNull(),
+  leadTimeFinishing: integer("lead_time_finishing").default(0).notNull(),
+  leadTimeSerial: boolean("lead_time_serial").default(false).notNull(),
   wastePercent: numeric("waste_percent", { precision: 6, scale: 4 }).default("0"),
   setupSheets: integer("setup_sheets").default(0),
   minOrderQty: numeric("min_order_qty", { precision: 12, scale: 3 }).default("1"),
+  /* UNIDADE DE VENDA (PEÇA 0 do PLANO-PORTAL-CLIENTE, v3.68.2) —
+     "cartela", "cento", "pacote", "par"… NULL = vendido por unidade.
+
+     Conceito de VENDA, distinto de piecesPerSheet (produção: quantas
+     peças saem da folha). Na foto 10x15 a folha rende várias peças e o
+     cliente leva por unidade — por isso o campo é próprio. Sem ele, a
+     Consulta Rápida copiava "1 un — R$ 12,90" no adesivo que vende por
+     cartela de 60, e o cliente do WhatsApp lia 1 adesivo. */
+  saleUnitLabel: text("sale_unit_label"),
+  /* Quantas frações vêm dentro da unidade (60 adesivos por cartela). */
+  saleUnitPieces: numeric("sale_unit_pieces", { precision: 12, scale: 3 }),
   operationalRate: numeric("operational_rate", { precision: 6, scale: 4 }).default("0"),
   roundingStep: numeric("rounding_step", { precision: 10, scale: 2 }).default("0.01"),
   // precificacao — em batch, margin representa lucro alvo no divisor de markup
@@ -474,8 +760,29 @@ export const products = pgTable("products", {
   trackStock: boolean("track_stock").default(false),
   stock: numeric("stock", { precision: 12, scale: 3 }).default("0"),
   minStock: numeric("min_stock", { precision: 12, scale: 3 }).default("0"),
+  /* --------------------------------------------------------------
+   * LOGÍSTICA (v3.12.0) — usados na cotação de frete.
+   * Quando zerados, o motor cai no pacote padrão do Painel de
+   * Controle, então o cadastro legado continua funcionando.
+   * ------------------------------------------------------------- */
+  shipWeight: numeric("ship_weight", { precision: 10, scale: 3 }).default("0"), // kg
+  shipHeight: numeric("ship_height", { precision: 10, scale: 2 }).default("0"), // cm
+  shipWidth: numeric("ship_width", { precision: 10, scale: 2 }).default("0"), // cm
+  shipLength: numeric("ship_length", { precision: 10, scale: 2 }).default("0"), // cm
   createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
-});
+}, (table) => [
+  /* SKU e código de barras precisam ser únicos: o PDV resolve o item
+     bipado com `find`, que devolve o PRIMEIRO resultado. Com código
+     repetido o operador vende o produto errado, com o preço errado, e
+     nada avisa — o erro só aparece no fechamento do caixa.
+     Índices parciais: os dois campos são opcionais e vazios não colidem. */
+  uniqueIndex("products_sku_unique_idx")
+    .on(table.sku)
+    .where(sql`coalesce(sku, '') <> ''`),
+  uniqueIndex("products_barcode_unique_idx")
+    .on(table.barcode)
+    .where(sql`coalesce(barcode, '') <> ''`),
+]);
 
 /* product -> finishing (N:N) */
 export const productFinishings = pgTable("product_finishings", {
@@ -507,6 +814,35 @@ export const productMaterials = pgTable("product_materials", {
 });
 
 /* ------------------------------------------------------------------ */
+/*  FAIXAS DE PREÇO POR QUANTIDADE (v3.34.0)                          */
+/*                                                                     */
+/*  "vendo mínimo 50 und, depois 100 und e assim vai" — etiqueta,      */
+/*  adesivo e brinde não são vendidos por unidade solta: o cliente     */
+/*  compra lote, e quanto maior o lote menor o preço unitário.         */
+/*                                                                     */
+/*  Até aqui o produto tinha UM preço só. Vender 50 e 500 pelo mesmo   */
+/*  unitário ou perde a venda grande, ou entrega a pequena no prejuízo */
+/*  — o setup (calibrar, carregar ribbon, testar) é o mesmo nas duas.  */
+/* ------------------------------------------------------------------ */
+export const productPriceTiers = pgTable("product_price_tiers", {
+  id: serial("id").primaryKey(),
+  productId: integer("product_id")
+    .notNull()
+    .references(() => products.id, { onDelete: "cascade" }),
+  /** quantidade mínima que ativa a faixa (50, 100, 250...) */
+  minQuantity: numeric("min_quantity", { precision: 12, scale: 3 }).notNull(),
+  /** preço UNITÁRIO praticado a partir dessa quantidade */
+  unitPrice: numeric("unit_price", { precision: 12, scale: 4 }).notNull(),
+  /** rótulo opcional mostrado no orçamento: "a partir de 100 un" */
+  label: text("label"),
+  createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+}, (table) => [
+  /* Duas faixas com a mesma quantidade mínima tornam o preço
+     indeterminado — qual das duas o motor escolhe? */
+  uniqueIndex("product_price_tiers_qty_idx").on(table.productId, table.minQuantity),
+]);
+
+/* ------------------------------------------------------------------ */
 /*  QUOTES / ORÇAMENTOS                                               */
 /* ------------------------------------------------------------------ */
 export const quoteStatusEnum = pgEnum("quote_status", [
@@ -533,9 +869,19 @@ export const quotes = pgTable("quotes", {
   paymentMethod: text("payment_method"),
   channel: text("channel").default("Atendimento"),
   sellerName: text("seller_name"),
+  /** vendedor do cadastro — o texto acima vira só histórico */
+  sellerId: integer("seller_id").references((): AnyPgColumn => sellers.id, {
+    onDelete: "set null",
+  }),
   notes: text("notes"),
   createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
-});
+}, (table) => [
+  /* Listagem por data e busca por número — ver comentário em `orders`. */
+  index("quotes_created_idx").on(table.createdAt),
+  index("quotes_customer_idx").on(table.customerId),
+  index("quotes_status_idx").on(table.status),
+  index("quotes_number_busca_idx").using("btree", sql`lower(number) text_pattern_ops`),
+]);
 
 export const quoteItems = pgTable("quote_items", {
   id: serial("id").primaryKey(),
@@ -581,12 +927,56 @@ export const orders = pgTable("orders", {
   shippingFee: numeric("shipping_fee", { precision: 12, scale: 4 }).default("0"),
   total: numeric("total", { precision: 12, scale: 4 }).default("0"),
   paymentMethod: text("payment_method"),
+  /* ── Entrada e saldo (política 50/50 da VTDIGITAL) ──────────────
+     "50% no ato do fechamento e 50% na entrega, sendo PIX. Cartão de
+     crédito, valor integral." É regra desde a fundação da empresa e
+     não existia no sistema — o controle era de cabeça, e dinheiro se
+     perde no esquecimento.
+
+     Guardamos VALORES, não percentuais: 50% de um total que muda
+     depois viraria conta errada. O percentual é só a sugestão na
+     hora de criar o pedido.
+
+     Enquanto depositPaidAt for null, o pedido não entra em produção. */
+  depositAmount: numeric("deposit_amount", { precision: 12, scale: 2 }).default("0").notNull(),
+  depositPaidAt: timestamp("deposit_paid_at", { mode: "date" }),
+  depositMethod: text("deposit_method"),
+  balanceAmount: numeric("balance_amount", { precision: 12, scale: 2 }).default("0").notNull(),
+  balancePaidAt: timestamp("balance_paid_at", { mode: "date" }),
+  balanceMethod: text("balance_method"),
   channel: text("channel").default("Atendimento"),
   sellerName: text("seller_name"),
+  /** vendedor do cadastro — o texto acima vira só histórico */
+  sellerId: integer("seller_id").references((): AnyPgColumn => sellers.id, {
+    onDelete: "set null",
+  }),
   notes: text("notes"),
   createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
-});
+}, (table) => [
+  /* Um orçamento gera NO MÁXIMO um pedido.
+     A rota de conversão conferia com um SELECT e inseria em seguida —
+     duplo-clique no botão "Converter em Pedido" criava duas OS para a
+     mesma proposta (reproduzido na auditoria da v3.15.0: 5 chamadas
+     paralelas geraram 3 pedidos). Parcial porque quote_id é nulo em
+     pedido avulso, e NULL não colide em índice único. */
+  uniqueIndex("orders_one_per_quote_idx")
+    .on(table.quoteId)
+    .where(sql`quote_id is not null`),
+  /* ── LISTAGEM E BUSCA (v3.62.0) ──
+     Só existiam índices de unicidade. Toda listagem ordena por
+     created_at desc e a busca filtra por nome/número — sem índice o
+     banco varria a tabela inteira a cada abertura de tela. Com 125
+     pedidos/mês são 1.500 linhas em um ano.
+
+     `lower(x) text_pattern_ops` é o que o Postgres aproveita em
+     `lower(x) LIKE 'termo%'`. Busca com % no início continua varrendo;
+     para isso o caminho seria pg_trgm, que só vale se virar rotina. */
+  index("orders_created_idx").on(table.createdAt),
+  index("orders_customer_idx").on(table.customerId),
+  index("orders_status_idx").on(table.status),
+  index("orders_number_busca_idx").using("btree", sql`lower(number) text_pattern_ops`),
+]);
 
 export const artApprovals = pgTable("art_approvals", {
   id: serial("id").primaryKey(),
@@ -621,7 +1011,15 @@ export const cashSessions = pgTable("cash_sessions", {
   notes: text("notes"),
   openedAt: timestamp("opened_at", { mode: "date" }).defaultNow().notNull(),
   closedAt: timestamp("closed_at", { mode: "date" }),
-});
+}, (table) => [
+  /* Só pode existir UMA sessão aberta por vez.
+     Sem esta trava, três requisições simultâneas de "abrir caixa"
+     criavam três sessões e a conferência de gaveta ficava sem sentido
+     (reproduzido em teste na v3.13.1). */
+  uniqueIndex("cash_sessions_one_open_idx")
+    .on(table.status)
+    .where(sql`status = 'aberto'`),
+]);
 
 /* Sangrias e suprimentos de gaveta. */
 export const cashMovements = pgTable("cash_movements", {
@@ -647,6 +1045,10 @@ export const sales = pgTable("sales", {
   discount: numeric("discount", { precision: 12, scale: 4 }).default("0"),
   taxes: numeric("taxes", { precision: 12, scale: 4 }).default("0"),
   cardFee: numeric("card_fee", { precision: 12, scale: 4 }).default("0"),
+  /* frete cotado no PDV (SuperFrete) — soma no total (v3.12.0) */
+  shippingFee: numeric("shipping_fee", { precision: 12, scale: 4 }).default("0"),
+  shippingService: text("shipping_service"),
+  shippingServiceId: integer("shipping_service_id"),
   total: numeric("total", { precision: 12, scale: 4 }).default("0"),
   paymentMethod: text("payment_method"),
   status: text("status").default("concluida").notNull(),
@@ -657,6 +1059,10 @@ export const sales = pgTable("sales", {
   receivedAmount: numeric("received_amount", { precision: 12, scale: 2 }),
   changeAmount: numeric("change_amount", { precision: 12, scale: 2 }),
   sellerName: text("seller_name"),
+  /** vendedor do cadastro — o texto acima vira só histórico */
+  sellerId: integer("seller_id").references((): AnyPgColumn => sellers.id, {
+    onDelete: "set null",
+  }),
   deliveryMode: text("delivery_mode"),
   deliveryDate: text("delivery_date"),
   notes: text("notes"),
@@ -666,7 +1072,10 @@ export const sales = pgTable("sales", {
   canceledAt: timestamp("canceled_at", { mode: "date" }),
   cancelReason: text("cancel_reason"),
   createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
-});
+}, (table) => [
+  index("sales_created_idx").on(table.createdAt),
+  index("sales_customer_idx").on(table.customerId),
+]);
 
 /* ------------------------------------------------------------------ */
 /*  KANBAN                                                            */
@@ -683,7 +1092,12 @@ export const kanbanCards = pgTable("kanban_cards", {
   orderId: integer("order_id").references(() => orders.id, {
     onDelete: "cascade",
   }),
-  quoteId: integer("quote_id"),
+  /* `orderId` e `customerId` sempre tiveram FK; `quoteId` era um
+     integer solto — orçamento removido deixava o card apontando para
+     um id inexistente. */
+  quoteId: integer("quote_id").references(() => quotes.id, {
+    onDelete: "set null",
+  }),
   productId: integer("product_id").references(() => products.id, {
     onDelete: "set null",
   }),
@@ -757,8 +1171,30 @@ export const transactions = pgTable("transactions", {
   customerId: integer("customer_id").references(() => customers.id, {
     onDelete: "set null",
   }),
+  /* --------------------------------------------------------------
+   * VÍNCULO COM O DOCUMENTO DE ORIGEM (v3.11.0)
+   *
+   * Antes o Financeiro se ligava aos outros módulos por TEXTO da
+   * descrição (ilike "Pedido PED-2026-001%"), o que casava pedido
+   * errado a partir do nº 10 e impedia reconciliação/estorno seguro.
+   * ------------------------------------------------------------- */
+  saleId: integer("sale_id").references(() => sales.id, { onDelete: "set null" }),
+  orderId: integer("order_id").references(() => orders.id, { onDelete: "set null" }),
+  purchaseId: integer("purchase_id").references(() => purchases.id, { onDelete: "set null" }),
+  cashSessionId: integer("cash_session_id").references(() => cashSessions.id, {
+    onDelete: "set null",
+  }),
+  /* lançado por rotina do sistema (PDV, pedido, compra, caixa) — não editável na mão */
+  automatic: boolean("automatic").default(false).notNull(),
+  /* arquivamento não-destrutivo, no padrão dos demais módulos */
+  archivedAt: timestamp("archived_at", { mode: "date" }),
+  archiveReason: text("archive_reason"),
+  notes: text("notes"),
   createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
-});
+}, (table) => [
+  index("transactions_created_idx").on(table.createdAt),
+  index("transactions_due_idx").on(table.dueDate),
+]);
 
 /* ------------------------------------------------------------------ */
 /*  API INTEGRATIONS (WhatsApp, VoIP, Portal - external systems)      */
@@ -787,6 +1223,7 @@ export type CrmLead = typeof crmLeads.$inferSelect;
 export type CrmActivity = typeof crmActivities.$inferSelect;
 export type Order = typeof orders.$inferSelect;
 export type ArtApproval = typeof artApprovals.$inferSelect;
+export type Seller = typeof sellers.$inferSelect;
 export type Supplier = typeof suppliers.$inferSelect;
 export type Purchase = typeof purchases.$inferSelect;
 export type ProductionSchedule = typeof productionSchedules.$inferSelect;
@@ -849,3 +1286,342 @@ export const commemorativeDateAudit = pgTable("commemorative_date_audit", {
 });
 
 export type CommemorativeDate = typeof commemorativeDates.$inferSelect;
+
+/* ------------------------------------------------------------------ */
+/*  SUPERFRETE · ENVIOS (v3.12.0)                                     */
+/*                                                                    */
+/*  Ciclo real da API:                                                */
+/*    cotação → carrinho (/cart) → checkout (paga) → etiqueta         */
+/*    (/tag/print) → rastreio (/tag/tracking)                         */
+/*                                                                    */
+/*  Guardamos cada etapa para nunca perder o dinheiro já gasto: se o  */
+/*  checkout deu certo mas a impressão falhou, o orderId da           */
+/*  SuperFrete continua aqui e a etiqueta pode ser reimpressa.        */
+/* ------------------------------------------------------------------ */
+export const shipmentStatusEnum = pgEnum("shipment_status", [
+  "cotado",
+  "no_carrinho",
+  "pago",
+  "postado",
+  "em_transito",
+  "entregue",
+  "cancelado",
+  "erro",
+]);
+
+export const shipments = pgTable("shipments", {
+  id: serial("id").primaryKey(),
+  orderId: integer("order_id").references(() => orders.id, { onDelete: "set null" }),
+  saleId: integer("sale_id").references(() => sales.id, { onDelete: "set null" }),
+  deliveryId: integer("delivery_id").references(() => deliveries.id, { onDelete: "set null" }),
+  customerId: integer("customer_id").references(() => customers.id, { onDelete: "set null" }),
+
+  status: shipmentStatusEnum("status").default("cotado").notNull(),
+
+  /* identificadores do lado da SuperFrete */
+  superfreteOrderId: text("superfrete_order_id").unique(),
+  protocol: text("protocol"),
+  serviceId: integer("service_id"),
+  serviceName: text("service_name"),
+  carrier: text("carrier"),
+
+  /* valores */
+  price: numeric("price", { precision: 12, scale: 2 }).default("0"),
+  discount: numeric("discount", { precision: 12, scale: 2 }).default("0"),
+  insuranceValue: numeric("insurance_value", { precision: 12, scale: 2 }).default("0"),
+  deliveryMin: integer("delivery_min"),
+  deliveryMax: integer("delivery_max"),
+
+  /* pacote cotado */
+  weight: numeric("weight", { precision: 10, scale: 3 }).default("0"),
+  height: numeric("height", { precision: 10, scale: 2 }).default("0"),
+  width: numeric("width", { precision: 10, scale: 2 }).default("0"),
+  length: numeric("length", { precision: 10, scale: 2 }).default("0"),
+
+  cepOrigin: text("cep_origin"),
+  cepDestination: text("cep_destination"),
+  addressSnapshot: text("address_snapshot"),
+
+  /* pós-compra */
+  trackingCode: text("tracking_code"),
+  labelUrl: text("label_url"),
+  trackingStatus: text("tracking_status"),
+  paidAt: timestamp("paid_at", { mode: "date" }),
+  postedAt: timestamp("posted_at", { mode: "date" }),
+  deliveredAt: timestamp("delivered_at", { mode: "date" }),
+
+  /* ambiente em que foi gerado — sandbox e produção não se misturam */
+  environment: text("environment").default("production").notNull(),
+  /* resposta crua da API, para auditoria e suporte */
+  payload: jsonb("payload"),
+  lastError: text("last_error"),
+
+  createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
+});
+
+export type Shipment = typeof shipments.$inferSelect;
+
+/* ------------------------------------------------------------------ */
+/*  INFINITEPAY · COBRANÇAS (v3.13.0)                                 */
+/*                                                                    */
+/*  Ciclo real da API:                                                */
+/*    POST /links          → cria o link de checkout                  */
+/*    cliente paga (Pix ou cartão em até 12x)                         */
+/*    webhook_url          → InfinitePay avisa que pagou              */
+/*    POST /payment_check  → confirmação ativa (fallback + double     */
+/*                            check de segurança)                     */
+/*                                                                    */
+/*  O webhook é uma URL pública SEM assinatura HMAC: qualquer um      */
+/*  poderia forjar um "pagamento aprovado". Por isso todo webhook é   */
+/*  reconferido com payment_check antes de dar baixa no Financeiro.   */
+/* ------------------------------------------------------------------ */
+export const paymentStatusEnum = pgEnum("payment_status", [
+  "pendente",
+  "pago",
+  "expirado",
+  "cancelado",
+  "erro",
+]);
+
+export const paymentLinks = pgTable("payment_links", {
+  id: serial("id").primaryKey(),
+  /** identificador enviado à InfinitePay e devolvido no webhook */
+  orderNsu: text("order_nsu").notNull().unique(),
+
+  orderId: integer("order_id").references(() => orders.id, { onDelete: "set null" }),
+  saleId: integer("sale_id").references(() => sales.id, { onDelete: "set null" }),
+  quoteId: integer("quote_id").references(() => quotes.id, { onDelete: "set null" }),
+  customerId: integer("customer_id").references(() => customers.id, { onDelete: "set null" }),
+  transactionId: integer("transaction_id").references(() => transactions.id, {
+    onDelete: "set null",
+  }),
+
+  status: paymentStatusEnum("status").default("pendente").notNull(),
+  description: text("description").notNull(),
+
+  /** valor cobrado e valor efetivamente pago (podem diferir: juros de parcelamento) */
+  amount: numeric("amount", { precision: 12, scale: 2 }).default("0").notNull(),
+  paidAmount: numeric("paid_amount", { precision: 12, scale: 2 }),
+
+  checkoutUrl: text("checkout_url"),
+  handle: text("handle"),
+
+  /* devolvidos após o pagamento */
+  invoiceSlug: text("invoice_slug"),
+  transactionNsu: text("transaction_nsu"),
+  captureMethod: text("capture_method"), // pix | credit_card
+  installments: integer("installments"),
+  receiptUrl: text("receipt_url"),
+
+  items: jsonb("items"),
+  paidAt: timestamp("paid_at", { mode: "date" }),
+  expiresAt: timestamp("expires_at", { mode: "date" }),
+
+  /** tarifa do checkout repassada ao cliente (0 quando a loja absorve) */
+  passedFee: numeric("passed_fee", { precision: 12, scale: 2 }).default("0"),
+  /** tarifa efetivamente retida pela InfinitePay, calculada na confirmação */
+  providerFee: numeric("provider_fee", { precision: 12, scale: 2 }).default("0"),
+  /** como a confirmação chegou: webhook | payment_check | manual */
+  confirmedBy: text("confirmed_by"),
+  webhookReceivedAt: timestamp("webhook_received_at", { mode: "date" }),
+  checkAttempts: integer("check_attempts").default(0).notNull(),
+
+  payload: jsonb("payload"),
+  lastError: text("last_error"),
+
+  createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
+});
+
+export type PaymentLink = typeof paymentLinks.$inferSelect;
+
+/* ------------------------------------------------------------------ */
+/*  LINKS DE CADASTRO PÚBLICO (v3.50.0)                                */
+/*                                                                     */
+/*  O operador clica "Pedir cadastro por WhatsApp" na ficha do cliente */
+/*  e o sistema gera UMA linha aqui. O token é o segredo: quem não     */
+/*  tem o link não alcança dado nenhum.                                */
+/*                                                                     */
+/*  Por que uma tabela e não um JWT assinado?                          */
+/*   - precisa expirar ao ser usado (JWT não revoga sem lista);        */
+/*   - o CRM precisa mostrar "enviado, ainda não abriu";               */
+/*   - fica o rastro de quem abriu, quando e de qual IP — LGPD pede    */
+/*     saber quando o próprio titular atualizou os dados.              */
+/* ------------------------------------------------------------------ */
+export const registrationLinkStatusEnum = pgEnum("registration_link_status", [
+  "pendente",   // criado, ainda não aberto
+  "aberto",     // cliente abriu o formulário
+  "concluido",  // cliente enviou — link queimado
+  "expirado",   // passou da validade sem concluir
+  "cancelado",  // operador revogou na mão
+]);
+
+export const registrationLinks = pgTable("registration_links", {
+  id: serial("id").primaryKey(),
+  /* Segredo da URL: /cadastro/<token>. 22 chars base58, ~128 bits.
+     Único porque é a chave de busca pública. */
+  token: text("token").notNull().unique(),
+  customerId: integer("customer_id")
+    .references(() => customers.id, { onDelete: "cascade" })
+    .notNull(),
+  status: registrationLinkStatusEnum("status").default("pendente").notNull(),
+
+  /* Cópia do nome/telefone no momento da criação. Se o cadastro mudar
+     depois, ainda sabemos o que foi prometido ao cliente. */
+  snapshotName: text("snapshot_name"),
+  snapshotPhone: text("snapshot_phone"),
+
+  /* Quem pediu e por onde saiu (whatsapp | copiado | manual). */
+  createdBy: text("created_by"),
+  sentVia: text("sent_via"),
+  sentAt: timestamp("sent_at", { mode: "date" }),
+
+  expiresAt: timestamp("expires_at", { mode: "date" }).notNull(),
+  openedAt: timestamp("opened_at", { mode: "date" }),
+  completedAt: timestamp("completed_at", { mode: "date" }),
+
+  /* Prova de aceite: quem preencheu, de onde. Guardamos o IP como
+     texto porque pode vir IPv6 ou lista do proxy. */
+  ip: text("ip"),
+  userAgent: text("user_agent"),
+
+  createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
+}, (table) => [
+  /* Um link vivo por cliente. Reenviar não deve criar fila de tokens
+     válidos: o código revoga o anterior antes de gerar o novo, e este
+     índice garante isso mesmo em corrida (dois cliques no botão). */
+  uniqueIndex("registration_links_one_active_idx")
+    .on(table.customerId)
+    .where(sql`status in ('pendente','aberto')`),
+]);
+
+export type RegistrationLink = typeof registrationLinks.$inferSelect;
+
+/* ------------------------------------------------------------------ */
+/*  MENSAGENS EDITÁVEIS DO WHATSAPP (v3.52.0)                          */
+/*                                                                     */
+/*  Todo texto que o bot manda vive aqui, editável pela web. O padrão  */
+/*  continua no código: se a linha não existir ou vier vazia, o        */
+/*  sistema usa o texto de fábrica. Nunca fica mudo.                   */
+/*                                                                     */
+/*  Por que tabela e não arquivo de configuração: o serviço do         */
+/*  WhatsApp roda em OUTRO processo. Arquivo exigiria reiniciar o bot  */
+/*  a cada correção de vírgula; o banco os dois já compartilham.       */
+/*                                                                     */
+/*  As variáveis {nome}, {link} etc. são trocadas na hora do envio.    */
+/*  A lista do que existe em cada mensagem está em lib/mensagens.ts —  */
+/*  a tela mostra ao operador quais ele pode usar.                     */
+/* ------------------------------------------------------------------ */
+export const messageTemplates = pgTable("message_templates", {
+  id: serial("id").primaryKey(),
+  /** Identificador estável, é por ele que o código busca. */
+  slug: text("slug").notNull().unique(),
+  /** Texto com as variáveis. Vazio = usa o padrão do código. */
+  body: text("body"),
+  /** Desligada, o bot pula esta mensagem (quando fizer sentido pular). */
+  active: boolean("active").default(true).notNull(),
+  /** Quem editou por último — a tela mostra para dar rastro. */
+  updatedBy: text("updated_by"),
+  updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
+});
+
+export type MessageTemplate = typeof messageTemplates.$inferSelect;
+
+/* ------------------------------------------------------------------ */
+/*  CAMPANHAS DE WHATSAPP (v3.54.0)                                    */
+/*                                                                     */
+/*  Marketing para BASE QUENTE apenas — quem já escreveu para a         */
+/*  gráfica. O documento MARKETING-WHATSAPP-BASE-QUENTE.md tem os       */
+/*  números: bot que só responde a quem falou primeiro tem <2% de ban   */
+/*  ao ano; quem aborda contato frio, 15-30%.                           */
+/*                                                                     */
+/*  As 6 condições combinadas com o dono, todas verificadas em código:  */
+/*    1. conversa recebida registrada (não basta estar cadastrado)      */
+/*    2. última interação há menos de 12 meses                          */
+/*    3. opt-in de marketing com origem e data                          */
+/*    4. máximo 4 mensagens por pessoa por mês                          */
+/*    5. lotes de no máximo 50 por dia                                  */
+/*    6. disjuntor automático em 1% de bloqueio                         */
+/* ------------------------------------------------------------------ */
+export const campaignStatusEnum = pgEnum("campaign_status", [
+  "rascunho",
+  "enviando",
+  "pausada",    // disjuntor disparou ou operador parou
+  "concluida",
+  "cancelada",
+]);
+
+export const campaigns = pgTable("campaigns", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  status: campaignStatusEnum("status").default("rascunho").notNull(),
+
+  /* Corpo da mensagem, com as mesmas variáveis do catálogo. */
+  body: text("body").notNull(),
+  /* Imagem opcional, como data URI. Mesmo limite do upload de logo. */
+  imageDataUri: text("image_data_uri"),
+  /* CTA: texto do botão e destino. O Baileys manda como link no fim
+     da mensagem — botão nativo exige API oficial. */
+  ctaLabel: text("cta_label"),
+  ctaUrl: text("cta_url"),
+
+  /* Filtro da audiência, avaliado na hora de montar a fila. */
+  audienceFilter: jsonb("audience_filter"),
+
+  /* Ritmo: quantos por dia e o intervalo entre mensagens. */
+  dailyLimit: integer("daily_limit").default(50).notNull(),
+  minDelaySeconds: integer("min_delay_seconds").default(8).notNull(),
+  maxDelaySeconds: integer("max_delay_seconds").default(25).notNull(),
+
+  /* Contadores, atualizados durante o envio. */
+  totalTargets: integer("total_targets").default(0).notNull(),
+  sentCount: integer("sent_count").default(0).notNull(),
+  failedCount: integer("failed_count").default(0).notNull(),
+  blockedCount: integer("blocked_count").default(0).notNull(),
+  repliedCount: integer("replied_count").default(0).notNull(),
+
+  /* Motivo da pausa automática — o operador precisa saber por quê. */
+  pausedReason: text("paused_reason"),
+
+  createdBy: text("created_by"),
+  startedAt: timestamp("started_at", { mode: "date" }),
+  finishedAt: timestamp("finished_at", { mode: "date" }),
+  createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
+});
+
+export const campaignTargetStatusEnum = pgEnum("campaign_target_status", [
+  "fila",
+  "enviado",
+  "falhou",
+  "bloqueado",   // o destinatário bloqueou
+  "respondeu",
+  "pulado",      // não passou nas regras na hora do envio
+]);
+
+export const campaignTargets = pgTable("campaign_targets", {
+  id: serial("id").primaryKey(),
+  campaignId: integer("campaign_id")
+    .references(() => campaigns.id, { onDelete: "cascade" })
+    .notNull(),
+  customerId: integer("customer_id")
+    .references(() => customers.id, { onDelete: "cascade" })
+    .notNull(),
+  phoneE164: text("phone_e164").notNull(),
+  status: campaignTargetStatusEnum("status").default("fila").notNull(),
+  /* Por que foi pulado — vira relatório para o operador. */
+  skipReason: text("skip_reason"),
+  error: text("error"),
+  sentAt: timestamp("sent_at", { mode: "date" }),
+  repliedAt: timestamp("replied_at", { mode: "date" }),
+  createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+}, (table) => [
+  /* Uma pessoa não recebe a mesma campanha duas vezes, nem que alguém
+     clique em "enviar" de novo. */
+  uniqueIndex("campaign_targets_unique_idx").on(table.campaignId, table.customerId),
+]);
+
+export type Campaign = typeof campaigns.$inferSelect;
+export type CampaignTarget = typeof campaignTargets.$inferSelect;

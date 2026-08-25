@@ -1,5 +1,5 @@
 {
-  "version": "3.10.0",
+  "version": "3.65.0",
   "groups": [
     {
       "id": "empresa",
@@ -22,6 +22,20 @@
           "key": "company_cnpj",
           "label": "CNPJ",
           "mono": true,
+          "defaultValue": "",
+          "mask": "documento"
+        },
+        {
+          "key": "company_ie",
+          "label": "Inscrição estadual",
+          "mono": true,
+          "hint": "ou ISENTO",
+          "defaultValue": ""
+        },
+        {
+          "key": "company_im",
+          "label": "Inscrição municipal",
+          "mono": true,
           "defaultValue": ""
         },
         {
@@ -33,19 +47,22 @@
           "key": "company_phone",
           "label": "Telefone 1",
           "mono": true,
-          "defaultValue": "(21) 3000-0000"
+          "defaultValue": "(21) 3000-0000",
+          "mask": "telefone"
         },
         {
           "key": "company_phone2",
           "label": "Telefone 2",
           "mono": true,
-          "defaultValue": ""
+          "defaultValue": "",
+          "mask": "telefone"
         },
         {
           "key": "company_whatsapp",
           "label": "WhatsApp",
           "mono": true,
-          "defaultValue": ""
+          "defaultValue": "",
+          "mask": "telefone"
         },
         {
           "key": "company_website",
@@ -56,7 +73,17 @@
           "key": "pix_key",
           "label": "Chave PIX",
           "span2": true,
-          "defaultValue": "contato@graficavtdigital.com.br"
+          "defaultValue": "contato@graficavtdigital.com.br",
+          "mask": "pix"
+        },
+        {
+          "key": "company_cep",
+          "label": "CEP",
+          "mono": true,
+          "defaultValue": "",
+          "mask": "cep",
+          "autofill": "endereco",
+          "hint": "Digite o CEP e o endereço se preenche sozinho"
         },
         {
           "key": "company_street",
@@ -67,6 +94,11 @@
           "key": "company_number",
           "label": "Número",
           "mono": true,
+          "defaultValue": ""
+        },
+        {
+          "key": "company_complement",
+          "label": "Complemento do endereço",
           "defaultValue": ""
         },
         {
@@ -86,9 +118,85 @@
           "defaultValue": ""
         },
         {
-          "key": "company_cep",
-          "label": "CEP",
+          "key": "company_tax_regime",
+          "label": "Regime tributário",
+          "type": "select",
+          "defaultValue": "simples",
+          "options": [
+            {
+              "value": "simples",
+              "label": "Simples Nacional"
+            },
+            {
+              "value": "presumido",
+              "label": "Lucro Presumido"
+            },
+            {
+              "value": "real",
+              "label": "Lucro Real"
+            },
+            {
+              "value": "mei",
+              "label": "MEI"
+            }
+          ]
+        },
+        {
+          "key": "company_cnae",
+          "label": "CNAE principal",
           "mono": true,
+          "hint": "atividade principal (NF-e)",
+          "defaultValue": ""
+        },
+        {
+          "key": "company_city_code",
+          "label": "Código IBGE do município",
+          "mono": true,
+          "hint": "7 dígitos — exigido na NF-e",
+          "defaultValue": ""
+        },
+        {
+          "key": "company_crt",
+          "label": "Código de regime tributário (CRT)",
+          "type": "select",
+          "defaultValue": "1",
+          "options": [
+            {
+              "value": "1",
+              "label": "1 — Simples Nacional"
+            },
+            {
+              "value": "2",
+              "label": "2 — Simples, excesso de receita"
+            },
+            {
+              "value": "3",
+              "label": "3 — Regime normal"
+            }
+          ]
+        },
+        {
+          "key": "company_logo",
+          "label": "Logo principal (documentos e cabeçalho)",
+          "type": "logo",
+          "hint": "Usada em orçamento, OS e no topo do sistema. Ideal: versão horizontal com fundo transparente.",
+          "span2": true,
+          "defaultValue": ""
+        },
+        {
+          "key": "company_logo_dark",
+          "label": "Logo para fundo escuro",
+          "type": "logo",
+          "hint": "Versão clara/branca. Usada no cupom do PDV e onde o fundo é escuro. Opcional.",
+          "span2": true,
+          "defaultValue": ""
+        },
+        {
+          "key": "company_logo_icon",
+          "label": "Ícone quadrado",
+          "type": "logo",
+          "hint": "Versão compacta 1:1 para favicon e miniaturas. Opcional.",
+          "span2": true,
           "defaultValue": ""
         }
       ]
@@ -116,6 +224,14 @@
           "defaultValue": "15"
         },
         {
+          "key": "labor_hourly_rate",
+          "label": "Valor da hora de mão de obra",
+          "type": "number",
+          "prefix": "R$",
+          "hint": "Multiplica as \"Horas estimadas\" do serviço e entra como custo. Deixe 0 para não cobrar por hora.",
+          "defaultValue": "0"
+        },
+        {
           "key": "card_fee_debit",
           "label": "Taxa maquininha — Débito",
           "type": "number",
@@ -130,6 +246,50 @@
           "suffix": "%",
           "mono": true,
           "defaultValue": "4.99"
+        },
+        {
+          "key": "pricing_payment_cost",
+          "label": "Custo de pagamento embutido no preço",
+          "type": "number",
+          "suffix": "%",
+          "mono": true,
+          "hint": "Pior meio que você aceita (ex.: 3x sem juros = 6,12%). Garante a margem mínima em qualquer forma de pagamento.",
+          "defaultValue": "6.12"
+        },
+        {
+          "key": "pricing_pix_discount",
+          "label": "Desconto à vista no PIX",
+          "type": "number",
+          "suffix": "%",
+          "mono": true,
+          "hint": "Desconto da política da empresa para pagamento à vista com cadastro em dia. NÃO confundir com a taxa do cartão: o padrão antigo (6,12%) era o custo da maquininha e dava mais desconto do que se pretendia.",
+          "defaultValue": "5"
+        },
+        {
+          "key": "pricing_installment_min",
+          "label": "Valor mínimo para parcelar sem juros",
+          "type": "number",
+          "prefix": "R$",
+          "mono": true,
+          "hint": "Abaixo disso o PDV não oferece 3x — parcela pequena demais compensa pouco.",
+          "defaultValue": "150"
+        },
+        {
+          "key": "pricing_installment_max",
+          "label": "Máximo de parcelas sem juros",
+          "type": "number",
+          "suffix": "x",
+          "mono": true,
+          "defaultValue": "3"
+        },
+        {
+          "key": "pricing_min_margin",
+          "label": "Margem mínima (piso)",
+          "type": "number",
+          "suffix": "%",
+          "mono": true,
+          "hint": "O sistema avisa se um desconto derrubar a margem abaixo deste valor.",
+          "defaultValue": "40"
         }
       ]
     },
@@ -281,6 +441,38 @@
           "span2": true,
           "hint": "Aparece no final do cupom impresso e no texto do WhatsApp",
           "defaultValue": "Agradecemos a preferência! Volte sempre."
+        },
+        {
+          "key": "pdv_receipt_boldness",
+          "label": "Intensidade da impressão térmica",
+          "type": "select",
+          "defaultValue": "600",
+          "hint": "Se o cupom sair claro, aumente. Se os caracteres empastarem, reduza.",
+          "options": [
+            {
+              "value": "400",
+              "label": "Normal (padrão do navegador)"
+            },
+            {
+              "value": "600",
+              "label": "Reforçado (recomendado)"
+            },
+            {
+              "value": "700",
+              "label": "Escuro"
+            },
+            {
+              "value": "800",
+              "label": "Muito escuro (cabeça gasta)"
+            }
+          ]
+        },
+        {
+          "key": "comissao_margem_padrao",
+          "label": "Margem estimada p/ item sem produto (%)",
+          "type": "number",
+          "hint": "Usada só quando a linha do pedido foi digitada à mão e não tem custo conhecido. O extrato marca esses casos.",
+          "defaultValue": "40"
         }
       ]
     },
@@ -295,8 +487,8 @@
           "key": "quote_validity_days",
           "label": "Validade padrão (dias)",
           "type": "number",
-          "hint": "Dias a partir da criação",
-          "defaultValue": "7"
+          "hint": "Depois disso os valores podem mudar. Aparece impresso no orçamento enviado ao cliente.",
+          "defaultValue": "3"
         },
         {
           "key": "quote_default_payment",
@@ -454,6 +646,119 @@
       ]
     },
     {
+      "id": "prazos",
+      "title": "Prazos & Expediente",
+      "desc": "Quando a gráfica PRODUZ e quando ATENDE — são coisas diferentes. Usado para calcular a data de entrega prometida no orçamento e no pedido.",
+      "icon": "clock",
+      "color": "text-proc-c",
+      "fields": [
+        {
+          "key": "prazo_dias_uteis",
+          "label": "Dias de produção",
+          "type": "select",
+          "defaultValue": "1,2,3,4,5",
+          "hint": "Quando a máquina roda. Sábado normalmente NÃO entra aqui, mesmo que a loja abra — quem produz de sábado por conta própria não deve prometer isso ao cliente.",
+          "options": [
+            {
+              "value": "1,2,3,4,5",
+              "label": "Segunda a sexta"
+            },
+            {
+              "value": "1,2,3,4,5,6",
+              "label": "Segunda a sábado"
+            },
+            {
+              "value": "1,2,3,4,5,6,0",
+              "label": "Todos os dias"
+            }
+          ]
+        },
+        {
+          "key": "prazo_dias_atendimento",
+          "label": "Dias de atendimento e entrega",
+          "type": "select",
+          "defaultValue": "1,2,3,4,5,6",
+          "hint": "Quando o cliente pode falar com você, retirar ou receber. Inclui o sábado sem que isso acelere a produção.",
+          "options": [
+            {
+              "value": "1,2,3,4,5",
+              "label": "Segunda a sexta"
+            },
+            {
+              "value": "1,2,3,4,5,6",
+              "label": "Segunda a sábado"
+            },
+            {
+              "value": "1,2,3,4,5,6,0",
+              "label": "Todos os dias"
+            }
+          ]
+        },
+        {
+          "key": "prazo_sabado_ate",
+          "label": "Sábado atende até",
+          "type": "text",
+          "defaultValue": "13:00",
+          "mono": true,
+          "hint": "Deixe vazio se não abrir sábado. Serve para oferecer retirada no sábado quando a peça fica pronta na sexta."
+        },
+        {
+          "key": "prazo_horario_corte",
+          "label": "Horário de corte",
+          "type": "text",
+          "defaultValue": "17:00",
+          "mono": true,
+          "hint": "Pedido aprovado depois deste horário conta a partir do dia seguinte. Evita prometer o que não dá para começar hoje."
+        },
+        {
+          "key": "prazo_usar_feriados",
+          "label": "Pular feriados",
+          "type": "select",
+          "defaultValue": "true",
+          "hint": "Nacionais + Rio de Janeiro (São Sebastião e São Jorge). Carnaval, Sexta-Feira Santa e Corpus Christi são calculados a cada ano — não é lista fixa que envelhece.",
+          "options": [
+            {
+              "value": "true",
+              "label": "Sim, pular feriados"
+            },
+            {
+              "value": "false",
+              "label": "Não, trabalhar em feriados"
+            }
+          ]
+        },
+        {
+          "key": "prazo_fechamentos",
+          "label": "Dias fechados",
+          "type": "text",
+          "defaultValue": "",
+          "mono": true,
+          "hint": "Recesso, férias coletivas, manutenção. Datas AAAA-MM-DD separadas por vírgula."
+        },
+        {
+          "key": "prazo_conta_de",
+          "label": "O prazo começa a contar",
+          "type": "select",
+          "defaultValue": "arte_aprovada",
+          "hint": "Contar da aprovação da arte é o mais justo: enquanto o cliente não aprova, o relógio não corre contra você.",
+          "options": [
+            {
+              "value": "arte_aprovada",
+              "label": "Da aprovação da arte"
+            },
+            {
+              "value": "pedido_aprovado",
+              "label": "Da aprovação do pedido"
+            },
+            {
+              "value": "entrada_paga",
+              "label": "Do pagamento da entrada"
+            }
+          ]
+        }
+      ]
+    },
+    {
       "id": "kanban",
       "title": "Kanban de Produção",
       "desc": "Sincronização entre o status do pedido e a coluna do Kanban — mapeamento automático.",
@@ -505,6 +810,171 @@
           "type": "number",
           "hint": "Lead sem contato depois desse prazo vai para Perdido",
           "defaultValue": "30"
+        },
+        {
+          "key": "cadastro_link_validade_dias",
+          "label": "Validade do link de cadastro (dias)",
+          "type": "number",
+          "hint": "Quanto tempo o link enviado ao cliente continua valendo. Entre 1 e 90 dias.",
+          "defaultValue": "7"
+        }
+      ]
+    },
+    {
+      "id": "whatsapp",
+      "title": "WhatsApp & Marketing",
+      "desc": "Como o robô se comporta e as travas de segurança do envio em massa. A conexão e o texto das mensagens ficam na tela WhatsApp; aqui são os parâmetros.",
+      "icon": "whatsapp",
+      "color": "text-emerald-600",
+      "fields": [
+        {
+          "key": "wa_token",
+          "label": "Token do serviço",
+          "type": "password",
+          "span2": true,
+          "hint": "Senha que o ERP usa para falar com o robô. Deixe em branco para manter a atual.",
+          "defaultValue": ""
+        },
+        {
+          "key": "wa_empresa_nome",
+          "label": "Como o robô se apresenta",
+          "hint": "Usado na variável {empresa} das mensagens. Vazio usa o nome fantasia.",
+          "defaultValue": ""
+        },
+        {
+          "key": "wa_horario_inicio",
+          "label": "Só responder a partir de",
+          "type": "text",
+          "mono": true,
+          "hint": "Fora da janela o robô fica quieto. Mensagem de madrugada é sinal de automação.",
+          "defaultValue": "08:00"
+        },
+        {
+          "key": "wa_horario_fim",
+          "label": "Parar de responder às",
+          "type": "text",
+          "mono": true,
+          "hint": "Deixe 23:59 para responder o dia inteiro.",
+          "defaultValue": "20:00"
+        },
+        {
+          "key": "wa_marketing_lote_dia",
+          "label": "Máximo de mensagens de marketing por dia",
+          "type": "number",
+          "suffix": "envios",
+          "hint": "O sistema nunca passa de 50, mesmo que você peça mais. Base pequena não perdoa.",
+          "defaultValue": "50"
+        },
+        {
+          "key": "wa_marketing_max_mes",
+          "label": "Máximo por pessoa, por mês",
+          "type": "number",
+          "suffix": "mensagens",
+          "hint": "Quatro é o limite recomendado. Acima disso a pessoa começa a bloquear.",
+          "defaultValue": "4"
+        },
+        {
+          "key": "wa_marketing_disjuntor",
+          "label": "Parar tudo se o bloqueio passar de",
+          "type": "number",
+          "suffix": "%",
+          "hint": "Numa base de 300, cada pessoa vale 0,33% — três bloqueios já são 1%. O sistema pausa sozinho.",
+          "defaultValue": "1"
+        },
+        {
+          "key": "wa_intervalo_min",
+          "label": "Intervalo mínimo entre envios",
+          "type": "number",
+          "suffix": "segundos",
+          "hint": "Disparo em rajada é a assinatura mais óbvia de robô.",
+          "defaultValue": "8"
+        },
+        {
+          "key": "wa_intervalo_max",
+          "label": "Intervalo máximo entre envios",
+          "type": "number",
+          "suffix": "segundos",
+          "hint": "O sistema sorteia um tempo entre o mínimo e o máximo a cada mensagem.",
+          "defaultValue": "25"
+        }
+      ]
+    },
+    {
+      "id": "email",
+      "title": "E-mail (SMTP)",
+      "desc": "Para o sistema enviar orçamentos, avisos e recibos por e-mail.",
+      "icon": "mail",
+      "color": "text-proc-c",
+      "fields": [
+        {
+          "key": "smtp_host",
+          "label": "Servidor de saída",
+          "mono": true,
+          "hint": "Na Hostinger é smtp.hostinger.com",
+          "defaultValue": "smtp.hostinger.com"
+        },
+        {
+          "key": "smtp_port",
+          "label": "Porta",
+          "type": "number",
+          "hint": "465 com SSL, ou 587 com TLS",
+          "defaultValue": "465"
+        },
+        {
+          "key": "smtp_secure",
+          "label": "Segurança",
+          "type": "select",
+          "options": [
+            {
+              "value": "ssl",
+              "label": "SSL — porta 465 (recomendado)"
+            },
+            {
+              "value": "tls",
+              "label": "TLS/STARTTLS — porta 587"
+            }
+          ],
+          "hint": "Se 465 não funcionar, tente 587 com TLS.",
+          "defaultValue": "ssl"
+        },
+        {
+          "key": "smtp_user",
+          "label": "Usuário (e-mail de envio)",
+          "span2": true,
+          "mono": true,
+          "hint": "A conta que envia. Sugerido: noreply@vtdigital.com.br",
+          "defaultValue": ""
+        },
+        {
+          "key": "smtp_password",
+          "label": "Senha",
+          "type": "password",
+          "span2": true,
+          "hint": "Deixe em branco para manter a senha atual.",
+          "defaultValue": ""
+        },
+        {
+          "key": "smtp_from_name",
+          "label": "Nome que aparece para o cliente",
+          "span2": true,
+          "hint": "Aparece como remetente na caixa de entrada dele.",
+          "defaultValue": "VTDIGITAL Art Studio"
+        },
+        {
+          "key": "smtp_reply_to",
+          "label": "Responder para (Reply-To)",
+          "span2": true,
+          "mono": true,
+          "hint": "Quando o cliente responder, cai aqui — não no noreply.",
+          "defaultValue": "contato.vt@vtdigital.com.br"
+        },
+        {
+          "key": "smtp_test_to",
+          "label": "Enviar teste para",
+          "span2": true,
+          "mono": true,
+          "hint": "Endereço usado pelo botão de teste.",
+          "defaultValue": "contato.vt@vtdigital.com.br"
         }
       ]
     },
@@ -537,6 +1007,255 @@
               "label": "Não"
             }
           ]
+        }
+      ]
+    },
+    {
+      "id": "pagamentos",
+      "title": "Pagamentos · InfinitePay",
+      "desc": "Link de checkout com Pix e cartão em até 12x. A baixa no Financeiro é automática.",
+      "icon": "wallet",
+      "color": "text-proc-c",
+      "fields": [
+        {
+          "key": "infinitepay_handle",
+          "label": "InfiniteTag (handle)",
+          "mono": true,
+          "hint": "Seu usuário no app InfinitePay, SEM o $ e sem @. Ex.: minhagrafica",
+          "defaultValue": ""
+        },
+        {
+          "key": "app_base_url",
+          "label": "URL pública do sistema",
+          "span2": true,
+          "hint": "Ex.: https://erp.suagrafica.com.br — usada no retorno do cliente e no webhook.",
+          "defaultValue": ""
+        },
+        {
+          "key": "infinitepay_methods",
+          "label": "Formas aceitas",
+          "type": "select",
+          "options": [
+            {
+              "value": "pix,credit_card",
+              "label": "Pix e cartão de crédito"
+            },
+            {
+              "value": "pix",
+              "label": "Somente Pix"
+            },
+            {
+              "value": "credit_card",
+              "label": "Somente cartão"
+            }
+          ],
+          "defaultValue": "pix,credit_card"
+        },
+        {
+          "key": "infinitepay_auto_settle",
+          "label": "Baixa automática",
+          "type": "select",
+          "options": [
+            {
+              "value": "true",
+              "label": "Sim — quita o pedido e lança a receita"
+            },
+            {
+              "value": "false",
+              "label": "Não — apenas registra o pagamento"
+            }
+          ],
+          "defaultValue": "true"
+        },
+        {
+          "key": "infinitepay_expires_hours",
+          "label": "Validade do link",
+          "type": "number",
+          "suffix": "horas",
+          "hint": "Depois disso a cobrança é marcada como expirada.",
+          "defaultValue": "72"
+        },
+        {
+          "key": "infinitepay_redirect_url",
+          "label": "URL de retorno (opcional)",
+          "span2": true,
+          "hint": "Vazio usa <URL pública>/pagamento/retorno",
+          "defaultValue": ""
+        },
+        {
+          "key": "infinitepay_webhook_url",
+          "label": "URL de webhook (opcional)",
+          "span2": true,
+          "hint": "Vazio usa <URL pública>/api/payments/webhook",
+          "defaultValue": ""
+        },
+        {
+          "key": "infinitepay_fee_pix",
+          "label": "Taxa InfinitePay — Pix",
+          "type": "number",
+          "suffix": "%",
+          "hint": "Pix costuma ser 0% na InfinitePay.",
+          "defaultValue": "0"
+        },
+        {
+          "key": "infinitepay_fee_credit",
+          "label": "Taxa InfinitePay — Crédito à vista",
+          "type": "number",
+          "suffix": "%",
+          "hint": "Taxa do link de checkout — é DIFERENTE da maquininha física.",
+          "defaultValue": "4.20"
+        },
+        {
+          "key": "infinitepay_fee_installment",
+          "label": "Taxa InfinitePay — Crédito parcelado",
+          "type": "number",
+          "suffix": "%",
+          "hint": "Aplicada quando o cliente parcela em 2x ou mais. ATENÇÃO: a taxa SOBE com o número de parcelas (3x ≈ 6,12% · 6x ≈ 8,8% · 12x ≈ 12,40%). Como aqui cabe um número só, use o parcelamento que você mais vende — se aceita 12x, deixar 5,99% subestima o custo em mais de 6 pontos.",
+          "defaultValue": "6.12"
+        },
+        {
+          "key": "infinitepay_fee_mode",
+          "label": "Quem paga a taxa do link",
+          "type": "select",
+          "options": [
+            {
+              "value": "absorve",
+              "label": "A loja absorve (cobra o valor cheio do documento)"
+            },
+            {
+              "value": "repassa",
+              "label": "Repassa ao cliente (soma a taxa no link)"
+            }
+          ],
+          "hint": "Independe da taxa da maquininha do PDV.",
+          "defaultValue": "absorve"
+        }
+      ]
+    },
+    {
+      "id": "envios",
+      "title": "Envios & Frete",
+      "desc": "Integração SuperFrete: cotação de frete, etiqueta dos Correios e rastreio.",
+      "icon": "truck",
+      "color": "text-proc-y",
+      "fields": [
+        {
+          "key": "superfrete_token",
+          "label": "Token da API SuperFrete",
+          "span2": true,
+          "mono": true,
+          "hint": "Deixe em branco para manter o token atual. Gere em superfrete.com → Integrações → Token. Pode usar a variável SUPERFRETE_TOKEN.",
+          "defaultValue": "",
+          "type": "password"
+        },
+        {
+          "key": "superfrete_sandbox",
+          "label": "Ambiente",
+          "type": "select",
+          "options": [
+            {
+              "value": "false",
+              "label": "Produção (etiqueta real, consome saldo)"
+            },
+            {
+              "value": "true",
+              "label": "Sandbox (testes, não gera etiqueta válida)"
+            }
+          ],
+          "hint": "Sandbox e produção usam tokens diferentes.",
+          "defaultValue": "false"
+        },
+        {
+          "key": "superfrete_cep_origem",
+          "label": "CEP de origem",
+          "mono": true,
+          "hint": "Vazio usa o CEP da empresa (Identidade).",
+          "defaultValue": ""
+        },
+        {
+          "key": "superfrete_services",
+          "label": "Serviços cotados",
+          "mono": true,
+          "hint": "1=PAC · 2=SEDEX · 17=Mini Envios · 3=LOGGI",
+          "defaultValue": "1,2,17"
+        },
+        {
+          "key": "superfrete_auto_charge",
+          "label": "Repassar frete ao cliente",
+          "type": "select",
+          "options": [
+            {
+              "value": "true",
+              "label": "Sim — soma no total do pedido"
+            },
+            {
+              "value": "false",
+              "label": "Não — a loja absorve o custo"
+            }
+          ],
+          "defaultValue": "true"
+        },
+        {
+          "key": "superfrete_post_expense",
+          "label": "Lançar etiqueta como despesa",
+          "type": "select",
+          "options": [
+            {
+              "value": "true",
+              "label": "Sim — vira despesa no Financeiro"
+            },
+            {
+              "value": "false",
+              "label": "Não"
+            }
+          ],
+          "hint": "Mantém o custo real do frete no resultado.",
+          "defaultValue": "true"
+        },
+        {
+          "key": "superfrete_insurance",
+          "label": "Valor declarado (seguro)",
+          "type": "select",
+          "options": [
+            {
+              "value": "false",
+              "label": "Não declarar"
+            },
+            {
+              "value": "true",
+              "label": "Declarar o valor do pedido"
+            }
+          ],
+          "defaultValue": "false"
+        },
+        {
+          "key": "superfrete_pkg_weight",
+          "label": "Pacote padrão · peso",
+          "type": "number",
+          "suffix": "kg",
+          "hint": "Usado quando o produto não tem peso cadastrado.",
+          "defaultValue": "0.3"
+        },
+        {
+          "key": "superfrete_pkg_height",
+          "label": "Pacote padrão · altura",
+          "type": "number",
+          "suffix": "cm",
+          "defaultValue": "4"
+        },
+        {
+          "key": "superfrete_pkg_width",
+          "label": "Pacote padrão · largura",
+          "type": "number",
+          "suffix": "cm",
+          "defaultValue": "12"
+        },
+        {
+          "key": "superfrete_pkg_length",
+          "label": "Pacote padrão · comprimento",
+          "type": "number",
+          "suffix": "cm",
+          "defaultValue": "17"
         }
       ]
     },

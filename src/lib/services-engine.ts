@@ -3,12 +3,49 @@ import "server-only";
 import { z } from "zod";
 import { db } from "@/db";
 import { finishingItems, productFinishings, products, quoteItems, services } from "@/db/schema";
-import { eq, or } from "drizzle-orm";
+import { and, eq, isNull, ne, or, sql } from "drizzle-orm";
 import { toDecimalString } from "@/lib/money";
 
 export type ServicesEngineError = { error: string; status: number; details?: unknown };
 
 const finite = z.coerce.number().finite();
+
+/**
+ * Recusa nome repetido dentro da mesma categoria (v3.46.1).
+ *
+ * Antes dava para cadastrar dois "Corte Laser" com custos diferentes,
+ * ambos aceitos com 200. Na hora do orçamento o operador via dois itens
+ * idênticos na lista e não tinha como saber qual era o certo — e
+ * escolher o errado é preço errado no orçamento do cliente.
+ *
+ * A comparação ignora maiúsculas e espaços nas pontas, senão
+ * "corte laser " passaria como diferente de "Corte Laser".
+ *
+ * Não virou índice único no banco de propósito: o mesmo nome em
+ * categorias diferentes é legítimo ("Corte" em Recorte e em
+ * Acabamento). A trava é por (nome, categoria).
+ */
+async function nomeJaExiste(
+  tabela: typeof services | typeof finishingItems,
+  nome: string,
+  categoryId: number | null,
+  ignorarId?: number
+): Promise<boolean> {
+  const mesmoNome = sql`lower(trim(${tabela.name})) = ${nome.trim().toLowerCase()}`;
+  const mesmaCategoria =
+    categoryId === null ? isNull(tabela.categoryId) : eq(tabela.categoryId, categoryId);
+
+  const filtros = [mesmoNome, mesmaCategoria];
+  if (ignorarId) filtros.push(ne(tabela.id, ignorarId));
+
+  const [achado] = await db
+    .select({ id: tabela.id })
+    .from(tabela)
+    .where(and(...filtros))
+    .limit(1);
+
+  return Boolean(achado);
+}
 
 const serviceSchema = z.object({
   name: z.string().trim().min(2, "Nome obrigatório").max(160),
@@ -51,6 +88,13 @@ export async function saveService(raw: unknown, id?: number) {
   const parsed = parse(serviceSchema, raw);
   if ("error" in parsed) return parsed;
   const d = parsed.data;
+  const categoria = d.categoryId || null;
+  if (await nomeJaExiste(services, d.name, categoria, id)) {
+    return {
+      error: `Já existe um serviço chamado "${d.name}" nesta categoria.`,
+      status: 409,
+    } satisfies ServicesEngineError;
+  }
   const data = {
     name: d.name,
     categoryId: d.categoryId || null,
@@ -77,7 +121,11 @@ export async function archiveService(id: number, reason = "Arquivado") {
   const [quote] = await db.select({ id: quoteItems.id }).from(quoteItems).where(eq(quoteItems.serviceId, id)).limit(1);
   if (product || quote) {
     const description = [existing.description, `ARQUIVADO: ${reason}`].filter(Boolean).join("\n");
-    const [row] = await db.update(services).set({ description }).where(eq(services.id, id)).returning();
+    const [row] = await db
+      .update(services)
+      .set({ description, archivedAt: new Date() })
+      .where(eq(services.id, id))
+      .returning();
     return { ok: true as const, row, archived: true };
   }
   await db.delete(services).where(eq(services.id, id));
@@ -88,6 +136,13 @@ export async function saveFinishing(raw: unknown, id?: number) {
   const parsed = parse(finishingSchema, raw);
   if ("error" in parsed) return parsed;
   const d = parsed.data;
+  const categoria = d.categoryId || null;
+  if (await nomeJaExiste(finishingItems, d.name, categoria, id)) {
+    return {
+      error: `Já existe um acabamento chamado "${d.name}" nesta categoria.`,
+      status: 409,
+    } satisfies ServicesEngineError;
+  }
   const data = {
     name: d.name,
     categoryId: d.categoryId || null,
@@ -110,7 +165,11 @@ export async function archiveFinishing(id: number, reason = "Arquivado") {
   const [used] = await db.select({ id: productFinishings.id }).from(productFinishings).where(eq(productFinishings.finishingId, id)).limit(1);
   if (used) {
     const description = [existing.description, `ARQUIVADO: ${reason}`].filter(Boolean).join("\n");
-    const [row] = await db.update(finishingItems).set({ description }).where(eq(finishingItems.id, id)).returning();
+    const [row] = await db
+      .update(finishingItems)
+      .set({ description, archivedAt: new Date() })
+      .where(eq(finishingItems.id, id))
+      .returning();
     return { ok: true as const, row, archived: true };
   }
   await db.delete(finishingItems).where(eq(finishingItems.id, id));

@@ -74,19 +74,33 @@ backup_state() {
 
   # Dump do banco com fallback JSON. O fallback não substitui pg_dump para
   # restore perfeito, mas evita update sem nenhuma cópia dos dados.
+  #
+  # ── REGRA DO INCIDENTE 2026-08-24 ──────────────────────────────────
+  # O pg_dump falhou (binário mais antigo que o servidor), o fallback
+  # JSON saiu incompleto, e o update SEGUIU assim. Dias depois, uma
+  # reinstalação da base curada apagou produção — e o único backup
+  # "utilizável" era esse JSON pela metade: produtos e pedidos
+  # perdidos, recuperados horas depois do backup pré-apagão.
+  # Update sem backup RESTAURÁVEL não roda mais. Aborta na hora.
+  dump_ok=0
   if command -v pg_dump >/dev/null 2>&1; then
     c_info "Exportando banco com pg_dump..."
-    if pg_dump "$DATABASE_URL" --no-owner --no-acl -F c -f "${backup_dir}/database.dump" >"${backup_dir}/pg_dump.log" 2>&1; then
+    if pg_dump "$DATABASE_URL" --no-owner --no-acl -F c -f "${backup_dir}/database.dump" >"${backup_dir}/pg_dump.log" 2>&1 && [ -s "${backup_dir}/database.dump" ]; then
       c_ok "Dump custom do banco salvo"
-    elif pg_dump "$DATABASE_URL" --no-owner --no-acl -f "${backup_dir}/database.sql" >>"${backup_dir}/pg_dump.log" 2>&1; then
+      dump_ok=1
+    elif pg_dump "$DATABASE_URL" --no-owner --no-acl -f "${backup_dir}/database.sql" >>"${backup_dir}/pg_dump.log" 2>&1 && [ -s "${backup_dir}/database.sql" ]; then
       c_ok "Dump SQL do banco salvo"
-    else
-      c_warn "pg_dump falhou — usando fallback JSON"
-      node scripts/backup-db-json.mjs "${backup_dir}/database-fallback.json" || c_warn "fallback JSON também falhou"
+      dump_ok=1
     fi
-  else
-    c_warn "pg_dump não encontrado — usando fallback JSON"
-    node scripts/backup-db-json.mjs "${backup_dir}/database-fallback.json" || c_warn "fallback JSON falhou"
+  fi
+  if [ "$dump_ok" = "0" ]; then
+    c_warn "pg_dump falhou ou indisponível — tentando fallback JSON"
+    if node scripts/backup-db-json.mjs "${backup_dir}/database-fallback.json" \
+       && node -e "const j=require('./${backup_dir}/database-fallback.json'); if(!j.tables || Object.keys(j.tables).length < 10) process.exit(1)"; then
+      c_ok "Fallback JSON salvo e VALIDADO (tabelas presentes)"
+    else
+      die "SEM BACKUP RESTAURÁVEL — update abortado por segurança. Descubra por que o pg_dump falhou (cat ${backup_dir}/pg_dump.log — costuma ser binário mais antigo que o servidor) e rode o update de novo."
+    fi
   fi
 
   printf '%s\n' "$backup_dir" > .printflow/last-backup.path
@@ -156,6 +170,9 @@ migrate_schema() {
 
   c_info "Reparando Estoque & Compras..."
   node scripts/repair-stock.mjs
+  node scripts/repair-finance.mjs
+  node scripts/repair-shipping.mjs
+  node scripts/repair-payments.mjs
   c_ok "Estoque & Compras reparado"
 }
 
@@ -218,6 +235,10 @@ main() {
   backup_state
   install_deps
   node scripts/preflight.mjs
+  # Aponta sobras de versões antigas ANTES do build. O tar/unzip não apaga
+  # arquivo que saiu do projeto, e uma rota duplicada faz o Next compilar a
+  # página errada — foi o que quebrou o deploy da v3.46.0.
+  bash scripts/verificar-instalacao.sh || true
   migrate_schema
   rebuild
   write_meta

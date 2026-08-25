@@ -39,6 +39,9 @@ export async function POST(req: Request) {
           ? "pendente"
           : "pago";
 
+    /* A partir daqui o índice único `orders_one_per_quote_idx` é a
+       autoridade: se duas conversões correrem juntas, uma insere e a
+       outra estoura violação — tratada no catch abaixo. */
     const result = await createOrder({
       quoteId,
       customerId: quote.customerId,
@@ -65,7 +68,24 @@ export async function POST(req: Request) {
 
     return Response.json({ ok: true, order: result.row, existing: false });
   } catch (e) {
+    /* Corrida perdida: outra requisição converteu o mesmo orçamento
+       primeiro. Não é erro para o usuário — devolvemos o pedido que
+       venceu, como se a chamada tivesse sido idempotente.
+       O Drizzle embrulha o erro do pg, então olhamos também em `cause`. */
+    const raw = `${String(e)} ${String((e as { cause?: unknown })?.cause ?? "")}`;
+    if (raw.includes("orders_one_per_quote_idx") || raw.includes("duplicate key")) {
+      const [winner] = await db.select().from(orders).where(eq(orders.quoteId, quoteId));
+      if (winner) return Response.json({ ok: true, order: winner, existing: true });
+      return Response.json(
+        { error: "Este orçamento já está sendo convertido. Atualize a página." },
+        { status: 409 }
+      );
+    }
+
     console.error("[orders/convert]", e);
-    return Response.json({ error: e instanceof Error ? e.message : "erro" }, { status: 500 });
+    return Response.json(
+      { error: "Não foi possível converter o orçamento em pedido." },
+      { status: 500 }
+    );
   }
 }

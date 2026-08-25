@@ -34,6 +34,7 @@ const categoryOf = (k) =>
   : k.startsWith("kanban_") ? "kanban"
   : k.startsWith("crm_") ? "crm"
   : k.startsWith("calendar_") ? "calendario"
+  : k.startsWith("prazo_") ? "prazos"
   : k.startsWith("fiscal_") ? "fiscal"
   : k.startsWith("app_") ? "sistema"
   : (k.includes("rate") || k.includes("fee") || k.includes("rounding")) ? "tributacao"
@@ -56,9 +57,13 @@ const EXPECTED = {
   pdv_seller_default: "", pdv_delivery_default: "Entrega direto para o cliente",
   pdv_receipt_footer: "Agradecemos pela preferência, esperamos seu retorno em breve!",
   pdv_require_customer: "false", pdv_allow_negative_stock: "false",
-  // orçamentos
-  quote_validity_days: "7", quote_default_payment: "PIX", quote_default_seller: "",
-  quote_default_notes: "Orçamento válido por 7 dias.",
+  // orçamentos — validade 3 dias é a política da casa
+  quote_validity_days: "3", quote_default_payment: "PIX", quote_default_seller: "",
+  quote_default_notes: "Orçamento válido por 3 dias.",
+  // prazos & expediente
+  prazo_dias_uteis: "1,2,3,4,5", prazo_horario_corte: "15:00",
+  prazo_usar_feriados: "true", prazo_fechamentos: "",
+  prazo_conta_de: "arte_aprovada",
   // pedidos
   order_default_priority: "normal", order_default_channel: "Atendimento",
   order_auto_kanban: "true", order_auto_delivery: "true", order_auto_transaction: "true",
@@ -145,10 +150,52 @@ async function main() {
     }
   }
 
+  /* 4) desconto PIX: 6,12% era a TAXA DO CARTÃO usada por engano como
+     desconto. A política da VTDIGITAL é 5%. Num pedido de R$ 500 a
+     diferença é R$ 5,60 saindo sem intenção.
+
+     Só corrige quem está exatamente em 6.12 (o valor errado herdado).
+     Qualquer outro número foi escolha do usuário e fica. */
+  let pixFix = 0;
+  {
+    const r = await q(`SELECT value FROM settings WHERE key = 'pricing_pix_discount'`);
+    const atual = r.rows[0]?.value;
+    if (atual && ["6.12", "6,12", "6.1200"].includes(String(atual).trim())) {
+      console.log(`↓ desconto PIX  ${atual}% → 5%  (era a taxa do cartão, não a política)`);
+      pixFix = 1;
+      if (!DRY) {
+        await q(
+          `UPDATE settings SET value = '5', updated_at = now() WHERE key = 'pricing_pix_discount'`
+        );
+      }
+    }
+  }
+
+  /* 5) validade do orçamento: o padrão antigo era 7 dias, a política
+     da VTDIGITAL é 3. Só ajusta quem está no valor herdado — se o
+     usuário escolheu outro número, é decisão dele. */
+  let validadeFix = 0;
+  {
+    const r = await q(`SELECT value FROM settings WHERE key = 'quote_validity_days'`);
+    if (String(r.rows[0]?.value ?? "").trim() === "7") {
+      console.log("↓ validade do orçamento  7 → 3 dias  (política da casa)");
+      validadeFix = 1;
+      if (!DRY) {
+        await q(`UPDATE settings SET value = '3', updated_at = now() WHERE key = 'quote_validity_days'`);
+        await q(
+          `UPDATE settings SET value = 'Orçamento válido por 3 dias.', updated_at = now()
+            WHERE key = 'quote_default_notes' AND value = 'Orçamento válido por 7 dias.'`
+        );
+      }
+    }
+  }
+
   console.log(
     `\n✅ ${DRY ? "Simulação" : "Reparo"} concluído: ` +
     `${inserted} inserida(s), ${migrations.length} migração(ões), ` +
-    `${recategorized} recategorização(ões), ${removed} removida(s).`
+    `${recategorized} recategorização(ões), ${removed} removida(s)` +
+    `${pixFix ? ", desconto PIX ajustado" : ""}` +
+    `${validadeFix ? ", validade do orçamento ajustada" : ""}.`
   );
   await pool.end();
 }

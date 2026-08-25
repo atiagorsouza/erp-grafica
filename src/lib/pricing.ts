@@ -63,11 +63,26 @@ export interface CategoryLike {
 }
 export interface PrinterLike {
   costMultiplier?: string | number | null;
+  /** valor da hora de máquina — 3D/recorte cobram tempo (v3.39.0) */
+  hourlyRate?: string | number | null;
 }
 export interface MaterialLike {
   name?: string | null;
   unit?: string | null;
   unitCost: string | number | null;
+}
+/** Linha de tabela terceirizada usada como insumo do produto (v3.42.0). */
+export interface PricingTableLike {
+  label?: string | null;
+  unit?: string | null;
+  unitCost: string | number | null;
+  minQty?: string | number | null;
+  widthCm?: string | number | null;
+  heightCm?: string | number | null;
+  /** DTF: peças que cabem na folha comprada */
+  piecesPerSheet?: string | number | null;
+  /** piso de cobrança em R$ por peça (lona/vinil) */
+  minCharge?: string | number | null;
 }
 export interface FinishingLike {
   name?: string | null;
@@ -78,13 +93,45 @@ export interface ServiceLike {
   name?: string | null;
   baseCost: string | number | null;
   type?: string | null;
+  /** Horas de trabalho do serviço. Vira custo quando combinada com
+   *  `laborHourlyRate` — ver `serviceTotal()` (v3.46.0). */
+  estimatedHours?: string | number | null;
 }
+
 
 const num = (v: unknown, fallback = 0): number => {
   if (v === null || v === undefined || v === "") return fallback;
   const n = typeof v === "number" ? v : parseFloat(String(v));
   return Number.isFinite(n) ? n : fallback;
 };
+
+/**
+ * Custo de um serviço = custo fixo + (horas × valor da hora).
+ *
+ * Até a v3.45.1 o campo "Horas estimadas" era gravado e exibido na tela,
+ * mas NUNCA entrava em cálculo nenhum: só o `baseCost` contava. Quem
+ * cadastrava "Arte final — 2h" via o campo aceitar o valor e supunha que
+ * as 2 horas seriam cobradas. Não eram.
+ *
+ * Agora as horas viram dinheiro, usando o valor-hora do Painel de
+ * Controle (`labor_hourly_rate`). Com a taxa em 0 — que é o default —
+ * o resultado é idêntico ao de antes, então nenhum produto já cadastrado
+ * muda de preço sozinho.
+ *
+ * Mesma ideia do tempo de máquina da v3.39.0, mas para mão de obra:
+ * lá é a impressora ocupada, aqui é a pessoa trabalhando.
+ */
+export function serviceTotal(
+  service: ServiceLike | null | undefined,
+  laborHourlyRate = 0
+): { total: number; base: number; labor: number; hours: number } {
+  if (!service) return { total: 0, base: 0, labor: 0, hours: 0 };
+  const base = num(service.baseCost);
+  const hours = Math.max(num(service.estimatedHours), 0);
+  const rate = Math.max(num(laborHourlyRate), 0);
+  const labor = hours * rate;
+  return { total: base + labor, base, labor, hours };
+}
 
 export type ColorMode = "mono" | "color";
 
@@ -146,14 +193,39 @@ export interface ProductCalcInput {
   category?: CategoryLike | null;
   consumables: ConsumableLike[];
   printer?: PrinterLike | null;
+  /* --------------------------------------------------------------
+   * FORMATO NO MODO UNIT (v3.31.0)
+   *
+   * Até a v3.30.0 o modo unit ignorava o formato: chamava
+   * `printerCostPerPage`, que não conhece cobertura nem área. Na
+   * prática o select "Formato" da tela de produto era decorativo —
+   * uma foto 10x15 com 100% de cobertura era custeada com a mesma
+   * tinta de um texto 5%, e o A3 custava igual ao A4.
+   *
+   * Agora unit e batch usam o MESMO motor (`computePrintSheetCost`),
+   * então cobertura, área e override valem nos dois modos.
+   * ------------------------------------------------------------- */
+  format?: PrintFormatLike | null;
   colorMode: ColorMode;
   pagesPerUnit: number; // páginas/impressões por unidade de produto
+  /* Peças que saem de uma folha. Quando maior que 1, o produto é
+     fracionado e o clique se divide entre as peças. */
+  piecesPerSheet?: number | string | null;
   copies: number; // vias/copias por unidade
+  /** minutos de máquina por unidade; com `printer.hourlyRate` vira custo */
+  machineMinutes?: number;
   baseMaterial?: MaterialLike | null;
   baseMaterialQty: number;
+  /** linha de tabela (DTF UV, Lona...) como custo do produto */
+  basePricingTable?: PricingTableLike | null;
+  basePricingTableQty?: number;
+  /** peças deste produto por folha; 0 = usa a referência da tabela */
+  basePricingTablePieces?: number;
   finishings: FinishingLine[];
   extraMaterials: MaterialLine[];
   service?: ServiceLike | null;
+  /** valor da hora de mão de obra (R$); multiplica `service.estimatedHours` */
+  laborHourlyRate?: number;
   margin: number; // margem sobre o preço (0..1)
   taxRate: number; // impostos sobre venda (0..1)
   cardFeeRate: number; // taxa maquininha (0..1)
@@ -187,21 +259,39 @@ export interface ProductCalcResult {
 export function computeProduct(input: ProductCalcInput): ProductCalcResult {
   const lines: BreakdownLine[] = [];
 
+  /* Quantas peças saem de uma folha.
+   *
+   * Quando o produto é fracionado — 4 panfletos numa A4, 10 cartões,
+   * 9 polaroids — a folha inteira é impressa de uma vez e o clique
+   * precisa ser dividido entre as peças. Cobrar o clique cheio em
+   * cada panfleto multiplica o custo da impressão por quatro.
+   *
+   * O modo batch já fazia isso (`computeBatchProduct`); o modo unit
+   * não fazia, e era o modo usado por panfleto, cartão e copo. */
+  const pieces = Math.max(num(input.piecesPerSheet, 1), 1);
+
   // 1) IMPRESSÃO -----------------------------------------------------
   let printing = 0;
   if (input.printer && input.category) {
-    const perPage = printerCostPerPage(
-      input.printer,
-      input.category,
-      input.consumables,
-      input.colorMode
-    );
-    printing = perPage * num(input.pagesPerUnit) * num(input.copies);
+    /* Mesmo motor do modo batch: respeita cobertura do formato, fator
+       de área e `printCostOverride`. `printSides` fica em 1 porque no
+       modo unit as faces já são contadas em `pagesPerUnit`. */
+    const perPage = computePrintSheetCost({
+      printer: input.printer,
+      category: input.category,
+      consumables: input.consumables,
+      format: input.format,
+      colorMode: input.colorMode,
+      printSides: 1,
+    });
+    printing = (perPage * num(input.pagesPerUnit) * num(input.copies)) / pieces;
+    const fmt = input.format?.name ? ` · ${input.format.name}` : "";
+    const frac = pieces > 1 ? ` ÷ ${pieces} por folha` : "";
     lines.push({
       label: "Impressão",
       detail: `${num(input.copies)} via(s) × ${num(input.pagesPerUnit)} pg × ${formatMoney(
         perPage
-      )}/pg (${input.colorMode === "color" ? "colorido" : "P&B"})`,
+      )}/pg (${input.colorMode === "color" ? "colorido" : "P&B"}${fmt})${frac}`,
       amount: printing,
     });
   } else if (input.category) {
@@ -210,13 +300,31 @@ export function computeProduct(input: ProductCalcInput): ProductCalcResult {
       input.consumables,
       input.colorMode
     );
-    printing = perPage * num(input.pagesPerUnit) * num(input.copies);
+    printing = (perPage * num(input.pagesPerUnit) * num(input.copies)) / pieces;
     lines.push({
       label: "Impressão (categoria)",
       detail: `${num(input.copies)} via(s) × ${num(input.pagesPerUnit)} pg × ${formatMoney(
         perPage
-      )}/pg`,
+      )}/pg${pieces > 1 ? ` ÷ ${pieces} por folha` : ""}`,
       amount: printing,
+    });
+  }
+
+  /* 1b) TEMPO DE MÁQUINA -------------------------------------------
+     Em 3D e recorte o insumo é barato e a ocupação é o custo real.
+     Só entra quando a impressora tem valor-hora E o produto declara
+     minutos — assim nenhuma impressora por página é afetada. */
+  const hourlyRate = num(input.printer?.hourlyRate, 0);
+  const machineMinutes = num(input.machineMinutes, 0);
+  if (hourlyRate > 0 && machineMinutes > 0) {
+    const timeCost = (machineMinutes / 60) * hourlyRate * num(input.copies, 1);
+    printing += timeCost;
+    const h = Math.floor(machineMinutes / 60);
+    const m = Math.round(machineMinutes % 60);
+    lines.push({
+      label: "Tempo de máquina",
+      detail: `${h > 0 ? `${h}h` : ""}${m > 0 ? `${m}min` : ""} × ${formatMoney(hourlyRate)}/h`,
+      amount: timeCost,
     });
   }
 
@@ -249,6 +357,57 @@ export function computeProduct(input: ProductCalcInput): ProductCalcResult {
     });
   }
 
+  /* 3b) TABELA TERCEIRIZADA ----------------------------------------
+     Caneca na UV, camisa têxtil: o custo vem da tabela do fornecedor
+     e a margem do produto é aplicada por cima. Usa `unitCost`, nunca
+     `sellPrice` — senão a margem entraria duas vezes. */
+  if (input.basePricingTable) {
+    const t = input.basePricingTable;
+    const qty = num(input.basePricingTableQty, 1);
+    const unit = String(t.unit || "unidade");
+    const tableCost = num(t.unitCost);
+    const minCharge = num(t.minCharge, 0);
+    let v = 0;
+    let detail = "";
+
+    if (unit === "m2") {
+      /* Lona/Vinil: área da peça × preço do m², com piso em reais.
+         Banner 1,20×0,90 = 1,08 m²; adesivo 30×30 cai no mínimo. */
+      const area = (num(t.widthCm) * num(t.heightCm)) / 10000;
+      const perPiece = Math.max(area * tableCost, minCharge);
+      v = perPiece * qty;
+      const noMin = area * tableCost;
+      detail =
+        minCharge > 0 && noMin < minCharge
+          ? `${area.toFixed(3)} m² × ${formatMoney(tableCost)} = ${formatMoney(noMin)} → mínimo ${formatMoney(minCharge)}`
+          : `${area.toFixed(3)} m² × ${formatMoney(tableCost)}`;
+    } else {
+      /* DTF: a folha é indivisível. `basePricingTableQty` aqui é
+         quantas PEÇAS do produto saem por folha comprada — a caneca
+         usa 1/6 de uma folha 20×28, então o custo dela é a folha
+         dividida pelo que cabe. */
+      /* O override do produto manda: quantas peças cabem depende da
+         ESTAMPA (6 canecas ou 30 chaveiros na mesma folha), não da
+         folha. Sem override, cai na referência da tabela. */
+      const override = num(input.basePricingTablePieces, 0);
+      const perSheet = override > 0 ? override : num(t.piecesPerSheet, 1);
+      if (perSheet > 1) {
+        v = (tableCost / perSheet) * qty;
+        detail = `${formatMoney(tableCost)} ÷ ${perSheet} por folha × ${qty}`;
+      } else {
+        v = Math.max(tableCost * qty, minCharge);
+        detail = `${qty} ${unit} × ${formatMoney(tableCost)}`;
+      }
+    }
+
+    materials += v;
+    lines.push({
+      label: `Tabela: ${t.label || "terceirizado"}`,
+      detail,
+      amount: v,
+    });
+  }
+
   // 4) MATERIAIS EXTRAS --------------------------------------------
   for (const ml of input.extraMaterials) {
     if (!ml.material) continue;
@@ -266,26 +425,64 @@ export function computeProduct(input: ProductCalcInput): ProductCalcResult {
   // 5) SERVIÇO ------------------------------------------------------
   let serviceCost = 0;
   if (input.service) {
-    serviceCost = num(input.service.baseCost);
+    const svc = serviceTotal(input.service, input.laborHourlyRate);
+    serviceCost = svc.total;
     lines.push({
       label: `Serviço: ${input.service.name}`,
       detail: input.service.type === "terceirizado" ? "Terceirizado" : "Próprio",
-      amount: serviceCost,
+      amount: svc.base,
     });
+    if (svc.labor > 0) {
+      lines.push({
+        label: `Mão de obra: ${input.service.name}`,
+        detail: `${svc.hours}h × ${formatMoney(num(input.laborHourlyRate))}/h`,
+        amount: svc.labor,
+      });
+    }
   }
 
   const baseCost = printing + materials + finishing + serviceCost;
 
-  // 6) MARGEM -------------------------------------------------------
-  // preço de venda = baseCost / (1 - margin)
-  const margin = Math.min(Math.max(num(input.margin), 0), 0.99);
-  const sellPrice = baseCost > 0 ? baseCost / (1 - margin) : 0;
-  const marginAmount = sellPrice - baseCost;
+  /* 6/7) MARGEM + IMPOSTO + CUSTO DE PAGAMENTO ----------------------
+   *
+   * Tudo num divisor único, igual ao modo tiragem.
+   *
+   * Antes a margem usava divisor e as taxas eram SOMADAS por fora:
+   *
+   *     sell  = custo / (1 - margem)
+   *     final = sell + sell*imposto + sell*taxa
+   *
+   * O erro: imposto e maquininha incidem sobre o valor efetivamente
+   * cobrado (o final), não sobre o subtotal. Com custo 100, margem 40%,
+   * imposto 6% e cartão 4,99%, o preço saía R$ 184,98 e sobravam
+   * R$ 164,65 — margem real de 39,27%, não os 40% pedidos. Pior: o modo
+   * tiragem, que sempre usou divisor, dava R$ 204,04 no mesmo produto.
+   * Dez por cento de diferença dependendo do modo escolhido.
+   *
+   * Com o divisor, a margem informada é o piso REAL sobre a receita:
+   *
+   *     final = custo / (1 - margem - imposto - pagamento)
+   *
+   * `paymentRate` deve trazer o PIOR meio de pagamento aceito (ex.: 3x
+   * sem juros). Assim toda venda respeita a margem mínima, e quem paga
+   * PIX gera a folga que banca o desconto à vista.
+   */
+  const margin = Math.max(num(input.margin), 0);
+  const taxRate = Math.max(num(input.taxRate), 0);
+  const paymentRate = Math.max(num(input.cardFeeRate), 0);
+  const rateTotal = margin + taxRate + paymentRate;
 
-  // 7) IMPOSTOS + TAXA DE MAQUININHA (sobre o preço de venda) -------
-  const taxAmount = sellPrice * num(input.taxRate);
-  const cardFeeAmount = sellPrice * num(input.cardFeeRate);
-  const finalPrice = sellPrice + taxAmount + cardFeeAmount;
+  /* Acima de 99% o divisor zera ou inverte o sinal: sem trava, um
+     cadastro errado geraria preço negativo ou absurdo. */
+  const divisor = 1 - Math.min(rateTotal, 0.99);
+  const finalPrice = baseCost > 0 ? baseCost / divisor : 0;
+
+  const taxAmount = finalPrice * taxRate;
+  const cardFeeAmount = finalPrice * paymentRate;
+  /* o que sobra depois de custo, imposto e taxa — o lucro de verdade */
+  const marginAmount = finalPrice - baseCost - taxAmount - cardFeeAmount;
+  /* mantido para compatibilidade: receita antes das deduções variáveis */
+  const sellPrice = finalPrice - taxAmount - cardFeeAmount;
 
   return {
     lines,
@@ -347,6 +544,8 @@ export interface BatchCalcInput {
   extraMaterials: MaterialLine[];
   finishings: BatchFinishingLine[];
   service?: ServiceLike | null;
+  /** valor da hora de mão de obra (R$); multiplica `service.estimatedHours` */
+  laborHourlyRate?: number;
   /** matriz de marginalização / markup divisor */
   operationalRate: number;
   taxRate: number;
@@ -429,10 +628,25 @@ export function computePrintSheetCost({
   return raw * (1 + num(category.wasteFactor)) * num(printer?.costMultiplier, 1);
 }
 
-/** Arredonda preço comercial para cima no degrau informado. */
+/**
+ * Arredonda preço comercial para cima no degrau informado.
+ *
+ * `Math.ceil(v / step) * step` reintroduz erro binário na multiplicação
+ * final — `roundCommercialPrice(1.15, 0.1)` devolvia `1.2000000000000002`.
+ * O valor sujo circulava no `unitPrice` e no detalhamento mostrado ao
+ * cliente (o banco escapava por causa do `round2` na gravação).
+ *
+ * A conta passa a ser feita em centavos inteiros, e o resultado é
+ * normalizado para 2 casas — preço não tem fração de centavo.
+ */
 export function roundCommercialPrice(value: number, step = 0.01): number {
   const safeStep = Math.max(num(step, 0.01), 0.01);
-  return Math.ceil((value - 1e-9) / safeStep) * safeStep;
+  if (!Number.isFinite(value) || value <= 0) return 0;
+
+  const stepCents = Math.max(1, Math.round(safeStep * 100));
+  const valueCents = Math.round(value * 100);
+  const rounded = Math.ceil(valueCents / stepCents) * stepCents;
+  return rounded / 100;
 }
 
 /**
@@ -448,9 +662,28 @@ export function computeBatchProduct(input: BatchCalcInput): BatchCalcResult {
   const qty = Math.max(num(input.requestedQuantity), 0);
   const pieces = Math.max(num(input.piecesPerSheet, 1), 1);
   const baseSheets = qty > 0 ? Math.ceil(qty / pieces) : 0;
-  const sheetsByWaste = Math.ceil(baseSheets * (1 + Math.max(num(input.wastePercent), 0)));
-  const sheetsBySetup = baseSheets + Math.max(Math.floor(num(input.setupSheets)), 0);
-  const finalSheets = Math.max(sheetsByWaste, sheetsBySetup);
+
+  /* Acerto e refugo são custos INDEPENDENTES e somam.
+   *
+   * Antes: `Math.max(sheetsByWaste, sheetsBySetup)` — pegava o maior,
+   * o que não corresponde a nada que acontece na máquina. Numa tiragem
+   * de 1000 peças (4/folha, acerto 10, perda 5%) cobrava 263 folhas
+   * enquanto a produção consumia 273. Em tiragem pequena era pior: o
+   * refugo era simplesmente descartado quando o setup fosse maior.
+   *
+   *   setup  = folhas queimadas até a cor entrar no registro.
+   *            FIXO por serviço — independe do tamanho da tiragem.
+   *   waste  = refugo ao longo da rodagem (puxada dupla, corte torto).
+   *            PROPORCIONAL ao volume.
+   *
+   * O refugo incide sobre as folhas efetivamente rodadas, o que inclui
+   * as de acerto: elas também passam pela máquina.
+   */
+  const setupSheets = Math.max(Math.floor(num(input.setupSheets)), 0);
+  const wastePercent = Math.max(num(input.wastePercent), 0);
+  const sheetsBySetup = baseSheets + setupSheets;
+  const sheetsByWaste = Math.ceil(sheetsBySetup * wastePercent);
+  const finalSheets = baseSheets > 0 ? sheetsBySetup + sheetsByWaste : 0;
   const lines: BreakdownLine[] = [];
 
   const printCostPerSheet = computePrintSheetCost({
@@ -521,12 +754,21 @@ export function computeBatchProduct(input: BatchCalcInput): BatchCalcResult {
     });
   }
 
-  const service = input.service ? num(input.service.baseCost) : 0;
-  if (input.service && service > 0) {
+  const svc = serviceTotal(input.service, input.laborHourlyRate);
+  const service = svc.total;
+  if (input.service && svc.base > 0) {
     lines.push({
       label: `Serviço: ${input.service.name}`,
       detail: "Custo fixo do lote",
-      amount: service,
+      amount: svc.base,
+    });
+  }
+  // Linha própria: o operador precisa ver quanto do preço é mão de obra.
+  if (input.service && svc.labor > 0) {
+    lines.push({
+      label: `Mão de obra: ${input.service.name}`,
+      detail: `${svc.hours}h × ${formatMoney(num(input.laborHourlyRate))}/h`,
+      amount: svc.labor,
     });
   }
 
@@ -588,6 +830,146 @@ export function computeBatchProduct(input: BatchCalcInput): BatchCalcResult {
     finalPrice,
     unitPrice: qty > 0 ? finalPrice / qty : 0,
     valid: true,
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/*  FAIXAS DE PREÇO POR QUANTIDADE                                     */
+/* ------------------------------------------------------------------ */
+
+/** Normaliza para 2 casas sem herdar erro binário da multiplicação. */
+function money2(v: number): number {
+  return Number.isFinite(v) ? Math.round(v * 100) / 100 : 0;
+}
+
+/* ------------------------------------------------------------------ */
+/*  TÉRMICA — rendimento do ribbon por formato                         */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Quantas etiquetas um ribbon imprime, dada a geometria do rolo.
+ *
+ * O ribbon avança o COMPRIMENTO da etiqueta mais o gap entre elas; a
+ * largura não importa (o ribbon é mais largo que a etiqueta). Rolos com
+ * várias colunas imprimem N etiquetas no mesmo avanço, multiplicando o
+ * rendimento.
+ *
+ *   76 m, etiqueta 100×30 (avanço 32 mm), 3 colunas → 7.125 etiquetas
+ *   76 m, etiqueta 100×150 (avanço 152 mm), 1 coluna →   500 etiquetas
+ *
+ * 14× de diferença: por isso o rendimento não pode morar na categoria.
+ */
+export function ribbonLabelYield(
+  ribbonMeters: number,
+  feedMm: number,
+  columns = 1
+): number {
+  const mm = num(ribbonMeters, 0) * 1000;
+  const feed = num(feedMm, 0);
+  const cols = Math.max(Math.floor(num(columns, 1)), 1);
+  if (mm <= 0 || feed <= 0) return 0;
+  return Math.floor((mm / feed) * cols);
+}
+
+/**
+ * Custo de ribbon por etiqueta.
+ *
+ * Devolve 0 quando falta geometria — o motor então cai no
+ * comportamento antigo (consumível da categoria escalado por
+ * `areaFactor`), preservando o cadastro legado.
+ */
+export function ribbonCostPerLabel(input: {
+  ribbonCost: number;
+  ribbonMeters: number;
+  feedMm: number;
+  columns?: number;
+}): number {
+  const yieldLabels = ribbonLabelYield(input.ribbonMeters, input.feedMm, input.columns);
+  if (yieldLabels <= 0) return 0;
+  return num(input.ribbonCost, 0) / yieldLabels;
+}
+
+export interface PriceTierLike {
+  minQuantity: string | number;
+  unitPrice: string | number;
+  label?: string | null;
+}
+
+export interface TierResolution {
+  /** preço unitário da faixa aplicada */
+  unitPrice: number;
+  /** total da venda: unitário × quantidade */
+  total: number;
+  /** faixa escolhida, ou null quando caiu no preço padrão do produto */
+  tier: PriceTierLike | null;
+  /** quantidade mínima da menor faixa — abaixo disso a venda é recusada */
+  minQuantity: number;
+  /** true quando a quantidade pedida está abaixo do mínimo vendável */
+  belowMinimum: boolean;
+}
+
+/**
+ * Escolhe a faixa de preço para a quantidade pedida.
+ *
+ * Regra: vale a MAIOR faixa cujo mínimo é menor ou igual à quantidade.
+ * Com faixas 50/100/250, pedir 180 aplica a de 100 — não a de 250, que
+ * o cliente ainda não alcançou.
+ *
+ * `belowMinimum` sinaliza pedido abaixo da menor faixa (ex.: 20 un num
+ * produto que só sai a partir de 50). Quem chama decide se recusa ou
+ * cobra o mínimo; o motor não inventa preço nesse caso, porque vender
+ * 20 etiquetas ao unitário de 1.000 é prejuízo garantido.
+ *
+ * Sem faixas cadastradas devolve o `fallbackUnitPrice` — todo produto
+ * que já existia continua funcionando igual.
+ */
+export function resolvePriceTier(
+  tiers: PriceTierLike[],
+  quantity: number,
+  fallbackUnitPrice: number
+): TierResolution {
+  const qty = Math.max(num(quantity, 0), 0);
+  const sorted = [...tiers]
+    .filter((t) => num(t.minQuantity, 0) > 0)
+    .sort((a, b) => num(a.minQuantity) - num(b.minQuantity));
+
+  if (sorted.length === 0) {
+    return {
+      unitPrice: fallbackUnitPrice,
+      total: money2(fallbackUnitPrice * qty),
+      tier: null,
+      minQuantity: 0,
+      belowMinimum: false,
+    };
+  }
+
+  const minQuantity = num(sorted[0].minQuantity);
+  /* `reduce` em vez de `findLast`: a lista já está ordenada, então o
+     último que couber é o correto, e evitamos depender de lib nova. */
+  const applicable = sorted.reduce<PriceTierLike | null>(
+    (acc, t) => (qty >= num(t.minQuantity) ? t : acc),
+    null
+  );
+
+  if (!applicable) {
+    /* Abaixo do mínimo: devolvemos o preço da menor faixa para a tela
+       ter o que mostrar, mas com a flag ligada. */
+    return {
+      unitPrice: num(sorted[0].unitPrice),
+      total: money2(num(sorted[0].unitPrice) * qty),
+      tier: sorted[0],
+      minQuantity,
+      belowMinimum: true,
+    };
+  }
+
+  const unitPrice = num(applicable.unitPrice);
+  return {
+    unitPrice,
+    total: money2(unitPrice * qty),
+    tier: applicable,
+    minQuantity,
+    belowMinimum: false,
   };
 }
 
