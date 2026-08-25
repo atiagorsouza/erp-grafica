@@ -50,6 +50,30 @@ interface PedidoResumo {
   criadoEm: string;
 }
 
+interface VendaResumo {
+  id: number;
+  numero: string;
+  total: number;
+  pagamento: string | null;
+  criadoEm: string;
+}
+
+interface OrcamentoResumo {
+  id: number;
+  numero: string;
+  total: number;
+  status: string;
+  criadoEm: string;
+}
+
+interface CobrancaResumo {
+  id: number;
+  descricao: string;
+  valor: number;
+  status: string;
+  criadoEm: string;
+}
+
 interface Ficha {
   id: number;
   nome: string;
@@ -63,6 +87,9 @@ interface Ficha {
   ltv: number;
   pedidos: PedidoResumo[];
   orcamentosAbertos: number;
+  vendas: VendaResumo[];
+  orcamentos: OrcamentoResumo[];
+  cobrancas: CobrancaResumo[];
 }
 
 interface Rapida {
@@ -99,6 +126,34 @@ function telefoneBonito(e164: string) {
   return e164;
 }
 
+/* Rótulos em português para a ficha 360º — mesmos nomes que as telas
+   de origem (PDV, orçamentos, cobranças) usam, para o operador não
+   precisar traduzir status cru do banco. */
+const ROTULO_ORC: Record<string, string> = {
+  rascunho: "Rascunho",
+  enviado: "Enviado",
+  aprovado: "Aprovado",
+  recusado: "Recusado",
+  expirado: "Expirado",
+};
+
+const ROTULO_COB: Record<string, string> = {
+  pendente: "Aguardando",
+  pago: "Pago",
+  expirado: "Expirado",
+  cancelado: "Cancelado",
+  erro: "Erro",
+};
+
+const ROTULO_PAG: Record<string, string> = {
+  dinheiro: "Dinheiro",
+  pix: "PIX",
+  debito: "Débito",
+  debit_card: "Débito",
+  credito: "Crédito",
+  credit_card: "Crédito",
+};
+
 export function ChatWhatsApp() {
   const [conversas, setConversas] = useState<Conversa[]>([]);
   const [aberta, setAberta] = useState<string | null>(null);
@@ -120,6 +175,14 @@ export function ChatWhatsApp() {
   const [ficha, setFicha] = useState<Ficha | null>(null);
   const [fichaAberta, setFichaAberta] = useState(false);
   const [rapidas, setRapidas] = useState<Rapida[]>([]);
+
+  /* Cadastro direto pela conversa (ficha 360º): conversa sem cliente
+     vinculado não tem ficha — cadastrar aqui evita trocar de tela e
+     perder o fio da conversa. O telefone é o E164 que já identifica
+     a conversa; só o nome é digitado. */
+  const [cadastroAberto, setCadastroAberto] = useState(false);
+  const [nomeNovo, setNomeNovo] = useState("");
+  const [salvandoCadastro, setSalvandoCadastro] = useState(false);
 
   const carregarConversas = useCallback(async () => {
     try {
@@ -151,9 +214,9 @@ export function ChatWhatsApp() {
     }
   }, []);
 
-  /* Ficha só quando o painel abre: são quatro consultas, e o chat
-     recarrega sozinho a cada 6 segundos — não faz sentido buscá-la
-     junto do polling. */
+  /* Ficha só quando o painel abre: são várias consultas (cliente,
+     pedidos, vendas, orçamentos, cobranças), e o chat recarrega
+     sozinho a cada 6 segundos — não faz sentido buscá-la junto. */
   const carregarFicha = useCallback(async (customerId: number) => {
     try {
       const r = await fetch(`/api/whatsapp-chat?ficha=${customerId}`);
@@ -163,6 +226,41 @@ export function ChatWhatsApp() {
       setFicha(null);
     }
   }, []);
+
+  /* Salva o cadastro vindo da própria conversa. Se o telefone já
+     pertence a um cliente, não duplica — só vincula a conversa a ele
+     (o robô escreve customer_id, mas aqui o operador está no controle). */
+  async function salvarCadastro() {
+    if (!aberta) return;
+    setSalvandoCadastro(true);
+    try {
+      const r = await fetch("/api/whatsapp-chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ op: "cadastrar", nome: nomeNovo, phoneE164: aberta }),
+      });
+      const d = (await r.json()) as {
+        ok?: boolean; customerId?: number; criado?: boolean; error?: string;
+      };
+      if (!r.ok || !d.customerId) {
+        toast.error(d.error || "Não foi possível cadastrar o cliente.");
+        return;
+      }
+      toast.success(
+        d.criado
+          ? "Cliente cadastrado e vinculado a esta conversa."
+          : "Cliente já existia — conversa vinculada a ele."
+      );
+      setCadastroAberto(false);
+      await carregarConversas();
+      setFichaAberta(true);
+      void carregarFicha(d.customerId);
+    } catch {
+      toast.error("Falha de rede ao cadastrar.");
+    } finally {
+      setSalvandoCadastro(false);
+    }
+  }
 
   /* Respostas rápidas saem do mesmo catálogo editável das outras
      mensagens: o que o cliente lê nunca mora no código. */
@@ -358,7 +456,7 @@ export function ChatWhatsApp() {
                     {telefoneBonito(atual.phoneE164)}
                   </p>
                 </div>
-                {atual.customerId && (
+                {atual.customerId ? (
                   <Button
                     size="sm"
                     variant={fichaAberta ? "outline" : "ghost"}
@@ -370,6 +468,18 @@ export function ChatWhatsApp() {
                     }}
                   >
                     {fichaAberta ? "Voltar à conversa" : "Ficha e pedidos"}
+                  </Button>
+                ) : (
+                  <Button
+                    size="sm"
+                    variant={fichaAberta ? "outline" : "ghost"}
+                    icon="person"
+                    onClick={() => {
+                      setCadastroAberto(true);
+                      setNomeNovo("");
+                    }}
+                  >
+                    Cadastrar cliente
                   </Button>
                 )}
                 {atual.assumidaPor ? (
@@ -435,6 +545,38 @@ export function ChatWhatsApp() {
 
                         <div>
                           <p className="mb-1.5 font-mono text-[10px] tracking-wide text-ink-400 uppercase">
+                            Últimas compras no balcão
+                          </p>
+                          {ficha.vendas.length === 0 ? (
+                            <p className="rounded-lg border border-dashed border-paper-300 px-3 py-4 text-center text-[12px] text-ink-400">
+                              Nenhuma venda no balcão.
+                            </p>
+                          ) : (
+                            <div className="space-y-1.5">
+                              {ficha.vendas.map((v) => (
+                                <div
+                                  key={v.id}
+                                  className="flex items-center gap-2 rounded-lg border border-paper-200 bg-white px-3 py-2"
+                                >
+                                  <div className="min-w-0 grow">
+                                    <p className="font-mono text-[11.5px] font-bold text-ink-900">{v.numero}</p>
+                                    <p className="text-[11px] text-ink-500">
+                                      {ROTULO_PAG[v.pagamento || ""] || (v.pagamento || "").replace(/_/g, " ") || "—"}
+                                      {" · "}
+                                      {dataBR(v.criadoEm)}
+                                    </p>
+                                  </div>
+                                  <span className="font-mono text-[12px] font-bold text-proc-c-strong">
+                                    {brl(v.total)}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+
+                        <div>
+                          <p className="mb-1.5 font-mono text-[10px] tracking-wide text-ink-400 uppercase">
                             Últimos pedidos
                           </p>
                           {ficha.pedidos.length === 0 ? (
@@ -464,12 +606,131 @@ export function ChatWhatsApp() {
                           )}
                         </div>
 
+                        <div>
+                          <p className="mb-1.5 font-mono text-[10px] tracking-wide text-ink-400 uppercase">
+                            Últimos orçamentos
+                          </p>
+                          {ficha.orcamentos.length === 0 ? (
+                            <p className="rounded-lg border border-dashed border-paper-300 px-3 py-4 text-center text-[12px] text-ink-400">
+                              Nenhum orçamento.
+                            </p>
+                          ) : (
+                            <div className="space-y-1.5">
+                              {ficha.orcamentos.map((o) => (
+                                <div
+                                  key={o.id}
+                                  className="flex items-center gap-2 rounded-lg border border-paper-200 bg-white px-3 py-2"
+                                >
+                                  <div className="min-w-0 grow">
+                                    <p className="font-mono text-[11.5px] font-bold text-ink-900">{o.numero}</p>
+                                    <p className="text-[11px] text-ink-500">
+                                      {ROTULO_ORC[o.status] || o.status} · {dataBR(o.criadoEm)}
+                                    </p>
+                                  </div>
+                                  <span className="font-mono text-[12px] font-bold text-proc-c-strong">
+                                    {brl(o.total)}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+
+                        <div>
+                          <p className="mb-1.5 font-mono text-[10px] tracking-wide text-ink-400 uppercase">
+                            Últimas cobranças
+                          </p>
+                          {ficha.cobrancas.length === 0 ? (
+                            <p className="rounded-lg border border-dashed border-paper-300 px-3 py-4 text-center text-[12px] text-ink-400">
+                              Nenhuma cobrança.
+                            </p>
+                          ) : (
+                            <div className="space-y-1.5">
+                              {ficha.cobrancas.map((k) => (
+                                <div
+                                  key={k.id}
+                                  className="flex items-center gap-2 rounded-lg border border-paper-200 bg-white px-3 py-2"
+                                >
+                                  <div className="min-w-0 grow">
+                                    <p className="truncate text-[11.5px] font-semibold text-ink-900">
+                                      {k.descricao || "—"}
+                                    </p>
+                                    <p className="text-[11px] text-ink-500">
+                                      {ROTULO_COB[k.status] || k.status} · {dataBR(k.criadoEm)}
+                                    </p>
+                                  </div>
+                                  <span className="font-mono text-[12px] font-bold text-proc-c-strong">
+                                    {brl(k.valor)}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+
                         <div className="border-t border-dashed border-paper-300 pt-2.5 text-[11.5px] text-ink-500">
                           {ficha.email && <p className="truncate">{ficha.email}</p>}
                           <p>Cliente desde {dataBR(ficha.desde)}</p>
                         </div>
                       </div>
                     )}
+                  </div>
+                )}
+
+                {/* Cadastro por cima do chat: mesma moldura da ficha.
+                    O telefone não é editável — é o E164 que identifica
+                    esta conversa; errar aqui seria vincular outra pessoa. */}
+                {cadastroAberto && (
+                  <div className="absolute inset-x-0 top-[57px] bottom-0 z-30 overflow-y-auto bg-paper-50 px-4 py-3.5">
+                    <div className="space-y-3.5">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="text-[14px] font-bold text-ink-900">Cadastrar cliente</p>
+                          <p className="font-mono text-[11px] text-ink-500">
+                            {telefoneBonito(atual.phoneE164)}
+                          </p>
+                        </div>
+                        <Button size="sm" variant="ghost" icon="close" onClick={() => setCadastroAberto(false)}>
+                          Fechar
+                        </Button>
+                      </div>
+
+                      <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-[12px] text-amber-800">
+                        Esta conversa ainda não está ligada a nenhum cliente. Cadastre
+                        para ver a ficha completa — compras, pedidos, orçamentos e cobranças.
+                      </p>
+
+                      <div>
+                        <label className="mb-1 block font-mono text-[10px] tracking-wide text-ink-400 uppercase">
+                          Nome do cliente
+                        </label>
+                        <Input
+                          autoFocus
+                          value={nomeNovo}
+                          onChange={(e) => setNomeNovo(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" && nomeNovo.trim().length >= 2 && !salvandoCadastro) {
+                              e.preventDefault();
+                              void salvarCadastro();
+                            }
+                          }}
+                          placeholder="Como o cliente se identifica"
+                        />
+                      </div>
+
+                      <Button
+                        icon="check"
+                        onClick={() => void salvarCadastro()}
+                        disabled={salvandoCadastro || nomeNovo.trim().length < 2}
+                      >
+                        {salvandoCadastro ? "Salvando…" : "Salvar e ver ficha"}
+                      </Button>
+
+                      <p className="text-[11px] text-ink-400">
+                        Se este telefone já pertence a um cliente cadastrado, nada é
+                        duplicado — a conversa apenas é vinculada a ele.
+                      </p>
+                    </div>
                   </div>
                 )}
 

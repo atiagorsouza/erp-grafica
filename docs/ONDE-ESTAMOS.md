@@ -4,7 +4,7 @@
 > aqui. Se você quiser saber em que pé está sem reler a conversa, é este
 > o arquivo.
 
-**Última atualização:** 24/08/2026
+**Última atualização:** 25/08/2026
 
 ---
 
@@ -24,12 +24,36 @@ instalar. Acabei de gerar, está em `release/`.
 
 | | |
 |---|---|
-| **Versão no ar** | **3.68.7** — receita do InfinitePay diz QUEM pagou; cobrança avulsa ganha cliente |
-| Rodando em | servidor da gráfica (túnel `app.vtdigital.site`) · em 3.68.5 até a 3.68.7 subir (leva junto a 3.68.6 do retorno) |
-| Testes | `e2e:smoke` completo ✔ · typecheck ✔ · lint 11 (base) · /cobrancas com campo novo a 200 ✔ |
+| **Versão no ar** | **3.68.8** — ficha 360º do cliente dentro do chat do WhatsApp |
+| Rodando em | servidor da gráfica (túnel `app.vtdigital.site`) · em 3.68.5 até a 3.68.8 subir (leva junto a 3.68.6 do retorno, a 3.68.7 do InfinitePay e a 3.68.8 da ficha) |
+| Testes | `e2e:smoke` completo ✔ · typecheck ✔ · lint 11 (base) · cadastro via chat testado ponta a ponta (cria, vincula, não duplica, recusa nome curto) ✔ · ficha 360º validada com venda PDV + pedido + orçamento (LTV soma os dois) |
 | Observado | `company_email` ganha padrão `contato.vt@` (só se vazio) · `labor_hourly_rate` ficou 0 por escolha do dono · aviso de "password sem suporte visual" = falso alarme da ferramenta do servidor (Painel desenha os 3 segredos com máscara) |
 | Lint | 11 problemas (baseline de sempre, nada novo) |
 | Pacote | `update-3.68.2/` · `printflow-erp-v3.68.2.tar.gz` — `bash scripts/deploy-auto.sh <caminho-do-pacote>` (SEMPRE com caminho) |
+
+### O que a 3.68.8 entregou — ficha 360º no chat do WhatsApp
+
+**QUEM É QUEM.** A ficha que abria sobre a conversa só olhava pedidos.
+Agora responde "o que esse cliente já fez?" sem sair do WhatsApp:
+
+- **Últimas compras no balcão** (vendas do PDV, com forma de pagamento e data)
+- **Últimos pedidos** (como antes, clicáveis)
+- **Últimos orçamentos** — antes só uma contagem de abertos; agora
+  número, valor e status de cada um (Rascunho/Enviado/Aprovado/…)
+- **Últimas cobranças** — descrição, valor e situação (Aguardando/Pago/…)
+- **LTV correto** — "Já comprou" soma pedidos E vendas de balcão
+  (cancelados de fora). Cliente fiel do balcão deixava de parecer
+  "nunca comprou".
+
+**CADASTRO SEM SAIR DA CONVERSA.** Conversa com selo "sem cadastro"
+ganhou botão **Cadastrar cliente**: telefone já vem travado no número
+da conversa (o E164 que a identifica), o operador só digita o nome.
+Se o telefone já pertence a um cliente, nada é duplicado — a conversa
+só é vinculada a ele. Depois de salvar, a ficha 360º abre sozinha.
+
+Detalhe técnico: `customer_id` em `whatsapp_conversas` continua sem
+writer no código do bot — o ERP agora escreve esse campo só no fluxo
+de cadastro do chat, que é decisão do operador.
 
 ### O que a 3.68.2 entregou — cartela, incidente e pagamento
 
