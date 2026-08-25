@@ -21,7 +21,7 @@ export interface MensagemItem {
   slug: string;
   titulo: string;
   quando: string;
-  grupo: "bot" | "cadastro" | "orcamento" | "pedido" | "rapidas" | "campanha" | "consulta";
+  grupo: "bot" | "cadastro" | "orcamento" | "pedido" | "rapidas" | "campanha" | "consulta" | "cobranca";
   padrao: string;
   texto: string;
   ativa: boolean;
@@ -60,6 +60,11 @@ const GRUPOS: { id: MensagemItem["grupo"]; titulo: string; desc: string }[] = [
     id: "consulta",
     titulo: "Consulta de preço",
     desc: "A moldura que envolve o texto copiado na Consulta Rápida: saudação no começo, assinatura no fim.",
+  },
+  {
+    id: "cobranca",
+    titulo: "Lembrete de cobrança",
+    desc: "O texto do sininho na tela de Cobranças, para cobrança esperando pagamento há dias.",
   },
 ];
 

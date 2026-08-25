@@ -24,9 +24,9 @@ instalar. Acabei de gerar, está em `release/`.
 
 | | |
 |---|---|
-| **Versão no ar** | **3.68.10** — moldura na Consulta Rápida + fim dos orçamentos fantasma (a 3.68.9 foi a blindagem das tabelas do WhatsApp, sem cara nova) |
-| Rodando em | servidor da gráfica (túnel `app.vtdigital.site`) · produção em 3.68.9 sincronizada ✔ — este deploy é o 3.68.10 |
-| Testes | `e2e:smoke` completo ✔ · typecheck ✔ · lint 11 (base) · script de limpeza testado no clone (dry-run lista, --aplicar apaga 1 fantasma sintético de 45 dias e preserva os 27 recentes) ✔ · ficha 360º sem fantasmas ✔ · filtro Ativos = 15 ✔ |
+| **Versão no ar** | **3.68.11** — lembrete de cobrança por WhatsApp (sininho nas Cobranças, envio pelo número da gráfica) |
+| Rodando em | servidor da gráfica (túnel `app.vtdigital.site`) · produção em 3.68.10 ✔ — este deploy é o 3.68.11 |
+| Testes | `e2e:smoke` completo ✔ · typecheck ✔ · lint 11 (base) · rota do lembrete testada: pendente monta texto com nome/valor/link/validade ✔ · paga → 422 ✔ · id inexistente → 404 ✔ |
 | Observado | `company_email` ganha padrão `contato.vt@` (só se vazio) · `labor_hourly_rate` ficou 0 por escolha do dono · aviso de "password sem suporte visual" = falso alarme da ferramenta do servidor (Painel desenha os 3 segredos com máscara) |
 | Lint | 11 problemas (baseline de sempre, nada novo) |
 | Pacote | `update-3.68.2/` · `printflow-erp-v3.68.2.tar.gz` — `bash scripts/deploy-auto.sh <caminho-do-pacote>` (SEMPRE com caminho) |

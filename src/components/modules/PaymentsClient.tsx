@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { whatsappNumber, type WhatsAppTarget } from "@/lib/validators";
+import { formatPhone, isWhatsAppBlocked, whatsappNumber, type WhatsAppTarget } from "@/lib/validators";
 import {
   Badge,
   Button,
@@ -16,6 +16,7 @@ import {
   Select,
   TableWrap,
   Td,
+  Textarea,
   Th,
   Tr,
   toast,
@@ -84,6 +85,17 @@ export function PaymentsClient({
   const [created, setCreated] = useState<Row | null>(null);
   const [cancelTarget, setCancelTarget] = useState<Row | null>(null);
   const [cancelReason, setCancelReason] = useState("");
+
+  /* Lembrete de cobrança por WhatsApp: texto do catálogo editável,
+     envio pelo número da gráfica e wa.me de reserva — a mesma conduta
+     do "Avisar cliente" de Pedidos. Ninguém cobra às cegas. */
+  const [lembrete, setLembrete] = useState<null | {
+    texto: string;
+    cliente: { nome: string; phone: string | null; whatsapp: string | null; whatsappOptOut: boolean | null } | null;
+  }>(null);
+  const [lembreteAbrindo, setLembreteAbrindo] = useState(false);
+  const [lembreteEnviando, setLembreteEnviando] = useState(false);
+  const [lembreteFalhou, setLembreteFalhou] = useState<string | null>(null);
 
   const [mode, setMode] = useState<"order" | "avulso">("order");
   const [orderId, setOrderId] = useState("");
@@ -178,6 +190,89 @@ export function PaymentsClient({
       toast.success("Link copiado");
     } catch {
       toast.error("Não foi possível copiar", text);
+    }
+  }
+
+  /* ── Lembrete de cobrança ── monta o texto no servidor (catálogo
+     editável) e envia pelo motor do WhatsApp; se o motor estiver no
+     chão, abre o WhatsApp Web com o texto pronto. */
+  async function abrirLembrete(c: Row) {
+    setLembreteAbrindo(true);
+    try {
+      const r = await fetch("/api/payments/lembrete", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ id: Number(c.id) }),
+      });
+      const d = await r.json();
+      if (!r.ok) {
+        toast.error("Não foi possível montar o lembrete", d?.error || "Tente de novo.");
+        return;
+      }
+      setLembreteFalhou(null);
+      setLembrete({ texto: d.texto, cliente: d.cliente });
+    } catch {
+      toast.error("Não foi possível montar o lembrete", "Verifique a conexão.");
+    } finally {
+      setLembreteAbrindo(false);
+    }
+  }
+
+  function fecharLembrete() {
+    setLembrete(null);
+    setLembreteFalhou(null);
+  }
+
+  function abrirLembreteNoWhatsAppWeb() {
+    if (!lembrete) return;
+    const c = lembrete.cliente;
+    const numero = c && !isWhatsAppBlocked(c as WhatsAppTarget) ? whatsappNumber(c as WhatsAppTarget) : "";
+    const url = numero
+      ? `https://wa.me/55${numero}?text=${encodeURIComponent(lembrete.texto)}`
+      : `https://wa.me/?text=${encodeURIComponent(lembrete.texto)}`;
+    window.open(url, "_blank");
+    fecharLembrete();
+  }
+
+  async function enviarLembrete() {
+    if (!lembrete) return;
+    const c = lembrete.cliente;
+
+    if (c && isWhatsAppBlocked(c as WhatsAppTarget)) {
+      toast.error("Cliente não aceita WhatsApp", "Escolha outro canal.");
+      return;
+    }
+    const numero = c ? whatsappNumber(c as WhatsAppTarget) : "";
+    if (!numero) {
+      setLembreteFalhou("Esta cobrança não tem cliente com número de WhatsApp no cadastro.");
+      return;
+    }
+
+    setLembreteEnviando(true);
+    setLembreteFalhou(null);
+    try {
+      const r = await fetch("/api/whatsapp/enviar", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ para: `55${numero}`, texto: lembrete.texto }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (r.ok) {
+        toast.success("Lembrete enviado", `Foi para ${formatPhone(String(c?.whatsapp || c?.phone || ""))}.`);
+        fecharLembrete();
+        return;
+      }
+      if (r.status === 409) {
+        setLembreteFalhou("O WhatsApp do sistema está desconectado. Reconecte em Atendimento → WhatsApp → Conexão.");
+      } else if (r.status === 403) {
+        setLembreteFalhou("Este contato pediu para não receber mensagens.");
+      } else {
+        setLembreteFalhou(d?.erro || "O serviço do WhatsApp não respondeu.");
+      }
+    } catch {
+      setLembreteFalhou("Falha de rede ao enviar pelo sistema.");
+    } finally {
+      setLembreteEnviando(false);
     }
   }
 
@@ -376,14 +471,23 @@ export function PaymentsClient({
                         </>
                       )}
                       {status === "pendente" && (
-                        <IconButton
-                          size="sm"
-                          name="refresh"
-                          label="Verificar pagamento"
-                          tone="primary"
-                          loading={busy}
-                          onClick={() => act(id, "check")}
-                        />
+                        <>
+                          <IconButton
+                            size="sm"
+                            name="bell"
+                            label="Lembrar cliente por WhatsApp"
+                            loading={lembreteAbrindo}
+                            onClick={() => void abrirLembrete(c)}
+                          />
+                          <IconButton
+                            size="sm"
+                            name="refresh"
+                            label="Verificar pagamento"
+                            tone="primary"
+                            loading={busy}
+                            onClick={() => act(id, "check")}
+                          />
+                        </>
                       )}
                       {Boolean(c.receiptUrl) && (
                         <IconButton
@@ -584,6 +688,76 @@ export function PaymentsClient({
         <Field label="Motivo">
           <Input value={cancelReason} onChange={(e) => setCancelReason(e.target.value)} placeholder="Ex.: cliente desistiu" />
         </Field>
+      </Modal>
+
+      {/* ── LEMBRETE POR WHATSAPP ── mesma conduta de Pedidos: o texto
+          vem do catálogo editável, o atendente confere/ajusta antes
+          de sair, envio pelo número da gráfica e wa.me de reserva. */}
+      <Modal
+        open={!!lembrete}
+        onClose={fecharLembrete}
+        title="Lembrar cliente por WhatsApp"
+        subtitle="Confira e ajuste o texto antes de enviar. Para mudar o padrão, use Painel → Mensagens."
+        width="max-w-lg"
+        footer={
+          <div className="flex w-full items-center justify-between gap-2">
+            <Button variant="ghost" onClick={fecharLembrete}>
+              Cancelar
+            </Button>
+            {lembreteFalhou ? (
+              <Button icon="whatsapp" variant="outline" onClick={abrirLembreteNoWhatsAppWeb}>
+                Abrir no WhatsApp Web
+              </Button>
+            ) : (
+              <Button icon="whatsapp" onClick={() => void enviarLembrete()} disabled={lembreteEnviando}>
+                {lembreteEnviando ? "Enviando…" : "Enviar pelo WhatsApp"}
+              </Button>
+            )}
+          </div>
+        }
+      >
+        {lembrete && (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-2 text-[11.5px]">
+              <span className="text-ink-500">
+                Para:{"\u00a0"}
+                <strong className="text-ink-700">{lembrete.cliente?.nome || "— sem cliente —"}</strong>
+              </span>
+              {lembrete.cliente && isWhatsAppBlocked(lembrete.cliente as WhatsAppTarget) ? (
+                <Badge tone="magenta">Não aceita WhatsApp</Badge>
+              ) : lembrete.cliente && whatsappNumber(lembrete.cliente as WhatsAppTarget) ? (
+                <span className="font-mono text-ink-500">
+                  {formatPhone(String(lembrete.cliente.whatsapp || lembrete.cliente.phone || ""))}
+                </span>
+              ) : (
+                <Badge tone="cyan">Sem número no cadastro</Badge>
+              )}
+            </div>
+
+            <Textarea
+              value={lembrete.texto}
+              onChange={(e) => setLembrete({ ...lembrete, texto: e.target.value })}
+              rows={11}
+              className="font-mono text-[12px] leading-relaxed"
+            />
+
+            {lembreteFalhou && (
+              <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2.5">
+                <p className="text-[12px] font-semibold text-amber-900">
+                  Não deu para enviar pelo sistema
+                </p>
+                <p className="mt-0.5 text-[11.5px] leading-relaxed text-amber-800">{lembreteFalhou}</p>
+                <p className="mt-1.5 text-[11px] text-amber-700">
+                  O texto está pronto: use o botão ao lado para abrir o WhatsApp Web.
+                </p>
+              </div>
+            )}
+
+            <p className="text-[11px] text-ink-400">
+              O WhatsApp mostra *texto entre asteriscos* em negrito e _entre sublinhados_ em itálico.
+            </p>
+          </div>
+        )}
       </Modal>
     </div>
   );
