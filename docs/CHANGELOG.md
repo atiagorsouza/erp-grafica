@@ -1,3 +1,7 @@
+## [3.68.8] — 2026-08-25
+
+- Ficha 360º no chat do WhatsApp: balcão, orçamentos e cobranças na conversa; cadastro de cliente sem sair do chat
+
 ## [3.68.7] — 2026-08-25
 
 - Receita do InfinitePay identifica quem pagou; avulsa com cliente
