@@ -431,6 +431,64 @@ export async function updateProduct(id: number, raw: unknown) {
   return { ok: true as const, row };
 }
 
+/* ==================================================================
+ *  RECALCULO EM CASCATA — material mudou, produto acompanha
+ *  (v3.68.14, auditoria de 25/08)
+ *
+ *  O produto guarda custo/preço como FOTOGRAFIA do dia em que foi
+ *  salvo. Antes da 3.68.14, editar o custo de um material não tocava
+ *  em produto nenhum: o papel ficava mais caro e o balcão (PDV e
+ *  Consulta Rápida) continuava vendendo pelo preço velho — reproduzido
+ *  na auditoria, 27 dos 29 produtos ativos têm material na composição.
+ *
+ *  Só o preço é refeito: composição, faixas e estoque são do produto
+ *  e continuam sendo editados só na tela dele. Um produto que falhe
+ *  a recalcular (ex.: cadastro antigo inconsistente) NÃO derruba o
+ *  salvamento do material — fica registrado no log do servidor.
+ * ================================================================== */
+export async function recalcProductsUsingMaterial(materialId: number): Promise<number> {
+  const bases = await db
+    .select({ id: products.id })
+    .from(products)
+    .where(eq(products.baseMaterialId, materialId));
+  const extras = await db
+    .select({ productId: productMaterials.productId })
+    .from(productMaterials)
+    .where(eq(productMaterials.materialId, materialId));
+
+  const ids = [...new Set([...bases.map((b) => Number(b.id)), ...extras.map((e) => Number(e.productId))])];
+  if (ids.length === 0) return 0;
+
+  let recalculados = 0;
+  for (const id of ids) {
+    try {
+      const [existing] = await db.select().from(products).where(eq(products.id, id)).limit(1);
+      if (!existing) continue;
+      /* A linha do banco não traz `finishings`/`materials`/`priceTiers`
+         (tabelas próprias) — o schema aplica [] e aqui isso é o
+         desejado: nada de sincronizar componentes, só repricear. */
+      const parsed = parse(existing);
+      if ("error" in parsed) continue;
+      const calc = await buildCalculation(parsed.data);
+      if ("error" in calc) continue;
+      await db
+        .update(products)
+        .set({
+          costSnapshot: toDecimalString(calc.costSnapshot, 4),
+          sellPrice: toDecimalString(calc.sellPrice, 4),
+          finalPrice: toDecimalString(calc.finalPrice, 4),
+          breakdown: calc.breakdown,
+          printerCategoryId: (calc.printerCategoryId as number | null) || null,
+        })
+        .where(eq(products.id, id));
+      recalculados++;
+    } catch (e) {
+      console.error(`[recalc-produto-${id}] material ${materialId}:`, e);
+    }
+  }
+  return recalculados;
+}
+
 export async function archiveProduct(id: number, reason = "Arquivado") {
   const [existing] = await db.select().from(products).where(eq(products.id, id)).limit(1);
   if (!existing) return { error: "Produto não encontrado", status: 404 } satisfies ProductError;

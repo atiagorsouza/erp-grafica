@@ -4,7 +4,7 @@
 > aqui. Se você quiser saber em que pé está sem reler a conversa, é este
 > o arquivo.
 
-**Última atualização:** 25/08/2026 (3ª)
+**Última atualização:** 25/08/2026 (4ª)
 
 ---
 
@@ -24,9 +24,9 @@ instalar. Acabei de gerar, está em `release/`.
 
 | | |
 |---|---|
-| **Versão no ar** | **3.68.13** — PDV: teto de desconto 50%, vendedor sempre visível, catálogo com "Mostrar mais" |
-| Rodando em | servidor da gráfica (túnel `app.vtdigital.site`) · produção em 3.68.11 ✔ — este deploy é o 3.68.13 |
-| Testes | `e2e:smoke` completo ✔ · typecheck ✔ · lint 11 (base) · /pdv 200 ✔ · guarda dos 50% testada na API (60% → 422; 45% → venda ok, cancelada e estoque restaurado) |
+| **Versão no ar** | **3.68.14** — material caro não congela mais preço de produto: recálculo em cascata + guarda da embalagem + faixas com aviso |
+| Rodando em | servidor da gráfica (túnel `app.vtdigital.site`) · produção em 3.68.11 ✔ — este deploy é o 3.68.14 |
+| Testes | `e2e:smoke` completo ✔ · typecheck ✔ · lint 11 (base) · API testada: custo divergente da embalagem → 422 com a conta na mensagem; embalagem +40% → produto recalculado na hora (custo 1,13→1,53; preço 2,98→4,03); faixas preservadas |
 | Observado | `company_email` ganha padrão `contato.vt@` (só se vazio) · `labor_hourly_rate` ficou 0 por escolha do dono · aviso de "password sem suporte visual" = falso alarme da ferramenta do servidor (Painel desenha os 3 segredos com máscara) |
 | Lint | 11 problemas (baseline de sempre, nada novo) |
 | Pacote | `update-3.68.2/` · `printflow-erp-v3.68.2.tar.gz` — `bash scripts/deploy-auto.sh <caminho-do-pacote>` (SEMPRE com caminho) |
@@ -885,3 +885,36 @@ sobrou nele, de fato).
 Testado na API: 60% → 422 com a mensagem nova; 45% → venda criada,
 cancelada e estoque restaurado. Smoke completo, typecheck, lint 11
 (baseline).
+
+## 2026-08-25 — v3.68.14 fechada (auditoria de Produtos & Custos)
+
+O dono reportou: "mudo algo em Materiais e insumos ou qq outra coisa e o
+preço e quantidade permanecem o valor anterior". Auditoria com
+reprodução achou **2 bugs reais + 1 armadilha de UX** — os três
+corrigidos:
+
+- **Preço congelado (o grave).** Produto guarda custo/preço como
+  fotografia do dia em que foi salvo; editar material não recalculava
+  NADA (reproduzido: papel 0,0558→0,40 e produto intacto — 27 dos 29
+  produtos dependem de material). Agora **salvar material recalcula na
+  hora todos os produtos que o usam** (base e insumo extra), com
+  toast informando "N produto(s) com preço recalculado".
+- **Custo descartado em silêncio.** Com embalagem preenchida (ex. resma
+  R$ 278,99 ÷ 5000), o custo unitário digitado era ignorado pela API
+  com resposta 200 OK (reproduzido: custo dobrado mandado, valor velho
+  mantido). Agora divergência → **422 com a conta na mensagem**; a
+  tela do Estoque manda o custo derivado da embalagem.
+- **Faixas de preço não acompanham.** Faixa é preço digitado à mão;
+  mudar material/margem mudava só o preço calculado e o balcão
+  (PDV/Consulta) seguia na faixa velha. Agora o editor avisa ("Preço
+  calculado mudou de X para Y e as faixas continuam no preço antigo")
+  e oferece **Reajustar faixas (+N%)** na mesma proporção.
+
+Também verificado na auditoria (sem alteração): editor recalcula ao
+vivo corretamente (motor testado direto); cancelamento/sangria/troco
+do PDV sólidos; estoque de material editado no modal não deixa
+movimentação (fica anotado para decisão futura).
+
+Nota técnica: recálculo em cascata só repriceia (custo/preço/breakdown);
+composição, faixas e estoque do produto continuam sendo da tela dele.
+Falha num produto não derruba o salvamento do material.
