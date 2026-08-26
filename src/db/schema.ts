@@ -853,26 +853,6 @@ export const quoteStatusEnum = pgEnum("quote_status", [
   "expirado",
 ]);
 
-/* ── GALERIA DE FOTOS DO PRODUTO (v3.69.2) ─────────────────────────
- * Primeira imagem de PRODUTO do sistema (a coluna `imageDataUri`
- * que existe no schema é das CAMPANHAS de WhatsApp, não daqui).
- * Até 3 fotos por produto, posição fixa 1..3 (a 1 é a capa do
- * card no portal), data URI no mesmo limite do upload de logo.
- * Servida publicamente pelo portal (material de marketing), com
- * cache de um dia: GET /api/portal/foto/[id]/[n]. */
-export const productImages = pgTable("product_images", {
-  id: serial("id").primaryKey(),
-  productId: integer("product_id")
-    .notNull()
-    .references(() => products.id, { onDelete: "cascade" }),
-  position: integer("position").notNull().default(1),
-  dataUri: text("data_uri").notNull(),
-  createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
-}, (table) => [
-  /* posição única por produto: a capa é sempre a 1, sem empate */
-  uniqueIndex("product_images_pos_idx").on(table.productId, table.position),
-]);
-
 export const quotes = pgTable("quotes", {
   id: serial("id").primaryKey(),
   number: text("number").notNull().unique(),

@@ -360,9 +360,6 @@ export function ProductsClient({
         priceTiers: tiers
           .filter((t) => num(t.minQuantity) > 0)
           .map((t) => ({ minQuantity: num(t.minQuantity), unitPrice: num(t.unitPrice), label: t.label?.trim() || null })),
-        /* galeria sempre inteira no save — vazio limpa (intenção
-         * explícita de remover as fotos) */
-        fotos: fotos.filter(Boolean),
       };
       if (editId) await mutate("products", "update", data, editId);
       else await mutate("products", "create", data);
@@ -999,52 +996,6 @@ export function ProductsClient({
                 <Field label="Qtd. dentro da unidade" hint="ex.: 60 adesivos por cartela">
                   <Input mono value={form.saleUnitPieces || ""} onChange={set("saleUnitPieces")} placeholder="ex.: 60" />
                 </Field>
-              </div>
-            </Bloco>
-
-            {/* GALERIA — fotos do catálogo/portal (v3.69.2) */}
-            <Bloco
-              titulo="Fotos do produto"
-              icone="image"
-              descricao={
-                <>
-                  Até <strong>3 fotos</strong> — a <strong>primeira é a capa</strong> do card no portal do cliente.
-                  PNG/JPG/WebP; são reduzidas pra 1000px automaticamente. Sem foto, o card usa o ícone.
-                </>
-              }
-            >
-              <div className="grid grid-cols-3 gap-3">
-                {[0, 1, 2].map((i) => (
-                  <div key={i} className="rounded-lg border border-ink-700 bg-ink-850 p-2 text-center">
-                    {fotos[i] ? (
-                      <img src={fotos[i]} alt={`Foto ${i + 1}`} className="mb-2 h-28 w-full rounded-md object-contain" />
-                    ) : (
-                      <div className="mb-2 flex h-28 items-center justify-center rounded-md bg-white/[0.04] font-mono text-[10px] tracking-wider text-ink-500 uppercase">
-                        {i === 0 ? "capa" : `foto ${i + 1}`}
-                      </div>
-                    )}
-                    <div className="flex items-center justify-center gap-1.5">
-                      <label className="cursor-pointer rounded-md border border-ink-600 px-2.5 py-1 text-[10.5px] font-semibold text-ink-100 hover:bg-white/5">
-                        {fotos[i] ? "Trocar" : "Enviar"}
-                        <input
-                          type="file"
-                          accept="image/png,image/jpeg,image/webp"
-                          className="hidden"
-                          onChange={(e) => escolherFoto(e, i)}
-                        />
-                      </label>
-                      {fotos[i] && (
-                        <IconButton
-                          size="sm"
-                          name="trash"
-                          label="Remover"
-                          tone="danger"
-                          onClick={() => setFotos((f) => f.filter((_, j) => j !== i))}
-                        />
-                      )}
-                    </div>
-                  </div>
-                ))}
               </div>
             </Bloco>
 
