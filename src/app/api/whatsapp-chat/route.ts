@@ -2,7 +2,7 @@
 
    O envio NÃO passa por aqui: quem envia é o serviço do WhatsApp, via
    /api/whatsapp/enviar. Esta rota só lê. */
-import { listarConversas, mensagensDe, fichaDoCliente, cadastrarDoChat } from "@/lib/chat-whatsapp";
+import { listarConversas, mensagensDe, fichaDoCliente } from "@/lib/chat-whatsapp";
 import { listarMensagens } from "@/lib/mensagens";
 
 export const dynamic = "force-dynamic";
@@ -47,28 +47,5 @@ export async function GET(req: Request) {
   } catch (e) {
     console.error("[whatsapp-chat]", e);
     return Response.json({ error: "Não foi possível ler as conversas." }, { status: 500 });
-  }
-}
-
-/* Cadastro direto do chat (ficha 360º): conversa "sem cadastro" vira
-   cliente sem sair do WhatsApp. Nome da conversa pré-preenche, telefone
-   E164 identifica. Cliente já existente não duplica — só vincula. */
-export async function POST(req: Request) {
-  let body: Record<string, unknown>;
-  try {
-    body = (await req.json()) as Record<string, unknown>;
-  } catch {
-    return Response.json({ error: "JSON inválido" }, { status: 400 });
-  }
-  if (String(body.op || "") !== "cadastrar") {
-    return Response.json({ error: "op inválida" }, { status: 400 });
-  }
-  try {
-    const r = await cadastrarDoChat(String(body.nome || ""), String(body.phoneE164 || ""));
-    if ("error" in r) return Response.json({ error: r.error }, { status: r.status });
-    return Response.json(r);
-  } catch (e) {
-    console.error("[whatsapp-chat:cadastrar]", e);
-    return Response.json({ error: "Falha ao cadastrar o cliente." }, { status: 500 });
   }
 }

@@ -3,19 +3,12 @@ import { db } from "@/db";
 import { itemCategories, productPriceTiers, products } from "@/db/schema";
 import { asc, eq } from "drizzle-orm";
 import { ConsultaPrecoClient, type ProdutoConsulta } from "@/components/modules/ConsultaPrecoClient";
-import { mensagem } from "@/lib/mensagens";
-import { getPricingDefaults } from "@/lib/settings";
 
 export const metadata: Metadata = { title: "Consulta Rápida de Preço" };
 export const dynamic = "force-dynamic";
 
 export default async function ConsultaPrecoPage() {
-  /* A moldura (saudação + assinatura) vem do catálogo editável no
-     Painel → Mensagens — o que o cliente lê nunca mora no código.
-     Textos já vêm preenchidos ({empresa} incluso) e desligados viram
-     string vazia, devolvendo o copiar puro de antes. */
-  const defaults = await getPricingDefaults();
-  const [linhas, faixas, cab, ass] = await Promise.all([
+  const [linhas, faixas] = await Promise.all([
     db
       .select({
         id: products.id,
@@ -32,10 +25,6 @@ export default async function ConsultaPrecoPage() {
       .where(eq(products.active, true))
       .orderBy(asc(itemCategories.name), asc(products.name)),
     db.select().from(productPriceTiers).orderBy(asc(productPriceTiers.minQuantity)),
-    mensagem("consulta.cabecalho"),
-    mensagem("consulta.assinatura", {
-      empresa: defaults.company_trade_name || defaults.company_name || "",
-    }),
   ]);
 
   /* Junta as faixas em memória: são poucas dezenas de linhas, não
@@ -59,13 +48,5 @@ export default async function ConsultaPrecoPage() {
     faixas: porProduto.get(l.id) ?? [],
   }));
 
-  return (
-    <ConsultaPrecoClient
-      produtos={produtos}
-      moldura={{
-        cabecalho: cab.ativa ? cab.texto : "",
-        assinatura: ass.ativa ? ass.texto : "",
-      }}
-    />
-  );
+  return <ConsultaPrecoClient produtos={produtos} />;
 }

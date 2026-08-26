@@ -129,10 +129,6 @@ export function ProductsClient({
   const [compFinishings, setCompFinishings] = useState<{ id: string; quantity: string; chargeMode: string; batchSize: string }[]>([]);
   const [compMaterials, setCompMaterials] = useState<{ id: string; quantity: string }[]>([]);
   const [tiers, setTiers] = useState<{ minQuantity: string; unitPrice: string; label: string }[]>([]);
-  /* Preço final SALVO no momento em que o editor abriu (null = produto
-     novo). É a régua para avisar que as faixas ficaram para trás
-     quando o preço calculado muda (v3.68.14). */
-  const [precoBase, setPrecoBase] = useState<number | null>(null);
   const [simQty, setSimQty] = useState<string>("");
 
   const set = (k: string) => (e: { target: { value: string } }) => setForm((f) => ({ ...f, [k]: e.target.value }));
@@ -245,7 +241,6 @@ export function ProductsClient({
     setCompFinishings([]);
     setCompMaterials([]);
     setTiers([]);
-    setPrecoBase(null);
     setSimQty("");
     setForm({ margin: "40", pagesPerUnit: "1", copies: "1", baseMaterialQty: "1", defaultQuantity: "100", piecesPerSheet: "1", printSides: "1", wastePercent: "5", setupSheets: "0", minOrderQty: "1", operationalRate: "15", roundingStep: "0.01",
       leadTimeCreation: "0", leadTimeProduction: "1", leadTimeFinishing: "0", leadTimeSerial: "false", saleUnitLabel: "", saleUnitPieces: "" });
@@ -263,7 +258,6 @@ export function ProductsClient({
     setCompMaterials(
       materials.filter((m) => Number(m.productId) === Number(p.id)).map((m) => ({ id: String(m.materialId), quantity: String(m.quantity) }))
     );
-    setPrecoBase(num(p.finalPrice));
     setTiers(
       priceTiers
         .filter((t) => Number(t.productId) === Number(p.id))
@@ -908,41 +902,6 @@ export function ProductsClient({
               descricao="Para quem vende em lote: mínimo 50, depois 100, 250… Vale a maior faixa que o pedido alcançar. Sem faixas, usa o preço calculado acima."
             >
               <div className="space-y-2">
-                {(() => {
-                  /* v3.68.14: faixa é preço DIGITADO — não acompanha o
-                     cálculo sozinha. Quando o preço calculado muda e o
-                     produto tem faixas, avisa e oferece o reajuste na
-                     mesma proporção (os descontos relativos se mantêm). */
-                  const antigo = precoBase;
-                  if (antigo == null || tiers.length === 0) return null;
-                  const novo = liveCalc ? liveCalc.finalPrice : 0;
-                  const variacao = antigo > 0 && novo > 0 ? novo / antigo : null;
-                  if (!variacao || Math.abs(variacao - 1) < 0.01) return null;
-                  const pct = (variacao - 1) * 100;
-                  return (
-                    <div className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-[11.5px] text-amber-900">
-                      <span>
-                        Preço calculado mudou ({formatMoney(antigo)} → {formatMoney(novo)}) e as faixas continuam no preço antigo.
-                      </span>
-                      <Button
-                        size="xs"
-                        variant="outline"
-                        onClick={() => {
-                          setTiers((arr) =>
-                            arr.map((t) => ({
-                              ...t,
-                              unitPrice: num(t.unitPrice) > 0 ? String(Math.round(num(t.unitPrice) * variacao * 100) / 100) : t.unitPrice,
-                            }))
-                          );
-                          setPrecoBase(novo);
-                        }}
-                      >
-                        Reajustar faixas ({pct > 0 ? "+" : ""}
-                        {pct.toFixed(1).replace(".", ",")}%)
-                      </Button>
-                    </div>
-                  );
-                })()}
                 {tiers.map((t, i) => {
                   const q = num(t.minQuantity);
                   const pu = num(t.unitPrice);

@@ -127,11 +127,11 @@ export function StockClient({ materials, suppliers, purchases, materialCats, mov
   })();
   const matName = (id: unknown) => materials.find((m) => Number(m.id) === Number(id))?.name;
 
-  async function run(fn: () => Promise<unknown>, ok: string | ((result: unknown) => string)) {
+  async function run(fn: () => Promise<unknown>, ok: string) {
     setSaving(true);
     try {
-      const result = await fn();
-      toast.success(typeof ok === "function" ? ok(result) : ok);
+      await fn();
+      toast.success(ok);
       refresh();
       return true;
     } catch (e) {
@@ -144,11 +144,6 @@ export function StockClient({ materials, suppliers, purchases, materialCats, mov
 
   const saveMat = (id?: number) =>
     run(async () => {
-      /* Com embalagem preenchida, o custo unitário VEM da divisão —
-         a API (v3.68.14) recusa custo digitado que diverja dela. O
-         formulário já mostra exatamente esta conta no campo travado;
-         mandamos o valor derivado para a edição da embalagem passar
-         lisa. */
       const data = {
         name: form.name,
         /* Só dígitos: o leitor às vezes manda espaço no fim, e um
@@ -158,7 +153,7 @@ export function StockClient({ materials, suppliers, purchases, materialCats, mov
         categoryId: form.categoryId || null,
         supplierId: form.supplierId || null,
         unit: form.unit || "unidade",
-        unitCost: packUnitCost != null ? String(packUnitCost) : form.unitCost || "0",
+        unitCost: form.unitCost || "0",
         packName: form.packName || null,
         packQuantity: form.packQuantity || "0",
         packCost: form.packCost || "0",
@@ -167,15 +162,10 @@ export function StockClient({ materials, suppliers, purchases, materialCats, mov
         minStock: form.minStock ?? "0",
         notes: form.notes || null,
       };
-      const j = id
-        ? await mutate("materials", "update", data, id)
-        : await mutate("materials", "create", data);
+      if (id) await mutate("materials", "update", data, id);
+      else await mutate("materials", "create", data);
       setMatModal(null);
-      return j;
-    }, (j) => {
-      const n = Number((j as { recalculados?: number } | undefined)?.recalculados || 0);
-      return n > 0 ? `Material salvo · ${n} produto(s) com preço recalculado` : "Material salvo";
-    });
+    }, "Material salvo");
 
   async function saveMov() {
     const mat = movModal?.material;

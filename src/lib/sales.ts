@@ -265,23 +265,6 @@ export async function createSale(raw: unknown) {
   /* ---------- 4. totais no servidor ---------- */
   const subtotal = round2(validLines.reduce((sum, l) => sum + l.total, 0));
   const discount = applyDiscount(subtotal, input.discount, input.discountMode);
-
-  /* Teto de desconto do dono (25/08): balcão não dá mais de 50%.
-     Antes o percentual era travado em 100% — "desconto" de 100% era
-     venda zerada esperando para acontecer, e 200% passava batido na
-     conferência visual. O desconto à vista (PIX/dinheiro) é automático
-     e chega SOMADO no campo, então o limite cresce pela taxa configurada.
-     Brinde/bonificação é item avulso, não desconto. */
-  const pixRate = Math.max(toNumber(defaults.pixDiscountRate, 0), 0);
-  const descontoMax = round2(subtotal * (0.5 + pixRate));
-  if (subtotal > 0 && discount > descontoMax) {
-    return {
-      error:
-        "Desconto máximo é 50% do subtotal (além do desconto à vista automático). Para brinde, use Item avulso.",
-      status: 422,
-    } satisfies SaleError;
-  }
-
   /* O frete entra no líquido: o cliente paga produto + entrega, e a taxa
      de cartão incide sobre o valor realmente cobrado. */
   const shippingFee = round2(toPositive(input.shippingFee));

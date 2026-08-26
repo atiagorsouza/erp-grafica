@@ -50,30 +50,6 @@ interface PedidoResumo {
   criadoEm: string;
 }
 
-interface VendaResumo {
-  id: number;
-  numero: string;
-  total: number;
-  pagamento: string | null;
-  criadoEm: string;
-}
-
-interface OrcamentoResumo {
-  id: number;
-  numero: string;
-  total: number;
-  status: string;
-  criadoEm: string;
-}
-
-interface CobrancaResumo {
-  id: number;
-  descricao: string;
-  valor: number;
-  status: string;
-  criadoEm: string;
-}
-
 interface Ficha {
   id: number;
   nome: string;
@@ -87,9 +63,6 @@ interface Ficha {
   ltv: number;
   pedidos: PedidoResumo[];
   orcamentosAbertos: number;
-  vendas: VendaResumo[];
-  orcamentos: OrcamentoResumo[];
-  cobrancas: CobrancaResumo[];
 }
 
 interface Rapida {
@@ -126,217 +99,6 @@ function telefoneBonito(e164: string) {
   return e164;
 }
 
-/* Rótulos em português para a ficha 360º — mesmos nomes que as telas
-   de origem (PDV, orçamentos, cobranças) usam, para o operador não
-   precisar traduzir status cru do banco. */
-const ROTULO_ORC: Record<string, string> = {
-  rascunho: "Rascunho",
-  enviado: "Enviado",
-  aprovado: "Aprovado",
-  recusado: "Recusado",
-  expirado: "Expirado",
-};
-
-const ROTULO_COB: Record<string, string> = {
-  pendente: "Aguardando",
-  pago: "Pago",
-  expirado: "Expirado",
-  cancelado: "Cancelado",
-  erro: "Erro",
-};
-
-const ROTULO_PAG: Record<string, string> = {
-  dinheiro: "Dinheiro",
-  pix: "PIX",
-  debito: "Débito",
-  debit_card: "Débito",
-  credito: "Crédito",
-  credit_card: "Crédito",
-};
-
-/* ── FICHA 360º ── corpo reaproveitado em dois lugares: na coluna
-   lateral (telas largas, sempre visível — estilo Waplus) e no overlay
-   que cobre a conversa (telas estreitas). O conteúdo é O MESMO; muda
-   só a moldura em volta. */
-function PainelFicha({ ficha }: { ficha: Ficha }) {
-  return (
-    <div className="space-y-3.5">
-      <div className="grid grid-cols-3 gap-2">
-        {[
-          { k: "Já comprou", v: brl(ficha.ltv) },
-          { k: "Pedidos", v: String(ficha.pedidos.length) },
-          { k: "Orç. abertos", v: String(ficha.orcamentosAbertos) },
-        ].map((x) => (
-          <div key={x.k} className="rounded-lg border border-paper-200 bg-white px-2.5 py-2 text-center">
-            <p className="font-mono text-[9.5px] tracking-wide text-ink-400 uppercase">{x.k}</p>
-            <p className="mt-0.5 text-[13px] font-bold text-ink-900">{x.v}</p>
-          </div>
-        ))}
-      </div>
-
-      <div>
-        <p className="mb-1.5 font-mono text-[10px] tracking-wide text-ink-400 uppercase">
-          Últimas compras no balcão
-        </p>
-        {ficha.vendas.length === 0 ? (
-          <p className="rounded-lg border border-dashed border-paper-300 px-3 py-4 text-center text-[12px] text-ink-400">
-            Nenhuma venda no balcão.
-          </p>
-        ) : (
-          <div className="space-y-1.5">
-            {ficha.vendas.map((v) => (
-              <div key={v.id} className="flex items-center gap-2 rounded-lg border border-paper-200 bg-white px-3 py-2">
-                <div className="min-w-0 grow">
-                  <p className="font-mono text-[11.5px] font-bold text-ink-900">{v.numero}</p>
-                  <p className="text-[11px] text-ink-500">
-                    {ROTULO_PAG[v.pagamento || ""] || (v.pagamento || "").replace(/_/g, " ") || "—"}
-                    {" · "}
-                    {dataBR(v.criadoEm)}
-                  </p>
-                </div>
-                <span className="font-mono text-[12px] font-bold text-proc-c-strong">{brl(v.total)}</span>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      <div>
-        <p className="mb-1.5 font-mono text-[10px] tracking-wide text-ink-400 uppercase">
-          Últimos pedidos
-        </p>
-        {ficha.pedidos.length === 0 ? (
-          <p className="rounded-lg border border-dashed border-paper-300 px-3 py-4 text-center text-[12px] text-ink-400">
-            Nenhum pedido ainda.
-          </p>
-        ) : (
-          <div className="space-y-1.5">
-            {ficha.pedidos.map((p) => (
-              <button
-                key={p.id}
-                onClick={() => window.open(`/pedidos?id=${p.id}`, "_blank")}
-                className="focus-ring flex w-full cursor-pointer items-center gap-2 rounded-lg border border-paper-200 bg-white px-3 py-2 text-left transition-colors hover:border-cyan-400"
-              >
-                <div className="min-w-0 grow">
-                  <p className="font-mono text-[11.5px] font-bold text-ink-900">{p.numero}</p>
-                  <p className="text-[11px] text-ink-500">
-                    {p.producao.replace(/_/g, " ")} · entrega {dataBR(p.entrega)}
-                  </p>
-                </div>
-                <span className="font-mono text-[12px] font-bold text-proc-c-strong">{brl(p.total)}</span>
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-
-      <div>
-        <p className="mb-1.5 font-mono text-[10px] tracking-wide text-ink-400 uppercase">
-          Últimos orçamentos
-        </p>
-        {ficha.orcamentos.length === 0 ? (
-          <p className="rounded-lg border border-dashed border-paper-300 px-3 py-4 text-center text-[12px] text-ink-400">
-            Nenhum orçamento.
-          </p>
-        ) : (
-          <div className="space-y-1.5">
-            {ficha.orcamentos.map((o) => (
-              <div key={o.id} className="flex items-center gap-2 rounded-lg border border-paper-200 bg-white px-3 py-2">
-                <div className="min-w-0 grow">
-                  <p className="font-mono text-[11.5px] font-bold text-ink-900">{o.numero}</p>
-                  <p className="text-[11px] text-ink-500">
-                    {ROTULO_ORC[o.status] || o.status} · {dataBR(o.criadoEm)}
-                  </p>
-                </div>
-                <span className="font-mono text-[12px] font-bold text-proc-c-strong">{brl(o.total)}</span>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      <div>
-        <p className="mb-1.5 font-mono text-[10px] tracking-wide text-ink-400 uppercase">
-          Últimas cobranças
-        </p>
-        {ficha.cobrancas.length === 0 ? (
-          <p className="rounded-lg border border-dashed border-paper-300 px-3 py-4 text-center text-[12px] text-ink-400">
-            Nenhuma cobrança.
-          </p>
-        ) : (
-          <div className="space-y-1.5">
-            {ficha.cobrancas.map((k) => (
-              <div key={k.id} className="flex items-center gap-2 rounded-lg border border-paper-200 bg-white px-3 py-2">
-                <div className="min-w-0 grow">
-                  <p className="truncate text-[11.5px] font-semibold text-ink-900">{k.descricao || "—"}</p>
-                  <p className="text-[11px] text-ink-500">
-                    {ROTULO_COB[k.status] || k.status} · {dataBR(k.criadoEm)}
-                  </p>
-                </div>
-                <span className="font-mono text-[12px] font-bold text-proc-c-strong">{brl(k.valor)}</span>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      <div className="border-t border-dashed border-paper-300 pt-2.5 text-[11.5px] text-ink-500">
-        {ficha.email && <p className="truncate">{ficha.email}</p>}
-        <p>Cliente desde {dataBR(ficha.desde)}</p>
-      </div>
-    </div>
-  );
-}
-
-/* ── CADASTRO ── campos do cadastro direto pelo chat, reutilizados
-   no overlay (telas estreitas) e na coluna lateral (largas). */
-function PainelCadastro({
-  nome,
-  onNome,
-  salvando,
-  onSalvar,
-}: {
-  nome: string;
-  onNome: (v: string) => void;
-  salvando: boolean;
-  onSalvar: () => void;
-}) {
-  return (
-    <div className="space-y-3.5">
-      <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-[12px] text-amber-800">
-        Esta conversa ainda não está ligada a nenhum cliente. Cadastre para ver a ficha
-        completa — compras, pedidos, orçamentos e cobranças.
-      </p>
-
-      <div>
-        <label className="mb-1 block font-mono text-[10px] tracking-wide text-ink-400 uppercase">
-          Nome do cliente
-        </label>
-        <Input
-          value={nome}
-          onChange={(e) => onNome(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && nome.trim().length >= 2 && !salvando) {
-              e.preventDefault();
-              onSalvar();
-            }
-          }}
-          placeholder="Como o cliente se identifica"
-        />
-      </div>
-
-      <Button icon="check" onClick={onSalvar} disabled={salvando || nome.trim().length < 2}>
-        {salvando ? "Salvando…" : "Salvar e ver ficha"}
-      </Button>
-
-      <p className="text-[11px] text-ink-400">
-        Se este telefone já pertence a um cliente cadastrado, nada é duplicado — a conversa
-        apenas é vinculada a ele.
-      </p>
-    </div>
-  );
-}
-
 export function ChatWhatsApp() {
   const [conversas, setConversas] = useState<Conversa[]>([]);
   const [aberta, setAberta] = useState<string | null>(null);
@@ -358,14 +120,6 @@ export function ChatWhatsApp() {
   const [ficha, setFicha] = useState<Ficha | null>(null);
   const [fichaAberta, setFichaAberta] = useState(false);
   const [rapidas, setRapidas] = useState<Rapida[]>([]);
-
-  /* Cadastro direto pela conversa (ficha 360º): conversa sem cliente
-     vinculado não tem ficha — cadastrar aqui evita trocar de tela e
-     perder o fio da conversa. O telefone é o E164 que já identifica
-     a conversa; só o nome é digitado. */
-  const [cadastroAberto, setCadastroAberto] = useState(false);
-  const [nomeNovo, setNomeNovo] = useState("");
-  const [salvandoCadastro, setSalvandoCadastro] = useState(false);
 
   const carregarConversas = useCallback(async () => {
     try {
@@ -397,9 +151,9 @@ export function ChatWhatsApp() {
     }
   }, []);
 
-  /* Ficha só quando o painel abre: são várias consultas (cliente,
-     pedidos, vendas, orçamentos, cobranças), e o chat recarrega
-     sozinho a cada 6 segundos — não faz sentido buscá-la junto. */
+  /* Ficha só quando o painel abre: são quatro consultas, e o chat
+     recarrega sozinho a cada 6 segundos — não faz sentido buscá-la
+     junto do polling. */
   const carregarFicha = useCallback(async (customerId: number) => {
     try {
       const r = await fetch(`/api/whatsapp-chat?ficha=${customerId}`);
@@ -409,41 +163,6 @@ export function ChatWhatsApp() {
       setFicha(null);
     }
   }, []);
-
-  /* Salva o cadastro vindo da própria conversa. Se o telefone já
-     pertence a um cliente, não duplica — só vincula a conversa a ele
-     (o robô escreve customer_id, mas aqui o operador está no controle). */
-  async function salvarCadastro() {
-    if (!aberta) return;
-    setSalvandoCadastro(true);
-    try {
-      const r = await fetch("/api/whatsapp-chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ op: "cadastrar", nome: nomeNovo, phoneE164: aberta }),
-      });
-      const d = (await r.json()) as {
-        ok?: boolean; customerId?: number; criado?: boolean; error?: string;
-      };
-      if (!r.ok || !d.customerId) {
-        toast.error(d.error || "Não foi possível cadastrar o cliente.");
-        return;
-      }
-      toast.success(
-        d.criado
-          ? "Cliente cadastrado e vinculado a esta conversa."
-          : "Cliente já existia — conversa vinculada a ele."
-      );
-      setCadastroAberto(false);
-      await carregarConversas();
-      setFichaAberta(true);
-      void carregarFicha(d.customerId);
-    } catch {
-      toast.error("Falha de rede ao cadastrar.");
-    } finally {
-      setSalvandoCadastro(false);
-    }
-  }
 
   /* Respostas rápidas saem do mesmo catálogo editável das outras
      mensagens: o que o cliente lê nunca mora no código. */
@@ -490,17 +209,13 @@ export function ChatWhatsApp() {
      Feito no clique, e não num efeito sobre `aberta`: setState dentro
      de efeito dispara renderização em cascata (o lint reclama, e com
      razão — a regra já vale no resto deste arquivo). */
-  const abrirConversa = useCallback((fone: string, customerId: number | null) => {
+  const abrirConversa = useCallback((fone: string) => {
     setAberta(fone);
     setLimite(30);
     setFichaAberta(false);
     setFicha(null);
     setTexto("");
-    /* A ficha carrega junto com a conversa: na coluna lateral (telas
-       largas) ela está sempre à mostra. Nas estreitas o overlay segue
-       a pedido do botão — e a ficha já vem quente quando ele clicar. */
-    if (customerId) void carregarFicha(customerId);
-  }, [carregarFicha]);
+  }, []);
 
   /* Só desce sozinho quando chega mensagem nova. Ao carregar as
      anteriores o operador está LENDO o passado — puxar a tela para o
@@ -588,14 +303,14 @@ export function ChatWhatsApp() {
           />
         </div>
       ) : (
-        <div className="grid lg:grid-cols-[290px_1fr] xl:grid-cols-[290px_1fr_330px]">
+        <div className="grid lg:grid-cols-[290px_1fr]">
           {/* ── Lista ── */}
           <div className="max-h-[300px] overflow-y-auto border-b border-paper-200 lg:max-h-[calc(100vh-330px)] lg:min-h-[460px] lg:border-r lg:border-b-0">
             {conversas.map((c) => (
               <button
                 key={c.phoneE164}
                 type="button"
-                onClick={() => abrirConversa(c.phoneE164, c.customerId)}
+                onClick={() => abrirConversa(c.phoneE164)}
                 className={cn(
                   "block w-full border-b border-paper-100 px-4 py-3 text-left transition-colors",
                   aberta === c.phoneE164 ? "bg-proc-c/8" : "hover:bg-paper-50"
@@ -643,11 +358,7 @@ export function ChatWhatsApp() {
                     {telefoneBonito(atual.phoneE164)}
                   </p>
                 </div>
-                {/* Botões de ficha/cadastro abrem OVERLAY — recurso de
-                    tela estreita. Em telas largas a ficha é a coluna
-                    lateral fixa e o cadastro mora nela: nada de botão. */}
-                <span className="contents xl:hidden">
-                {atual.customerId ? (
+                {atual.customerId && (
                   <Button
                     size="sm"
                     variant={fichaAberta ? "outline" : "ghost"}
@@ -660,20 +371,7 @@ export function ChatWhatsApp() {
                   >
                     {fichaAberta ? "Voltar à conversa" : "Ficha e pedidos"}
                   </Button>
-                ) : (
-                  <Button
-                    size="sm"
-                    variant={fichaAberta ? "outline" : "ghost"}
-                    icon="person"
-                    onClick={() => {
-                      setCadastroAberto(true);
-                      setNomeNovo("");
-                    }}
-                  >
-                    Cadastrar cliente
-                  </Button>
                 )}
-                </span>
                 {atual.assumidaPor ? (
                   <Button
                     size="sm"
@@ -701,11 +399,8 @@ export function ChatWhatsApp() {
                     dentro dela, `absolute inset-0` se ancora no conteúdo
                     já rolado e a ficha nasce fora da vista. Aqui cobre a
                     conversa inteira, menos o cabeçalho. */}
-                {/* Ficha por cima do chat: em telas estreitas cobre a
-                    conversa. Em telas largas (xl) este overlay não
-                    renderiza — lá a ficha é a coluna lateral fixa. */}
                 {fichaAberta && (
-                  <div className="absolute inset-x-0 top-[57px] bottom-0 z-20 overflow-y-auto bg-paper-50 px-4 py-3.5 xl:hidden">
+                  <div className="absolute inset-x-0 top-[57px] bottom-0 z-20 overflow-y-auto bg-paper-50 px-4 py-3.5">
                     {!ficha ? (
                       <p className="py-6 text-center text-[12.5px] text-ink-400">
                         Carregando ficha…
@@ -725,42 +420,56 @@ export function ChatWhatsApp() {
                           </Button>
                         </div>
 
-                        <PainelFicha ficha={ficha} />
+                        <div className="grid grid-cols-3 gap-2">
+                          {[
+                            { k: "Já comprou", v: brl(ficha.ltv) },
+                            { k: "Pedidos", v: String(ficha.pedidos.length) },
+                            { k: "Orç. abertos", v: String(ficha.orcamentosAbertos) },
+                          ].map((x) => (
+                            <div key={x.k} className="rounded-lg border border-paper-200 bg-white px-2.5 py-2 text-center">
+                              <p className="font-mono text-[9.5px] tracking-wide text-ink-400 uppercase">{x.k}</p>
+                              <p className="mt-0.5 text-[13px] font-bold text-ink-900">{x.v}</p>
+                            </div>
+                          ))}
+                        </div>
+
+                        <div>
+                          <p className="mb-1.5 font-mono text-[10px] tracking-wide text-ink-400 uppercase">
+                            Últimos pedidos
+                          </p>
+                          {ficha.pedidos.length === 0 ? (
+                            <p className="rounded-lg border border-dashed border-paper-300 px-3 py-4 text-center text-[12px] text-ink-400">
+                              Nenhum pedido ainda.
+                            </p>
+                          ) : (
+                            <div className="space-y-1.5">
+                              {ficha.pedidos.map((p) => (
+                                <button
+                                  key={p.id}
+                                  onClick={() => window.open(`/pedidos?id=${p.id}`, "_blank")}
+                                  className="focus-ring flex w-full cursor-pointer items-center gap-2 rounded-lg border border-paper-200 bg-white px-3 py-2 text-left transition-colors hover:border-cyan-400"
+                                >
+                                  <div className="min-w-0 grow">
+                                    <p className="font-mono text-[11.5px] font-bold text-ink-900">{p.numero}</p>
+                                    <p className="text-[11px] text-ink-500">
+                                      {p.producao.replace(/_/g, " ")} · entrega {dataBR(p.entrega)}
+                                    </p>
+                                  </div>
+                                  <span className="font-mono text-[12px] font-bold text-proc-c-strong">
+                                    {brl(p.total)}
+                                  </span>
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="border-t border-dashed border-paper-300 pt-2.5 text-[11.5px] text-ink-500">
+                          {ficha.email && <p className="truncate">{ficha.email}</p>}
+                          <p>Cliente desde {dataBR(ficha.desde)}</p>
+                        </div>
                       </div>
                     )}
-                  </div>
-                )}
-
-                {/* Cadastro por cima do chat: mesma moldura da ficha.
-                    O telefone não é editável — é o E164 que identifica
-                    esta conversa; errar aqui seria vincular outra pessoa. */}
-                {/* Cadastro por cima do chat (telas estreitas): mesma
-                    moldura da ficha. O telefone não é editável — é o
-                    E164 que identifica esta conversa; errar aqui seria
-                    vincular outra pessoa. Em telas largas o formulário
-                    mora na coluna lateral, sem overlay. */}
-                {cadastroAberto && (
-                  <div className="absolute inset-x-0 top-[57px] bottom-0 z-30 overflow-y-auto bg-paper-50 px-4 py-3.5 xl:hidden">
-                    <div className="space-y-3.5">
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0">
-                          <p className="text-[14px] font-bold text-ink-900">Cadastrar cliente</p>
-                          <p className="font-mono text-[11px] text-ink-500">
-                            {telefoneBonito(atual.phoneE164)}
-                          </p>
-                        </div>
-                        <Button size="sm" variant="ghost" icon="close" onClick={() => setCadastroAberto(false)}>
-                          Fechar
-                        </Button>
-                      </div>
-
-                      <PainelCadastro
-                        nome={nomeNovo}
-                        onNome={setNomeNovo}
-                        salvando={salvandoCadastro}
-                        onSalvar={() => void salvarCadastro()}
-                      />
-                    </div>
                   </div>
                 )}
 
@@ -866,47 +575,6 @@ export function ChatWhatsApp() {
               </div>
             </div>
           )}
-
-          {/* ── Ficha lateral (só em telas largas) ── sempre visível
-              com a conversa aberta: quem atende quer ler a ficha e a
-              conversa AO MESMO TEMPO, sem clicar pra lá e pra cá.
-              Referência do dono: painel fixo do Waplus. Em telas
-              estreitas este aside nem renderiza — lá vale o overlay. */}
-          <aside className="hidden max-h-[calc(100vh-330px)] min-h-[460px] flex-col overflow-y-auto border-l border-paper-200 bg-paper-50 px-3.5 py-3 xl:flex">
-            {!atual ? (
-              <p className="py-6 text-center text-[12px] text-ink-400">
-                Abra uma conversa para ver a ficha do cliente aqui do lado.
-              </p>
-            ) : !atual.customerId ? (
-              <div className="space-y-3.5">
-                <div className="min-w-0 border-b border-dashed border-paper-300 pb-2.5">
-                  <p className="text-[13px] font-bold text-ink-900">Cadastrar cliente</p>
-                  <p className="font-mono text-[11px] text-ink-500">
-                    {telefoneBonito(atual.phoneE164)}
-                  </p>
-                </div>
-                <PainelCadastro
-                  nome={nomeNovo}
-                  onNome={setNomeNovo}
-                  salvando={salvandoCadastro}
-                  onSalvar={() => void salvarCadastro()}
-                />
-              </div>
-            ) : !ficha ? (
-              <p className="py-6 text-center text-[12px] text-ink-400">Carregando ficha…</p>
-            ) : (
-              <div className="space-y-3.5">
-                <div className="min-w-0 border-b border-dashed border-paper-300 pb-2.5">
-                  <p className="truncate text-[14px] font-bold text-ink-900">{ficha.nome}</p>
-                  <p className="truncate font-mono text-[11px] text-ink-500">
-                    {ficha.documento || "sem documento"}
-                    {ficha.cidade ? ` · ${ficha.cidade}/${ficha.estado || ""}` : ""}
-                  </p>
-                </div>
-                <PainelFicha ficha={ficha} />
-              </div>
-            )}
-          </aside>
         </div>
       )}
     </Card>

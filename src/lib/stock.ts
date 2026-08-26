@@ -8,7 +8,6 @@ import { nextDocumentNumber } from "@/lib/documents";
 import { formatCEP, formatPhone, isValidCNPJ, isValidEmail, onlyDigits } from "@/lib/validators";
 import { round2, toDecimalString, toNumber } from "@/lib/money";
 import { upsertAutoTransaction } from "@/lib/finance";
-import { recalcProductsUsingMaterial } from "@/lib/products";
 import { todayISO } from "@/lib/period";
 
 export type StockError = { error: string; status: number; details?: unknown };
@@ -167,23 +166,6 @@ export async function saveMaterial(raw: unknown, id?: number) {
   const derived = derivedUnitCost(d.packCost, d.packQuantity);
   const effectiveUnitCost = derived ?? d.unitCost;
 
-  /* Auditoria 25/08 (v3.68.14): com embalagem preenchida, o custo
-     unitário digitado era descartado EM SILÊNCIO — a API respondia
-     200 OK e gravava outro valor (reproduzido: custo dobrado mandado,
-     custo antigo mantido, nenhuma mensagem). Agora a divergência é
-     recusada com a conta na mesa; para mudar o custo de um insumo
-     com embalagem, edita-se a embalagem. Tolerância de meio centavo
-     cobre arredondamentos (unit_cost guarda 4 casas, o derive usa 6). */
-  if (derived != null && d.unitCost > 0 && Math.abs(d.unitCost - derived) > 0.005) {
-    return {
-      error:
-        `Custo unitário (${d.unitCost.toFixed(4)}) não bate com a embalagem: ` +
-        `${d.packCost.toFixed(2)} ÷ ${d.packQuantity.toLocaleString("pt-BR")} = ${derived.toFixed(4)}. ` +
-        `Com a embalagem preenchida ela manda: ajuste o custo ou a quantidade da embalagem.`,
-      status: 422,
-    } satisfies StockError;
-  }
-
   /* Código de barras repetido quebra o uso que justifica o campo: bipar
      e achar o insumo. Com dois materiais no mesmo código, o leitor vira
      sorteio. Avisa qual já usa em vez de só recusar. */
@@ -205,11 +187,7 @@ export async function saveMaterial(raw: unknown, id?: number) {
   if (id) {
     const [row] = await db.update(materials).set(data).where(eq(materials.id, id)).returning();
     if (!row) return { error: "Material não encontrado", status: 404 } satisfies StockError;
-    /* Custo mudou → preço dos produtos que usam este material é
-       refeito na hora (v3.68.14). Sem isso o PDV vendia pelo preço
-       de ontem mesmo depois do insumo encarecer. */
-    const recalculados = await recalcProductsUsingMaterial(id);
-    return { ok: true as const, row, recalculados };
+    return { ok: true as const, row };
   }
   const [row] = await db.insert(materials).values(data).returning();
   return { ok: true as const, row };

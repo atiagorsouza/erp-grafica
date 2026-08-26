@@ -207,16 +207,8 @@ export async function getQuotesPage(opcoes: {
   const filtro = opcoes.filtro || "all";
 
   const buscaSql = condicaoBuscaOrcamento(busca);
-  /* "ativos" é o filtro padrão desde a v3.68.10: a base acumulava
-     dezenas de rascunhos de teste e orçamentos expirados — "fantasmas"
-     que entopem a lista sem valor nenhum para o balcão. Ativo é o que
-     está na rua (enviado) ou fechado e ainda relevante (aprovado). */
   const where =
-    filtro === "all"
-      ? buscaSql
-      : filtro === "ativos"
-        ? sql`${buscaSql} AND ${quotes.status}::text IN ('enviado','aprovado')`
-        : sql`${buscaSql} AND ${quotes.status}::text = ${filtro}`;
+    filtro === "all" ? buscaSql : sql`${buscaSql} AND ${quotes.status}::text = ${filtro}`;
 
   const [{ total }] = await db
     .select({ total: sql<number>`count(*)::int` })
@@ -243,7 +235,6 @@ export async function getQuotesPage(opcoes: {
       aprovado: sql<number>`count(*) FILTER (WHERE ${quotes.status}::text = 'aprovado')::int`,
       recusado: sql<number>`count(*) FILTER (WHERE ${quotes.status}::text = 'recusado')::int`,
       expirado: sql<number>`count(*) FILTER (WHERE ${quotes.status}::text = 'expirado')::int`,
-      ativos: sql<number>`count(*) FILTER (WHERE ${quotes.status}::text IN ('enviado','aprovado'))::int`,
       todos: sql<number>`count(*)::int`,
     })
     .from(quotes)

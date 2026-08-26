@@ -183,36 +183,6 @@ export interface FichaChat {
   ltv: number;
   pedidos: PedidoResumo[];
   orcamentosAbertos: number;
-  /* FICHA 360º (25/08): o chat precisa responder "o que esse cliente
-     fez?" sem sair da conversa — balcão, orçamento e cobrança junto
-     com o pedido que já vinha. */
-  vendas: VendaResumo[];
-  orcamentos: OrcamentoResumo[];
-  cobrancas: CobrancaResumo[];
-}
-
-export interface VendaResumo {
-  id: number;
-  numero: string;
-  total: number;
-  pagamento: string | null;
-  criadoEm: string;
-}
-
-export interface OrcamentoResumo {
-  id: number;
-  numero: string;
-  total: number;
-  status: string;
-  criadoEm: string;
-}
-
-export interface CobrancaResumo {
-  id: number;
-  descricao: string;
-  valor: number;
-  status: string;
-  criadoEm: string;
 }
 
 /** Ficha do cliente para o chat: quem é, quanto já comprou e o que
@@ -229,7 +199,7 @@ export async function fichaDoCliente(customerId: number): Promise<FichaChat | nu
   if (!Number.isInteger(id) || id <= 0) return null;
 
   return tolerante(async () => {
-    const [cli, peds, ltv, orc, vendas, ltvVendas, orcLista, cobranca] = await Promise.all([
+    const [cli, peds, ltv, orc] = await Promise.all([
       db.execute<{
         id: number; name: string; type: string | null; document: string | null;
         email: string | null; phone: string | null; whatsapp: string | null;
@@ -252,29 +222,7 @@ export async function fichaDoCliente(customerId: number): Promise<FichaChat | nu
       `),
       db.execute<{ n: string }>(sql`
         SELECT count(*) AS n FROM quotes
-         WHERE customer_id = ${id} AND status = 'enviado'
-      `),
-      db.execute<{
-        id: number; number: string; total: string; payment_method: string | null; created_at: Date;
-      }>(sql`
-        SELECT id, number, total, payment_method, created_at
-          FROM sales WHERE customer_id = ${id} AND status <> 'cancelada'
-         ORDER BY created_at DESC LIMIT 5
-      `),
-      db.execute<{ v: string }>(sql`
-        SELECT COALESCE(SUM(total),0) AS v FROM sales
-         WHERE customer_id = ${id} AND status <> 'cancelada'
-      `),
-      db.execute<{ id: number; number: string; total: string; status: string; created_at: Date }>(sql`
-        SELECT id, number, total, status, created_at
-          FROM quotes
-         WHERE customer_id = ${id} AND status IN ('enviado','aprovado')
-         ORDER BY created_at DESC LIMIT 4
-      `),
-      db.execute<{ id: number; description: string; amount: string; status: string; created_at: Date }>(sql`
-        SELECT id, description, amount, status, created_at
-          FROM payment_links WHERE customer_id = ${id}
-         ORDER BY created_at DESC LIMIT 5
+         WHERE customer_id = ${id} AND status IN ('rascunho','enviado')
       `),
     ]);
 
@@ -291,9 +239,7 @@ export async function fichaDoCliente(customerId: number): Promise<FichaChat | nu
       cidade: c.city || null,
       estado: c.state || null,
       desde: c.created_at ? new Date(c.created_at).toISOString() : null,
-      /* LTV completo: pedido (produção) + venda de balcão. Antes só
-         pedido — cliente fiel do balcão aparecia como "nunca comprou". */
-      ltv: Number(ltv.rows?.[0]?.v || 0) + Number(ltvVendas.rows?.[0]?.v || 0),
+      ltv: Number(ltv.rows?.[0]?.v || 0),
       orcamentosAbertos: Number(orc.rows?.[0]?.n || 0),
       pedidos: (peds.rows || []).map((p) => ({
         id: Number(p.id),
@@ -304,75 +250,8 @@ export async function fichaDoCliente(customerId: number): Promise<FichaChat | nu
         entrega: p.due_date || null,
         criadoEm: new Date(p.created_at).toISOString(),
       })),
-      vendas: (vendas.rows || []).map((v) => ({
-        id: Number(v.id),
-        numero: String(v.number || ""),
-        total: Number(v.total || 0),
-        pagamento: v.payment_method || null,
-        criadoEm: new Date(v.created_at).toISOString(),
-      })),
-      orcamentos: (orcLista.rows || []).map((o) => ({
-        id: Number(o.id),
-        numero: String(o.number || ""),
-        total: Number(o.total || 0),
-        status: String(o.status || ""),
-        criadoEm: new Date(o.created_at).toISOString(),
-      })),
-      cobrancas: (cobranca.rows || []).map((k) => ({
-        id: Number(k.id),
-        descricao: String(k.description || ""),
-        valor: Number(k.amount || 0),
-        status: String(k.status || ""),
-        criadoEm: new Date(k.created_at).toISOString(),
-      })),
     };
   }, null);
-}
-
-/* ── CADASTRO DIRETO DO CHAT (ficha 360º) ──────────────────────────
-   Conversa "sem cadastro": o operador cadastra sem sair do WhatsApp.
-   Nome vem pré-preenchido do nome da conversa; telefone é o E164 que
-   já identifica a conversa. Se o cliente JÁ existe (telefone igual,
-   máscara diferente), não duplica — só vincula a conversa a ele. */
-export async function cadastrarDoChat(
-  rawNome: string,
-  phoneE164: string
-): Promise<{ ok: true; customerId: number; criado: boolean } | { error: string; status: number }> {
-  const nome = String(rawNome || "").trim();
-  const fone = String(phoneE164 || "").replace(/\D+/g, "");
-  if (nome.length < 2) return { error: "Informe o nome do cliente", status: 422 };
-  if (fone.length < 10 || fone.length > 15) return { error: "Telefone inválido", status: 422 };
-
-  const variantes = fone.startsWith("55") && fone.length >= 12 ? [fone, fone.slice(2)] : [fone];
-
-  /* drizzle expande array puro como tupla ($1,$2), que quebra o
-     ANY(::text[]) — sql.join emite uma lista de parâmetros de verdade. */
-  const existente = await db.execute<{ id: number }>(sql`
-    SELECT id FROM customers
-     WHERE regexp_replace(coalesce(whatsapp, phone, ''), '\\D', '', 'g')
-       IN (${sql.join(variantes.map((v) => sql`${v}`), sql`, `)})
-     LIMIT 1
-  `);
-  let customerId = Number(existente.rows?.[0]?.id || 0);
-  let criado = false;
-
-  if (!customerId) {
-    const ins = await db.execute<{ id: number }>(sql`
-      INSERT INTO customers (name, phone, whatsapp, type)
-      VALUES (${nome}, ${fone}, ${fone}, 'pf')
-      RETURNING id
-    `);
-    customerId = Number(ins.rows?.[0]?.id || 0);
-    criado = true;
-  }
-  if (!customerId) return { error: "Não foi possível cadastrar o cliente", status: 500 };
-
-  await db.execute(sql`
-    UPDATE whatsapp_conversas SET customer_id = ${customerId}
-     WHERE phone_e164 = ${fone} AND coalesce(customer_id, 0) <> ${customerId}
-  `);
-
-  return { ok: true as const, customerId, criado };
 }
 
 /** Quantas conversas esperam resposta — para o badge do menu. */
