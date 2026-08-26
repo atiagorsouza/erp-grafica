@@ -1,0 +1,19 @@
+--- src/app/api/portal/route.ts
++++ src/app/api/portal/route.ts
+@@ -252,6 +263,16 @@
+     porProduto.set(f.productId, lista);
+   }
+ 
++  /* ── GALERIA (v3.69.2): quantas fotos cada produto tem. A foto em
++   * si NÃO vem no catálogo (peso) — o portal busca em
++   * /api/portal/foto/:id/:n com cache de um dia. Capa legada conta
++   * como foto 1 para quem cadastrou antes da galeria. */
++  await garantirTabelas();
++  const { rows: fotosRows } = await pool.query(
++    `SELECT product_id, count(*)::int AS n FROM product_images GROUP BY product_id`
++  );
++  const fotosPorId = new Map<number, number>(fotosRows.map((r: { product_id: number; n: number }) => [r.product_id, Number(r.n)]));
++
+   /* ══ Verdade única na fronteira (3.69.1) ════════════════════════
+    * O banco guarda DOIS preços por produto: `finalPrice` (recalculado
+    * pelo motor a cada save) e as faixas (digitadas à mão) — e nada

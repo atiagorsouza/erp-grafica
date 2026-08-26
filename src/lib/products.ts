@@ -13,6 +13,7 @@ import {
   productFinishings,
   productMaterials,
   productPriceTiers,
+  productImages,
   products,
   quoteItems,
   services,
@@ -93,6 +94,10 @@ const productSchema = z.object({
   finishings: z.array(componentSchema).optional().default([]),
   materials: z.array(componentSchema).optional().default([]),
   /* faixas de preço por quantidade (v3.34.0) — "mínimo 50, depois 100..." */
+  /* GALERIA (v3.69.2): até 3 fotos em data URI — a 1ª é a capa do
+   * card no portal. Redimensionadas no cliente (canvas, ~1000px),
+   * então cada uma gira em torno de 100–250 KB. */
+  fotos: z.array(z.string().min(30).max(1_500_000)).max(3).optional(),
   priceTiers: z
     .array(
       z.object({
@@ -254,6 +259,21 @@ async function buildCalculation(data: ProductPayload) {
   };
 }
 
+/* Fotos da galeria: substituição total, como as faixas — simples e
+ * idempotente. A posição é a ordem do array (1..3). Sem foto enviada
+ * (campo ausente) NÃO apaga: preserva quem salvou sem mexer na
+ * galeria (fluxos internos como reprice não enviam `fotos`). */
+async function syncFotos(tx: Tx, productId: number, data: ProductPayload) {
+  if (!Array.isArray(data.fotos)) return;
+  await tx.delete(productImages).where(eq(productImages.productId, productId));
+  const limpas = (data.fotos as string[])
+    .filter((f) => typeof f === "string" && f.startsWith("data:image"))
+    .slice(0, 3);
+  for (let i = 0; i < limpas.length; i++) {
+    await tx.insert(productImages).values({ productId, position: i + 1, dataUri: limpas[i] });
+  }
+}
+
 async function syncComponents(tx: Tx, productId: number, data: ProductPayload) {
   await tx.delete(productFinishings).where(eq(productFinishings.productId, productId));
   await tx.delete(productMaterials).where(eq(productMaterials.productId, productId));
@@ -379,6 +399,7 @@ export async function createProduct(raw: unknown) {
     const sku = data.sku || genSku(created.name, created.id);
     const [updated] = await tx.update(products).set({ sku }).where(eq(products.id, created.id)).returning();
     await syncComponents(tx, created.id, data);
+    await syncFotos(tx, created.id, data);
     if (data.trackStock && data.stock > 0) {
       await tx.insert(stockMovements).values({
         kind: "entrada",
@@ -413,6 +434,7 @@ export async function updateProduct(id: number, raw: unknown) {
   const row = await db.transaction(async (tx) => {
     const [updated] = await tx.update(products).set(baseProductData(data, calc) as never).where(eq(products.id, id)).returning();
     await syncComponents(tx, id, data);
+    await syncFotos(tx, id, data);
     const delta = round2(data.stock - previousStock);
     if (data.trackStock && Math.abs(delta) > 0.0001) {
       await tx.insert(stockMovements).values({

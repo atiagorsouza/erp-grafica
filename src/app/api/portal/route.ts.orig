@@ -126,17 +126,6 @@ let tabelasProntas: Promise<void> | null = null;
 function garantirTabelas(): Promise<void> {
   tabelasProntas ??= (async () => {
     await pool.query(`
-      CREATE TABLE IF NOT EXISTS product_images (
-        id SERIAL PRIMARY KEY,
-        product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
-        position INTEGER NOT NULL DEFAULT 1,
-        data_uri TEXT NOT NULL,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-      )`);
-    await pool.query(
-      `CREATE UNIQUE INDEX IF NOT EXISTS product_images_pos_idx ON product_images (product_id, position)`
-    );
-    await pool.query(`
       CREATE TABLE IF NOT EXISTS portal_codigos (
         id SERIAL PRIMARY KEY,
         fone TEXT NOT NULL,
@@ -269,7 +258,6 @@ export async function GET(req: Request) {
         descricao: p.description ?? undefined,
         preco: faixa1 ? faixa1.preco : base,
         unidade: p.saleUnitLabel ?? undefined,
-        fotos: fotosPorId.get(p.id) ?? 0,
         faixas: comAncora,
       };
     })
@@ -277,7 +265,7 @@ export async function GET(req: Request) {
 
   return Response.json({
     module: "customer-portal",
-    portal: "3.69.2",
+    portal: "3.69.1",
     catalog,
   });
 }
