@@ -230,7 +230,7 @@ export async function GET(req: Request) {
     .from(productPriceTiers)
     .orderBy(asc(productPriceTiers.productId), asc(productPriceTiers.minQuantity));
 
-  const porProduto = new Map<number, unknown[]>();
+  const porProduto = new Map<number, { min: number; preco: number; label?: string }[]>();
   for (const f of faixas) {
     const lista = porProduto.get(f.productId) ?? [];
     lista.push({
@@ -241,21 +241,31 @@ export async function GET(req: Request) {
     porProduto.set(f.productId, lista);
   }
 
-  const catalog = linhas.map((p) => ({
-    id: p.id,
-    nome: p.name,
-    sku: p.sku ?? undefined,
-    categoriaId: p.categoryId ?? undefined,
-    categoria: p.category ?? undefined,
-    descricao: p.description ?? undefined,
-    preco: Number(p.finalPrice ?? 0),
-    unidade: p.saleUnitLabel ?? undefined,
-    faixas: porProduto.get(p.id) ?? [],
-  }));
+  const catalog = linhas
+    .map((p) => {
+      const base = Number(p.finalPrice ?? 0);
+      const faixasDe = [...(porProduto.get(p.id) ?? [])].sort((a, b) => a.min - b.min);
+      const faixa1 = faixasDe.find((f) => f.min === 1);
+      const comAncora = faixa1
+        ? faixasDe
+        : [...(base > 0 ? [{ min: 1, preco: base, label: "unidade" }] : []), ...faixasDe];
+      return {
+        id: p.id,
+        nome: p.name,
+        sku: p.sku ?? undefined,
+        categoriaId: p.categoryId ?? undefined,
+        categoria: p.category ?? undefined,
+        descricao: p.description ?? undefined,
+        preco: faixa1 ? faixa1.preco : base,
+        unidade: p.saleUnitLabel ?? undefined,
+        faixas: comAncora,
+      };
+    })
+    .filter((p) => Number(p.preco) > 0);
 
   return Response.json({
     module: "customer-portal",
-    portal: "3.69.0",
+    portal: "3.69.1",
     catalog,
   });
 }
@@ -386,21 +396,52 @@ export async function POST(req: Request) {
       const ids = [...new Set(itens.map((i) => Number((i as Record<string, unknown>).produtoId)).filter(Number.isFinite))];
       const prods = ids.length
         ? await db
-            .select({ id: products.id, name: products.name, finalPrice: products.finalPrice })
+            .select({ id: products.id, name: products.name, finalPrice: products.finalPrice, active: products.active })
             .from(products)
             .where(inArray(products.id, ids))
         : [];
       const porId = new Map(prods.map((p) => [p.id, p]));
 
+      const faixasPedido = ids.length
+        ? await db
+            .select({
+              productId: productPriceTiers.productId,
+              minQuantity: productPriceTiers.minQuantity,
+              unitPrice: productPriceTiers.unitPrice,
+            })
+            .from(productPriceTiers)
+            .where(inArray(productPriceTiers.productId, ids))
+            .orderBy(asc(productPriceTiers.minQuantity))
+        : [];
+      const faixasPorId = new Map<number, { min: number; preco: number }[]>();
+      for (const f of faixasPedido) {
+        const lista = faixasPorId.get(f.productId) ?? [];
+        lista.push({ min: Number(f.minQuantity), preco: Number(f.unitPrice) });
+        faixasPorId.set(f.productId, lista);
+      }
+      const precoDoServidor = (produtoId: number, qtd: number, finalPrice: unknown): number => {
+        const base = Number(finalPrice ?? 0);
+        const fs = faixasPorId.get(produtoId) ?? [];
+        const faixa1 = fs.find((f) => f.min === 1);
+        let unit = faixa1 ? faixa1.preco : base;
+        for (const f of fs) if (qtd >= f.min && f.preco > 0) unit = f.preco;
+        return unit > 0 ? unit : base;
+      };
+
       type ItemRec = { descricao: string; produtoId?: number; qtd: number; unit: number; total: number };
       const limpos: ItemRec[] = [];
+      const divergencias: string[] = [];
       for (const raw of itens) {
         const it = (raw ?? {}) as Record<string, unknown>;
         const prod = porId.get(Number(it.produtoId));
         const qtd = Number(it.quantidade);
-        if (!prod || !Number.isFinite(qtd) || qtd <= 0) continue; // item sem produto válido não entra
+        if (!prod || !prod.active || !Number.isFinite(qtd) || qtd <= 0) continue;
         const detalhe = typeof it.detalhe === "string" ? it.detalhe.trim().slice(0, 500) : "";
-        const unit = Number.isFinite(Number(it.precoRef)) ? Number(it.precoRef) : Number(prod.finalPrice ?? 0);
+        const unit = precoDoServidor(prod.id, qtd, prod.finalPrice);
+        const refCliente = Number(it.precoRef);
+        if (Number.isFinite(refCliente) && refCliente > 0 && Math.abs(refCliente - unit) > 0.01) {
+          divergencias.push(`${prod.name}: site R$ ${refCliente.toFixed(2)} × servidor R$ ${unit.toFixed(2)}`);
+        }
         limpos.push({
           descricao: detalhe ? `${prod.name} — ${detalhe}` : prod.name,
           produtoId: prod.id,
@@ -424,6 +465,9 @@ export async function POST(req: Request) {
         if (linha) notas.push(`Entrega: ${linha}`);
       }
       if (obs) notas.push(`Obs.: ${obs}`);
+      if (divergencias.length) {
+        notas.push(`[!] Preço do site divergiu do cadastro — usado o preço do SERVIDOR: ${divergencias.join(" · ")}`);
+      }
       notas.push("[!] Preços de REFERÊNCIA do portal — confirmar antes de enviar ao cliente.");
 
       const numero = await nextDocumentNumber("quote");

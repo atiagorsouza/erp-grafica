@@ -899,9 +899,38 @@ export function ProductsClient({
             <Bloco
               titulo="Preço por quantidade"
               icone="tag"
-              descricao="Para quem vende em lote: mínimo 50, depois 100, 250… Vale a maior faixa que o pedido alcançar. Sem faixas, usa o preço calculado acima."
+              descricao="Vale a maior faixa que o pedido alcançar. Sem faixas, usa o preço calculado ao lado. A faixa de 1 unidade deve BATER com o preço final — se divergir, o aviso amarelo aparece (era a causa do 'preço errado' no site)."
             >
               <div className="space-y-2">
+                {(() => {
+                  if (!liveCalc || liveCalc.finalPrice <= 0) return null;
+                  const alvo = liveCalc.finalPrice;
+                  const f1 = tiers.find((t) => num(t.minQuantity) === 1);
+                  if (!f1) {
+                    if (tiers.length === 0) return null;
+                    return (
+                      <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-[11.5px] text-amber-900">
+                        Nenhuma faixa começa em 1 unidade — o site vai ancorar o card no preço calculado ({formatMoney(alvo)}). Se a intenção é vender avulso por outro valor, crie a faixa "a partir de 1".
+                      </div>
+                    );
+                  }
+                  const pu = num(f1.unitPrice);
+                  if (Math.abs(pu - alvo) <= 0.01) return null;
+                  return (
+                    <div className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-[11.5px] text-amber-900">
+                      <span>
+                        Faixa de 1 unidade (<strong>{formatMoney(pu)}</strong>) não bate com o preço calculado (<strong>{formatMoney(alvo)}</strong>) — o site cobra pela faixa. Decida qual é o verdadeiro:
+                      </span>
+                      <Button
+                        size="xs"
+                        variant="outline"
+                        onClick={() => setTiers((arr) => arr.map((t) => (num(t.minQuantity) === 1 ? { ...t, unitPrice: String(Math.round(alvo * 100) / 100) } : t)))}
+                      >
+                        Usar {formatMoney(alvo)} na faixa 1
+                      </Button>
+                    </div>
+                  );
+                })()}
                 {tiers.map((t, i) => {
                   const q = num(t.minQuantity);
                   const pu = num(t.unitPrice);
@@ -1138,6 +1167,11 @@ export function ProductsClient({
                   )}
                   {liveCalc.valid === false && (
                     <p className="mt-1.5 rounded-md bg-red-500/15 px-2.5 py-1.5 text-[10.5px] text-red-300">{liveCalc.error}</p>
+                  )}
+                  {liveCalc.baseCost === 0 && liveCalc.finalPrice === 0 && (
+                    <p className="mt-1.5 rounded-md bg-amber-500/15 px-2.5 py-1.5 text-[10.5px] text-amber-300">
+                      Custo base R$ 0,00 — sem impressão, material ou serviço configurado o preço sai ZERADO ("não está precificando"). Preencha ao lado antes de vender.
+                    </p>
                   )}
                 </div>
               )}
