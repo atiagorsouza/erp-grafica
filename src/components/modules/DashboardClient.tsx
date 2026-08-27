@@ -11,8 +11,8 @@ type Props = {
   kpis: {
     revenue14: number;
     todayRevenue: number;
-    avgTicket: number;
-    totalSales: number;
+    avgTicket14: number;
+    sales14: number;
     pendingReceivable: number;
     customers: number;
     activeCustomers: number;
@@ -22,14 +22,13 @@ type Props = {
     inProduction: number;
     lowStockCount: number;
     pipelineValue: number;
-    totalRevenue: number;
   };
   series14: { label: string; value: number; hint?: string }[];
   production: { label: string; value: number }[];
   pipeline: { label: string; value: number }[];
   fleet: { id: number; name: string; brand: string | null; status: string; category: string; color: string; icon: string }[];
   lowStock: { id: number; name: string; stock: number; min: number; unit: string }[];
-  recentQuotes: { id: number; number: string; status: string; total: number; createdAt: string }[];
+  recentQuotes: { id: number; number: string; status: string; total: number; createdAtLabel: string }[];
   birthdays?: { id: number; name: string; day: string; isToday: boolean; contact: string | null }[];
   recentOrders: { id: number; number: string; status: string; productionStatus: string; total: number; dueDate: string | null; priority: string }[];
   agendaToday: { id: number; title: string; startTime: string; estimatedMinutes: number; status: string; printer?: string }[];
@@ -169,12 +168,51 @@ export function DashboardClient(p: Props) {
         </div>
       </div>
 
+      {/* Faixa operacional — números que a página já calculava e não
+          exibia em lugar nenhum. A auditoria de 24/08 pedia exatamente
+          isto: alerta de estoque crítico visível na Visão Geral. */}
+      <div className="reveal mb-4 flex flex-wrap items-stretch gap-2">
+        {[
+          { href: "/pedidos", icon: "layers" as IconName, label: "Em produção", value: p.kpis.inProduction, tone: p.kpis.inProduction > 0 ? "amber" : "muted" },
+          { href: "/estoque", icon: "boxes" as IconName, label: "Estoque crítico", value: p.kpis.lowStockCount, tone: p.kpis.lowStockCount > 0 ? "red" : "muted" },
+          { href: "/clientes", icon: "users" as IconName, label: "Clientes ativos", value: p.kpis.activeCustomers, tone: "cyan" },
+          { href: "/produtos", icon: "tag" as IconName, label: "No catálogo", value: p.kpis.products, tone: "muted" },
+        ].map((chip) => (
+          <Link
+            key={chip.href}
+            href={chip.href}
+            className={cn(
+              "flex min-h-11 flex-1 items-center gap-2.5 rounded-lg border px-3 py-1.5 transition-colors sm:flex-none sm:border-paper-200 sm:bg-paper-50 sm:shadow-card sm:hover:border-ink-300",
+              chip.tone === "red" && "border-red-200 bg-red-50/70 sm:border-red-200 sm:bg-red-50/70",
+              chip.tone === "amber" && "border-amber-200 bg-amber-50/70 sm:border-amber-200 sm:bg-amber-50/70",
+            )}
+          >
+            <Icon
+              name={chip.icon}
+              size={15}
+              className={
+                chip.tone === "red" ? "text-red-600" : chip.tone === "amber" ? "text-amber-600" : chip.tone === "cyan" ? "text-proc-c-strong" : "text-ink-400"
+              }
+            />
+            <span className="min-w-0 truncate text-[11.5px] font-medium text-ink-600">{chip.label}</span>
+            <span
+              className={cn(
+                "ml-auto font-mono text-[13px] font-semibold tnum sm:ml-1",
+                chip.tone === "red" ? "text-red-700" : chip.tone === "amber" ? "text-amber-700" : "text-ink-900",
+              )}
+            >
+              {chip.value}
+            </span>
+          </Link>
+        ))}
+      </div>
+
       {/* KPIs */}
       <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 xl:grid-cols-4">
         <Kpi
           label="Faturamento · 14 dias"
           value={formatMoney(p.kpis.revenue14)}
-          sub={`${p.kpis.totalSales} vendas no período`}
+          sub={`${p.kpis.sales14} vendas em 14 dias`}
           icon="chart"
           tone="cyan"
           spark={sparkVals}
@@ -183,7 +221,7 @@ export function DashboardClient(p: Props) {
         <Kpi
           label="Hoje no caixa"
           value={formatMoney(p.kpis.todayRevenue)}
-          sub={`Ticket médio ${formatMoney(p.kpis.avgTicket)}`}
+          sub={`Ticket médio · 14d ${formatMoney(p.kpis.avgTicket14)}`}
           icon="wallet"
           tone="green"
           href="/financeiro"
@@ -385,6 +423,15 @@ export function DashboardClient(p: Props) {
                 ))}
               </div>
             )}
+            {p.kpis.lowStockCount > p.lowStock.length && (
+              <Link
+                href="/estoque"
+                className="mt-3 flex items-center justify-between rounded-lg bg-red-50/70 px-3 py-2 text-[11.5px] font-semibold text-red-700 transition-colors hover:bg-red-100/70"
+              >
+                + {p.kpis.lowStockCount - p.lowStock.length} outro(s) material(is) no crítico
+                <Icon name="arrow-right" size={12} />
+              </Link>
+            )}
           </Card>
 
           {/* Aniversariantes: a data já era coletada e só existia na
@@ -428,9 +475,7 @@ export function DashboardClient(p: Props) {
                 >
                   <span className="min-w-0">
                     <span className="block font-mono text-[11.5px] font-semibold text-ink-800">{q.number}</span>
-                    <span className="block text-[10.5px] text-ink-400">
-                      {new Date(q.createdAt).toLocaleDateString("pt-BR")}
-                    </span>
+                    <span className="block text-[10.5px] text-ink-400">{q.createdAtLabel}</span>
                   </span>
                   <span className="flex items-center gap-2.5">
                     <span className="font-mono text-[12px] font-semibold text-ink-900 tnum">{formatMoney(q.total)}</span>
@@ -501,3 +546,4 @@ export function DashboardClient(p: Props) {
     </div>
   );
 }
+

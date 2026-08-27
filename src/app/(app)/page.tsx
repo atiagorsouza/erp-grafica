@@ -64,11 +64,16 @@ export default async function DashboardPage() {
        `created_at` é `timestamp without time zone` guardando UTC, então
        é preciso declarar UTC ANTES de converter — sem isso a venda da
        noite pula para o dia seguinte, que é justamente o bug corrigido
-       na v3.11.0. */
+       na v3.11.0.
+
+       v3.70.2: veio também o COUNT por dia — o cartão "Faturamento · 14
+       dias" dizia "N vendas no período" com N de TODO o histórico
+       (o mesmo tipo de incoerência que a v3.62.0 corrigiu no valor). */
     db
       .select({
         dia: sql<string>`(${sales.createdAt} AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo')::date::text`,
         total: sql<number>`COALESCE(SUM(${sales.total}), 0)::float8`,
+        n: sql<number>`count(*)::int`,
       })
       .from(sales)
       .where(
@@ -184,9 +189,10 @@ export default async function DashboardPage() {
   const todayRevenue = porDia.get(hojeLoja) || 0;
 
   /* ── KPIs ── */
-  const totalRevenue = Number(agregVendas[0]?.total ?? 0);
-  const totalVendasValidas = Number(agregVendas[0]?.n ?? 0);
-  const avgTicket = totalVendasValidas ? totalRevenue / totalVendasValidas : 0;
+  /* Ticket médio do PERÍODO de 14 dias — o do cartão "Hoje no caixa"
+     dizia "Ticket médio R$ X" com X do histórico inteiro. */
+  const vendas14 = serieVendas.reduce((s, r) => s + Number(r.n || 0), 0);
+  const avgTicket14 = vendas14 ? revenue14 / vendas14 : 0;
   const pendingReceivable = Number(agregTx[0]?.aReceber ?? 0);
   const openQuotes = Number(agregOrcamentos[0]?.abertos ?? 0);
   const approvedQuotes = Number(agregOrcamentos[0]?.aprovados ?? 0);
@@ -217,13 +223,14 @@ export default async function DashboardPage() {
       kpis={{
         revenue14,
         todayRevenue,
-        avgTicket,
+        avgTicket14,
         /* Correção de coerência: o cartão mostrava `salesRows.length`,
            ou seja TODAS as vendas, canceladas inclusive — logo abaixo de
            um faturamento que as exclui. "25 vendas" com "R$ 549,78" não
            fechavam entre si. Agora conta só as válidas, na mesma regra
-           do valor exibido ao lado. */
-        totalSales: totalVendasValidas,
+           do valor exibido ao lado. (v3.70.2: e apenas as do período
+           de 14 dias, acompanhando o valor do cartão.) */
+        sales14: vendas14,
         pendingReceivable,
         customers: totalCustomers,
         activeCustomers,
@@ -233,7 +240,6 @@ export default async function DashboardPage() {
         inProduction,
         lowStockCount,
         pipelineValue,
-        totalRevenue,
       }}
       series14={series14}
       production={Object.entries(prodStatus).map(([k, v]) => ({ label: k, value: v }))}
@@ -260,7 +266,14 @@ export default async function DashboardPage() {
         number: q.number,
         status: q.status,
         total: Number(q.total || 0),
-        createdAt: q.createdAt.toISOString(),
+        /* v3.70.2 — data formatada AQUI, no fuso da loja. Antes ia ISO
+           e o navegador formatava no fuso dele: orçamento criado às
+           21h aparecia como "dia seguinte". Classe de bug da v3.11.0. */
+        createdAtLabel: new Intl.DateTimeFormat("pt-BR", {
+          day: "2-digit",
+          month: "2-digit",
+          timeZone: "America/Sao_Paulo",
+        }).format(q.createdAt),
       }))}
       recentOrders={pedidosRecentes.map((o) => ({
         id: o.id,
@@ -282,3 +295,4 @@ export default async function DashboardPage() {
     />
   );
 }
+

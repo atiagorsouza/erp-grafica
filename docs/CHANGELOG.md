@@ -1,3 +1,16 @@
+## [3.72.2] — 2026-08-27
+
+Reconciliação da sessão do protocolo do agente: Visão Geral + blindagens de deploy comprovadas no incidente de hoje.
+
+- **`update.sh` acha o pg_dump compatível sozinho** — major do servidor via `SHOW server_version_num`, varre PATH + Debian + **aPanel (`/www/server/pgsql`)**; fim do `export PATH` manual
+- **`update.sh` carimba `settings.app_version`** no fim (pendência #1 do incidente 25/08; evita falso-erro no smoke 11.8)
+- **Bug do validador do backup JSON**: `require('./<absoluto>')` → `.//www/...` → "Cannot find module" → update abortava com o dump gravado (derrubou o update de hoje). Caminho agora por `argv`
+- **Visão Geral**: KPIs da janela de 14 dias coerentes, ticket "· 14d", data no fuso da loja formatada no servidor, chips operacionais (Em produção / Estoque crítico / Clientes ativos / No catálogo), estoque "+N", sparkline fluida, tooltip no toque
+- **Docs**: topologia real (PG 18 aPanel; cluster 17 local não é do ERP), MANUAL §1.1 corrigido + receita Docker, lições do deploy 27/08 (processo zumbi na porta, `pm2 save`, timeout do update)
+
+---
+
+
 ## [3.68.5] — 2026-08-25
 
 - PDV cobra por link na hora; WhatsApp com numero do cliente
