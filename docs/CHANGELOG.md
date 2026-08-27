@@ -10,7 +10,18 @@
 
 - 3D: filamento e material do estoque, impressora cobra so horas
 
-## [3.70.0] — 2026-08-27
+## [3.70.1] — 2026-08-27
+
+Protocolo de operação para o agente do servidor + fluxo do portal Hostinger.
+
+- **`AGENTE-SERVIDOR.md`** (raiz): manual permanente para o agente que mantém a produção — rotina de verificação, fluxo de update (backup → `update.sh` → restart → smoke → carimbo), as regras que não se quebram (cada uma nasceu de um incidente), rollback, política de branch (`main` apenas) e o fluxo separado do portal
+- **Boletins `UPDATES/<versão>.md`**: cada release passa a trazer um boletim com o que mudou, o que o agente faz, como valida e como volta atrás (criados os da 3.70.0 e 3.70.1)
+- **`scripts/agente-verificar.mjs`**: comando somente-leitura que compara banco × repositório e lista boletins pendentes na ordem, com os próximos passos
+- **Portal Hostinger (convenção)**: `portal-hostinger/` como casa do portal (ainda sem código — plano em `docs/PLANO-PORTAL-CLIENTE.md`), `scripts/empacotar-portal.sh` gerando `release/portal-v<versão>-<data>.zip` com LEIA-ME de implantação
+
+---
+
+
 
 Blindagem das tabelas do WhatsApp, árvore de categorias v2 no seed e o smoke 100% verde de novo (estava falhando em 4 pontos).
 

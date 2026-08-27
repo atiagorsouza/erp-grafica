@@ -24,10 +24,11 @@ instalar. Acabei de gerar, está em `release/`.
 
 | | |
 |---|---|
-| **Versão no repositório** | **3.70.0** — Blindagem e Árvore v2 (smoke 308/308 ✔ no sandbox) |
-| Rodando em | servidor da gráfica (túnel `app.vtdigital.site`) · em 3.68.5 até subir a 3.70.0 |
+| **Versão no repositório** | **3.70.1** — Protocolo do agente do servidor (smoke 308/308 ✔ no sandbox) |
+| Rodando em | servidor da gráfica (túnel `app.vtdigital.site`) · em 3.68.5 até subir a 3.70.x |
+| **Deploy** | **agente do servidor segue `AGENTE-SERVIDOR.md`** (raiz): `node scripts/agente-verificar.mjs` → ler `UPDATES/*.md` pendentes → `update.sh` → restart → smoke. Boletins existentes: 3.70.0 e 3.70.1 |
+| Portal cliente | convenção criada: código em `portal-hostinger/` (vazio ainda), zip para Hostinger via `scripts/empacotar-portal.sh` — fluxo SEPARADO do ERP (§8 do manual do agente) |
 | Testes | `e2e:smoke` completo ✔ · typecheck ✔ · lint 15 (base pré-existente, nenhum em arquivo novo) |
-| O que a 3.70.0 entrega | tabelas do WhatsApp no schema Drizzle (fim do risco de DROP), seed com árvore v2 (10 mestres + subs), contador de orçamento corrigido + retry 23505, `check-version` sem psql e barulhento, `install.sh` aplica logo e carimba versão |
 | Sandbox/preview | PostgreSQL embutido via npm (`@embedded-postgres/linux-x64`, v18.4) — `bash /home/user/pg.sh setup` |
 
 ### O que a 3.68.2 entregou — cartela, incidente e pagamento
