@@ -368,6 +368,90 @@ export async function getCustomersPage(opcoes: {
   };
 }
 
+/* ─────────────────────────────────────────────────────────────
+   Exportação de clientes (v3.72.1)
+
+   A tela de clientes é paginada no servidor (10 por página), então o
+   navegador nunca tem a carteira inteira — o CSV tem que ser gerado
+   aqui. Reproduz EXATAMENTE os filtros da tela (busca/status/origem)
+   e calcula o LTV no mesmo SELECT, sem paginação.
+
+   Mesma regra de LTV do getCustomersPage: vendas canceladas não entram
+   (`status IS DISTINCT FROM 'cancelada'`).
+   ───────────────────────────────────────────────────────────── */
+export type ClienteExportRow = {
+  tipo: string;
+  nome: string;
+  nome_fantasia: string | null;
+  documento: string | null;
+  email: string | null;
+  telefone: string | null;
+  whatsapp: string | null;
+  cidade: string | null;
+  uf: string | null;
+  status: string;
+  origem: string | null;
+  marketing: boolean;
+  aniversario: string | null;
+  cadastro: string | null;
+  ltv: number;
+};
+
+export async function getClientesParaExport(opcoes: {
+  busca?: string;
+  status?: string;
+  origem?: string;
+} = {}): Promise<ClienteExportRow[]> {
+  const busca = opcoes.busca || "";
+  const status = opcoes.status || "all";
+  const origem = opcoes.origem || "all";
+
+  const partes = [condicaoBuscaCliente(busca)];
+  if (status !== "all") partes.push(sql`${customers.status} = ${status}`);
+  if (origem !== "all") partes.push(sql`coalesce(${customers.origin}, '') = ${origem}`);
+  const where = partes.reduce((acc, p) => sql`${acc} AND ${p}`);
+
+  const ltv = sql`(
+    SELECT COALESCE(SUM(t), 0)::float8 FROM (
+      SELECT COALESCE(total, 0) AS t FROM ${sales}
+       WHERE customer_id = ${customers.id}
+         AND status IS DISTINCT FROM 'cancelada'
+      UNION ALL
+      SELECT COALESCE(total, 0) AS t FROM ${orders}
+       WHERE customer_id = ${customers.id}
+    ) u
+  )`;
+
+  const res = await db
+    .select({
+      tipo: customers.type,
+      nome: customers.name,
+      nome_fantasia: customers.tradeName,
+      documento: customers.document,
+      email: customers.email,
+      telefone: customers.phone,
+      whatsapp: customers.whatsapp,
+      cidade: customers.city,
+      uf: customers.state,
+      status: customers.status,
+      origem: customers.origin,
+      marketing: customers.marketingOptIn,
+      aniversario: customers.birthDate,
+      cadastro: sql<string>`to_char(${customers.createdAt}, 'YYYY-MM-DD')`,
+      ltv: sql<number>`${ltv} AS ltv`,
+    })
+    .from(customers)
+    .where(where)
+    .orderBy(asc(customers.name));
+
+  return res.map((r) => ({
+    ...r,
+    ltv: Number(r.ltv) || 0,
+    aniversario: r.aniversario ?? null,
+    cadastro: r.cadastro ?? null,
+  }));
+}
+
 export async function getCategoriesByModule(
   module: "product" | "material" | "service" | "finishing" | "pricing_table"
 ) {

@@ -25,6 +25,7 @@ import {
 import { Icon } from "@/components/icons";
 import { cn } from "@/lib/format";
 import { PeriodPicker } from "@/components/modules/PeriodPicker";
+import { baixarCsv, tabelaParaCsv } from "@/lib/csv";
 
 type Row = Record<string, unknown>;
 
@@ -139,6 +140,59 @@ export function FinanceClient({
   const current = Math.min(page, pageCount);
   const visible = filtered.slice((current - 1) * PAGE_SIZE, current * PAGE_SIZE);
 
+  /**
+   * Exporta CSV do que está na tela (v3.72.1): os filtros de tipo,
+   * status e busca são aplicados em `filtered` — o CSV respeita o que
+   * o operador está vendo, e traz TODOS os lançamentos do filtro, não
+   * só a página atual. Despesas saem com sinal negativo para o total
+   * fechar no Excel.
+   */
+  function exportCsv() {
+    const STATUS: Record<string, string> = {
+      pendente: "Pendente",
+      pago: "Pago",
+      atrasado: "Atrasado",
+    };
+    const TIPO: Record<string, string> = { receita: "Receita", despesa: "Despesa" };
+
+    const rows = filtered
+      .slice()
+      .sort((a, b) => String(a.dueDate || "").localeCompare(String(b.dueDate || "")))
+      .map((t) => [
+        fmtDate(t.dueDate),
+        fmtDate(t.paidDate),
+        String(t.description || ""),
+        TIPO[String(t.type)] || String(t.type || ""),
+        label(t.category),
+        STATUS[String(t.status)] || String(t.status || ""),
+        String(t.method || ""),
+        ((t.type === "receita" ? 1 : -1) * Number(t.amount || 0)).toFixed(2),
+        t.automatic ? "automático" : "manual",
+        t.archivedAt ? "arquivado" : "",
+        String(t.notes || ""),
+      ]);
+
+    baixarCsv(
+      `financeiro-${period.from}-a-${period.to}`,
+      tabelaParaCsv(
+        [
+          "Vencimento",
+          "Pagamento",
+          "Descrição",
+          "Tipo",
+          "Categoria",
+          "Status",
+          "Método",
+          "Valor",
+          "Origem",
+          "Arquivado",
+          "Observações",
+        ],
+        rows
+      )
+    );
+  }
+
   /** Traduz o erro da API. O handler antigo devolvia o SQL inteiro. */
   function fail(e: unknown, fallback: string) {
     const msg = e instanceof Error ? e.message : "";
@@ -230,7 +284,14 @@ export function FinanceClient({
         title="Financeiro"
         icon="wallet"
         description="Receitas e despesas com baixa rápida. PDV, pedidos, compras e movimentos de caixa lançam aqui automaticamente."
-        actions={<Button icon="plus" onClick={openNew}>Lançamento</Button>}
+        actions={
+          <>
+            <Button variant="ghost" icon="download" onClick={exportCsv} disabled={filtered.length === 0}>
+              CSV
+            </Button>
+            <Button icon="plus" onClick={openNew}>Lançamento</Button>
+          </>
+        }
       />
 
       <PeriodPicker
