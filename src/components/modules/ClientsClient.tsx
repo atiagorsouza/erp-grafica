@@ -445,6 +445,18 @@ export function ClientsClient({ customers, leads, activities, quotes, orders, sa
         description="Pessoa física e jurídica no mesmo lugar, com funil comercial de 6 etapas e histórico 360° de cada conta."
         actions={
           <>
+            {tab === "carteira" && (
+              <a
+                href={`/api/export/clientes?q=${encodeURIComponent(paginacao.busca)}&status=${encodeURIComponent(
+                  paginacao.status
+                )}&origem=${encodeURIComponent(paginacao.origem)}`}
+                className="focus-ring inline-flex shrink-0 cursor-pointer items-center justify-center gap-2 rounded-lg border border-paper-200 bg-paper-50 px-4 text-[13px] font-semibold text-ink-600 transition-all duration-150 hover:border-ink-300 hover:text-ink-900"
+                title={`Exporta os ${paginacao.totalCarteira} clientes da carteira (respeitando busca e filtros) como CSV`}
+              >
+                <Icon name="download" size={16} />
+                CSV
+              </a>
+            )}
             <Button variant="outline" icon="download" onClick={() => setImportOpen(true)}>
               Importar PDF
             </Button>

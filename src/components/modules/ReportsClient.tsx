@@ -5,6 +5,7 @@ import { Badge, Button, Card, PageHeader } from "@/components/ui";
 import { formatMoney } from "@/lib/pricing";
 import { cn } from "@/lib/format";
 import { PeriodPicker } from "@/components/modules/PeriodPicker";
+import { baixarCsv, toCsv } from "@/lib/csv";
 
 type Totals = {
   salesCount: number;
@@ -86,11 +87,15 @@ export function ReportsClient({
   const marginColors = (v: number) =>
     v < 0 ? "#dc2626" : v >= 45 ? "#10b981" : v >= 30 ? "var(--color-proc-c)" : v >= 20 ? "#d97706" : "#dc2626";
 
-  /** Exportação CSV com BOM, para o Excel abrir com acento correto. */
+  /**
+   * Exportação CSV do relatório gerencial (v3.72.1 usa o utilitário
+   * compartilhado `lib/csv` — BOM e escaping não ficam mais à mão em
+   * cada tela).
+   */
   function exportCsv() {
-    const rows: string[][] = [
+    const rows: (string[] | null)[] = [
       ["VTDIGITAL — Relatório", periodLabel],
-      [],
+      null,
       ["Indicador", "Valor"],
       ["Receita total (PDV + Pedidos)", totals.revenue.toFixed(2)],
       ["Vendas PDV (qtd)", String(totals.salesCount)],
@@ -102,7 +107,7 @@ export function ReportsClient({
       ["Conversão (%)", String(totals.conversion)],
       ["Vendas canceladas (qtd)", String(totals.canceledCount)],
       ["Vendas canceladas (R$)", totals.canceledTotal.toFixed(2)],
-      [],
+      null,
       ["Resultado do período", "Valor"],
       ["Receita bruta", dre.grossRevenue.toFixed(2)],
       ["Recebido", dre.summary.received.toFixed(2)],
@@ -113,33 +118,24 @@ export function ReportsClient({
       ["Resultado (competência)", dre.result.toFixed(2)],
       ["Saldo em caixa (realizado)", dre.cashResult.toFixed(2)],
       ["Margem (%)", dre.margin.toFixed(2)],
-      [],
+      null,
       ["Receitas por categoria", "Valor", "Lançamentos"],
       ...dre.revenues.map((r) => [r.label, r.total.toFixed(2), String(r.count)]),
-      [],
+      null,
       ["Despesas por categoria", "Valor", "Lançamentos"],
       ...dre.expenses.map((r) => [r.label, r.total.toFixed(2), String(r.count)]),
-      [],
+      null,
       ["Faturamento por mês", "PDV", "Pedidos", "Total"],
       ...months.map((m) => [m.key, m.pdv.toFixed(2), m.orders.toFixed(2), m.value.toFixed(2)]),
-      [],
+      null,
       ["Mix de pagamento", "Valor"],
       ...payments.map((p) => [p.label, p.value.toFixed(2)]),
-      [],
+      null,
       ["Top clientes", "Valor"],
       ...topCustomers.map((c) => [c.label, c.value.toFixed(2)]),
     ];
 
-    const csv = rows
-      .map((r) => r.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(";"))
-      .join("\n");
-    const blob = new Blob([`\ufeff${csv}`], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `printflow-relatorio-${period.from}_a_${period.to}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+    baixarCsv(`relatorio-${period.from}-a-${period.to}`, toCsv(rows));
   }
 
   const resultPositive = dre.result >= 0;
