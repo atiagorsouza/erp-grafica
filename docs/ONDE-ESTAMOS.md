@@ -24,12 +24,12 @@ instalar. Acabei de gerar, está em `release/`.
 
 | | |
 |---|---|
-| **Versão no ar** | **3.68.5** — PDV cobra por link na hora + WhatsApp sabe o número do cliente |
-| Rodando em | servidor da gráfica (túnel `app.vtdigital.site`) · em 3.68.4 até a 3.68.5 subir |
-| Testes | `e2e:smoke` completo ✔ · typecheck ✔ · lint 11 (base) · migração do e-mail testada ao vivo |
-| Observado | `company_email` ganha padrão `contato.vt@` (só se vazio) · `labor_hourly_rate` ficou 0 por escolha do dono · aviso de "password sem suporte visual" = falso alarme da ferramenta do servidor (Painel desenha os 3 segredos com máscara) |
-| Lint | 11 problemas (baseline de sempre, nada novo) |
-| Pacote | `update-3.68.2/` · `printflow-erp-v3.68.2.tar.gz` — `bash scripts/deploy-auto.sh <caminho-do-pacote>` (SEMPRE com caminho) |
+| **Versão no repositório** | **3.70.1** — Protocolo do agente do servidor (smoke 308/308 ✔ no sandbox) |
+| Rodando em | servidor da gráfica (túnel `app.vtdigital.site`) · em 3.68.5 até subir a 3.70.x |
+| **Deploy** | **agente do servidor segue `AGENTE-SERVIDOR.md`** (raiz): `node scripts/agente-verificar.mjs` → ler `UPDATES/*.md` pendentes → `update.sh` → restart → smoke. Boletins existentes: 3.70.0 e 3.70.1 |
+| Portal cliente | convenção criada: código em `portal-hostinger/` (vazio ainda), zip para Hostinger via `scripts/empacotar-portal.sh` — fluxo SEPARADO do ERP (§8 do manual do agente) |
+| Testes | `e2e:smoke` completo ✔ · typecheck ✔ · lint 15 (base pré-existente, nenhum em arquivo novo) |
+| Sandbox/preview | PostgreSQL embutido via npm (`@embedded-postgres/linux-x64`, v18.4) — `bash /home/user/pg.sh setup` |
 
 ### O que a 3.68.2 entregou — cartela, incidente e pagamento
 

@@ -125,6 +125,13 @@ setup_database() {
   node scripts/repair-finance.mjs
   node scripts/repair-shipping.mjs
   node scripts/repair-payments.mjs
+
+  # Identidade e carimbo de versão (v3.69.2): uma instalação do zero
+  # nascia SEM as logos da VTDIGITAL e SEM settings.app_version — o
+  # e2e-smoke reprova as duas coisas (seção 11.995) e a marca só
+  # aparecia depois de alguém subir a logo na mão.
+  node scripts/aplicar-logo.mjs --aplicar
+  node scripts/check-version.mjs
   c_ok "Seed concluído"
 }
 

@@ -10,7 +10,6 @@
  * (reescreve package.json e o banco a partir do VERSION).
  */
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
-import { execFileSync } from "node:child_process";
 import "dotenv/config";
 
 const fix = process.argv.includes("--fix");
@@ -53,41 +52,58 @@ if (existsSync(changelog) && !readFileSync(changelog, "utf8").includes(`## [${ve
 
 /* 4. banco de dados */
 if (process.env.DATABASE_URL) {
+  /* ANTES da v3.69.2 esta etapa chamava o BINÁRIO `psql` e engolia
+     qualquer falha (inclusive psql ausente) em silêncio — o banco
+     ficava sem carimbo e o script ainda dizia "consistente"
+     (fio pendente anotado em ONDE-ESTAMOS.md, 3.68.2).
+
+     Agora usa o MESMO driver `pg` da aplicação: se o DATABASE_URL
+     aponta para um banco que o app alcança, o check alcança também.
+     E falha de conexão passou a ser ERRO BARULHENTO — banco
+     inalcançável com DATABASE_URL configurado não é "opcional",
+     é sintoma de incidente (ver docs/INCIDENTE-DEPLOY-3.68.3.md). */
+  const pg = (await import("pg")).default;
+  const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
   try {
-    const out = execFileSync(
-      "psql",
-      [process.env.DATABASE_URL, "-qAt", "-c", "select value from settings where key='app_version' limit 1"],
-      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }
-    ).trim();
+    const { rows } = await pool.query(
+      "select value from settings where key='app_version' limit 1"
+    );
+    const out = (rows[0]?.value ?? "").trim();
     /* `out` vazio = a chave NUNCA existiu.
-    
+
        Bug v3.53.2: a condição era `out && out !== version`, então a
        primeira gravação nunca acontecia — e o banco ficava sem
        `app_version` para sempre. Com isso /api/version devolvia
        installedVersion:null e não havia como saber, olhando o
        sistema, qual update já tinha entrado.
-    
+
        Gravar quando está AUSENTE não precisa de --fix: não há valor
        do usuário para sobrescrever, só um vazio para preencher. */
     if (!out) {
-      execFileSync("psql", [
-        process.env.DATABASE_URL, "-qAt", "-c",
-        "insert into settings (key,value,category) values ('app_version','" + version + "','sistema') " +
+      await pool.query(
+        "insert into settings (key,value,category) values ('app_version',$1,'sistema') " +
         "on conflict (key) do update set value=excluded.value, updated_at=now()",
-      ], { stdio: "ignore" });
+        [version]
+      );
       console.log(`↻ settings.app_version gravado pela primeira vez: ${version}`);
     } else if (out !== version) {
       if (!fix) die(`Banco gravado em ${out}, VERSION é ${version}. Rode scripts/update.sh ou --fix`);
-      execFileSync("psql", [
-        process.env.DATABASE_URL, "-qAt", "-c",
-        "insert into settings (key,value,category) values ('app_version','" + version + "','sistema') " +
+      await pool.query(
+        "insert into settings (key,value,category) values ('app_version',$1,'sistema') " +
         "on conflict (key) do update set value=excluded.value, updated_at=now()",
-      ], { stdio: "ignore" });
+        [version]
+      );
       console.log(`↻ settings.app_version atualizado para ${version}`);
     }
-  } catch {
-    /* banco ausente/indisponível — validação de banco é opcional */
+  } catch (e) {
+    console.error(`✖ DATABASE_URL está configurado mas o banco não respondeu: ${e.message}`);
+    console.error("  Isto costuma ser sintoma de ambiente errado (ver docs/INCIDENTE-DEPLOY-3.68.3.md).");
+    await pool.end().catch(() => {});
+    process.exit(1);
   }
+  await pool.end();
+} else {
+  console.log("! DATABASE_URL ausente — checagem de banco pulada (ok em máquina sem banco)");
 }
 
 console.log(`✔ Versionamento consistente: v${version}`);
