@@ -23,7 +23,7 @@ import {
 } from "@/components/ui";
 import { Icon } from "@/components/icons";
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 type Row = Record<string, any>;
 
 export function ServicesClient({ services, finishings, serviceCats, finishingCats }: {

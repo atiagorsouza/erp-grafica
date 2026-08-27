@@ -178,6 +178,50 @@ hospedado na **Hostinger** e atualizado por pacote, não por git pull.
 - Enquanto `portal-hostinger/` não tiver código, o empacotador avisa
   e não gera nada — é o estado atual esperado.
 
+### 8.1 Por que o portal NÃO usa git pull
+
+A Hostinger (plano compartilhado) não dá shell com git nem processo
+Node persistente. Por isso o portal é **estático/PHP publicado por
+arquivo**, não por repositório. O git continua sendo a fonte da
+verdade — o que muda é a forma de entrega:
+
+| | ERP (servidor da gráfica) | Portal (Hostinger) |
+|---|---|---|
+| Entrega | `git pull origin main` | zip pelo gerenciador de arquivos |
+| Quem aplica | **você** (agente do servidor) | **o dono**, manualmente |
+| Versão | `VERSION` na raiz | `portal-hostinger/VERSION` |
+| Reinício | `pm2 restart` | nenhum (arquivo estático) |
+| Rollback | backup do `update.sh` | re-subir o zip anterior |
+
+### 8.2 O passo a passo do portal (quando houver versão)
+
+1. **No repositório** (feito pelo agente de desenvolvimento): o código
+   do portal vive em `portal-hostinger/`, versionado normalmente no
+   git. Nada de zip commitado — o zip é *gerado*, não guardado.
+2. **Gerar o pacote** — pode ser rodado no servidor da gráfica, já que
+   é só empacotamento (não toca produção nem banco):
+   ```bash
+   cd /www/wwwroot/erp-grafica
+   git pull origin main
+   bash scripts/empacotar-portal.sh
+   # → release/portal-v<versão>-<data>.zip
+   ```
+3. **Entregar ao dono**: o zip fica em `release/`. Avise o caminho e a
+   versão. **Você para aqui** — não tem credencial da Hostinger e não
+   deve pedir.
+4. **O dono sobe**: gerenciador de arquivos da Hostinger → pasta pública
+   do domínio → extrair. O `LEIA-ME-HOSTINGER.txt` vai dentro do pacote
+   com o passo a passo e a configuração de endpoint/chave.
+5. **Validar**: abrir o portal no navegador e enviar um pedido de teste.
+   O pedido tem que aparecer no ERP (o portal fala com
+   `https://app.vtdigital.site/api/portal/*`, autenticado por
+   `PORTAL_API_KEYS`).
+
+> **Atenção à chave.** O portal e o ERP compartilham `PORTAL_API_KEYS`.
+> Se essa chave for trocada no `.env` do ERP, o portal **para de
+> funcionar** até ser re-empacotado/reconfigurado com a nova. Trocar a
+> chave é, na prática, uma implantação dos dois lados.
+
 ---
 
 ## 9. Como você recebe trabalho (formato das mensagens)
@@ -194,6 +238,45 @@ Sua resposta, ao terminar, deve trazer:
 1. Saída do `/api/version` (versão + `upToDate`)
 2. Última linha do `e2e:smoke` (contagem de checks ✔)
 3. Qualquer anomalia encontrada no caminho
+
+### 9.1 De onde vem essa mensagem (não é escrita à mão)
+
+O agente de desenvolvimento fecha cada versão com **um comando só**:
+
+```bash
+npm run entregar -- --tipo patch --titulo "..." --mudou "..." 
+```
+
+O `scripts/entregar.mjs` faz, em ordem: calcula a próxima versão
+(semver), grava `VERSION` + `package.json`, cria o boletim
+`UPDATES/<versão>.md`, comita, faz push na branch de trabalho e
+**imprime a mensagem acima já pronta**.
+
+Por que isso importa para você: significa que **toda versão que chega
+tem boletim**, com o commit certo carimbado dentro. Se você receber uma
+ordem de atualização sem boletim correspondente, ou com a versão do
+`VERSION` diferente da que a mensagem cita, **isso é anomalia** — pare e
+reporte (§6, última linha).
+
+### 9.2 O caminho completo, ponta a ponta
+
+```
+[agente de desenvolvimento]          [dono]              [você, no servidor]
+  npm run entregar                                     
+    → VERSION + package.json          
+    → UPDATES/<v>.md                  
+    → commit + push (branch arena/*)  
+    → imprime a mensagem         ──►  abre o PR         
+                                      mergeia em main   ──►  git pull origin main
+                                      repassa a mensagem      bash scripts/update.sh
+                                                              pm2 restart <nome>
+                                                              valida (§4 passos 5–7)
+                                                         ◄──  responde os 3 itens (§9)
+```
+
+**Você só entra depois do merge em `main`.** Se a mensagem citar uma
+branch `arena/*`, o merge ainda não aconteceu: não atualize, avise o
+dono.
 
 ---
 

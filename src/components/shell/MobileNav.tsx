@@ -27,10 +27,18 @@ export function MobileNav({ pathname }: { pathname: string }) {
   const [aberto, setAberto] = useState(false);
 
   /* Trocou de tela? Fecha. Sem isso a gaveta continua aberta por cima
-     do conteúdo depois do clique. */
-  useEffect(() => {
+     do conteúdo depois do clique.
+
+     Feito com "state derivado da rota" em vez de setState dentro de
+     useEffect: o effect disparava um segundo render em cascata (React
+     19 passou a acusar isso como erro de lint). Comparando a rota
+     anterior durante o próprio render, a gaveta já sai fechada no
+     primeiro passo — sem frame intermediário com o menu aberto. */
+  const [rotaAnterior, setRotaAnterior] = useState(pathname);
+  if (rotaAnterior !== pathname) {
+    setRotaAnterior(pathname);
     setAberto(false);
-  }, [pathname]);
+  }
 
   /* Com a gaveta aberta, o fundo não deve rolar junto. */
   useEffect(() => {

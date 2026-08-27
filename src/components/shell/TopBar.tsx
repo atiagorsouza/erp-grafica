@@ -36,9 +36,13 @@ export function TopBar({ pathname }: { pathname: string }) {
 
   /* busca global */
   useEffect(() => {
+    /* Termo curto demais: nada a buscar. O `setHits([])` era chamado
+       aqui de forma síncrona e o React 19 acusa cascata de render.
+       Agendar no mesmo timer do debounce resolve sem mudar o
+       comportamento visível (a lista some do mesmo jeito). */
     if (q.trim().length < 2) {
-      setHits([]);
-      return;
+      const limpar = setTimeout(() => setHits([]), 0);
+      return () => clearTimeout(limpar);
     }
     const t = setTimeout(async () => {
       try {

@@ -364,6 +364,32 @@ async function barcodeEmUso(barcode: string | null, ignorarId?: number) {
     : null;
 }
 
+/* Mesma guarda do código de barras, para o SKU.
+
+   Já existia uma rede de segurança na rota (`products_sku_unique_idx`
+   virava 409), mas ela só age DEPOIS que o Postgres recusa a gravação:
+   a transação estoura, o erro sobe com stack completa no log
+   ("duplicate key value violates unique constraint") e a mensagem que
+   chega ao operador é genérica — "Já existe um produto com este SKU",
+   sem dizer QUAL produto. Com dois mil itens no catálogo, isso não
+   ajuda ninguém a achar o duplicado.
+
+   Verificando antes, o caminho fica limpo: nada de exceção no log e a
+   resposta diz o nome do produto que já usa o código. O status
+   continua 409 (conflito) para não quebrar quem já consome a API. */
+async function skuEmUso(sku: string | null, ignorarId?: number) {
+  if (!sku) return null;
+  const iguais = await db
+    .select({ id: products.id, name: products.name })
+    .from(products)
+    .where(eq(products.sku, sku))
+    .limit(2);
+  const conflito = iguais.find((p) => p.id !== ignorarId);
+  return conflito
+    ? ({ error: `O SKU ${sku} já está em "${conflito.name}".`, status: 409 } satisfies ProductError)
+    : null;
+}
+
 export async function createProduct(raw: unknown) {
   const parsed = parse(raw);
   if ("error" in parsed) return parsed;
@@ -373,6 +399,9 @@ export async function createProduct(raw: unknown) {
 
   const duplicado = await barcodeEmUso(nullable(data.barcode));
   if (duplicado) return duplicado;
+
+  const skuDuplicado = await skuEmUso(nullable(data.sku));
+  if (skuDuplicado) return skuDuplicado;
 
   const row = await db.transaction(async (tx) => {
     const [created] = await tx.insert(products).values(baseProductData(data, calc) as never).returning();
@@ -407,6 +436,9 @@ export async function updateProduct(id: number, raw: unknown) {
 
   const duplicado = await barcodeEmUso(nullable(data.barcode), id);
   if (duplicado) return duplicado;
+
+  const skuDuplicado = await skuEmUso(nullable(data.sku), id);
+  if (skuDuplicado) return skuDuplicado;
 
   const previousStock = toNumber(existing.stock, 0);
 

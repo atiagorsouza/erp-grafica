@@ -30,7 +30,7 @@ import {
 import { Icon } from "@/components/icons";
 import { cn } from "@/lib/format";
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 type Row = Record<string, any>;
 
 const SLUG = (s: string) =>
@@ -107,7 +107,14 @@ function Simulator({ categories, consumables, printers, formats }: {
   const prt = catPrinters.find((p) => String(p.id) === prtId);
   const cons = consumables.filter((c) => String(c.categoryId) === catId);
 
-  const calc = useMemo(() => {
+  /* Era `useMemo([cat, fmt, prt, cons, mode])`. O React Compiler recusava
+     otimizar o componente inteiro ("existing memoization could not be
+     preserved") porque `fmt`/`prt` saem de `.find()` sobre arrays
+     recalculados a cada render. Resultado na prática: o componente
+     perdia TODA a memoização automática por causa de um useMemo manual
+     que não paga por si — a conta abaixo é aritmética simples.
+     Sem o useMemo, o compilador volta a memoizar o componente todo. */
+  const calc = (() => {
     if (!cat) return null;
     const referenceCoverage = Math.max(num(cat.referenceCoverage, 0.05), 0.0001);
     const coverage = Math.max(num(fmt?.inkCoverage, referenceCoverage), 0);
@@ -148,7 +155,7 @@ function Simulator({ categories, consumables, printers, formats }: {
       ],
       total: perSheet || total,
     };
-  }, [cat, fmt, prt, cons, mode]);
+  })();
 
   return (
     <Card className="reveal reveal-1 mb-6 overflow-hidden" pad={false}>
