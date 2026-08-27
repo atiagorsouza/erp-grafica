@@ -26,12 +26,37 @@ ls -lh ~/backup-*.sql     # confira o TAMANHO
 
 Arquivo de 0 byte não é backup. Confira antes de prosseguir.
 
-**Se der "server version mismatch" (17 vs 18):** o cliente instalado é
-mais novo que o servidor e o `pg_dump` se recusa a rodar. Use o binário
-da versão certa:
+**Se der "server version mismatch"** (aconteceu em produção em 27/08:
+cliente 17.11 × servidor 18.0): o `pg_dump` se recusa a rodar quando o
+**CLIENTE é mais antigo que o SERVIDOR**. Desde a v3.70.3 o
+`update.sh` procura sozinho o binário certo entre os instalados
+(`/usr/lib/postgresql/<N>/bin`). Se ele não existir, instale o cliente
+da versão do servidor:
 
 ```bash
-/usr/lib/postgresql/17/bin/pg_dump "$DATABASE_URL" > ~/backup-$(date +%F-%H%M).sql
+apt-get update && apt-get install -y postgresql-client-18   # ajuste o número
+# ou, se o binário já existir fora do PATH:
+export PATH=/usr/lib/postgresql/18/bin:$PATH
+```
+
+**FATO CONFIRMADO em produção (27/08/2026):** o banco do ERP é o
+PostgreSQL **18.0 do aPanel**, em `/www/server/pgsql` — o pg_dump certo
+é `/www/server/pgsql/bin/pg_dump`. O PostgreSQL 17 de
+`/usr/lib/postgresql/17` NÃO é o banco do ERP (instalação antiga do
+sistema; não delete). Desde a v3.70.3 o `update.sh` encontra o binário
+certo sozinho (varre Debian + aPanel); manualmente:
+
+```bash
+export PATH=/www/server/pgsql/bin:$PATH
+```
+
+**Se o PostgreSQL rodar em Docker** (outro cenário comum), o binário
+certo está DENTRO do container:
+
+```bash
+docker ps | grep -i postgres   # ache o nome
+docker exec <container> pg_dump -U <usuario> -F c -f /tmp/bkp.dump <banco>
+docker cp <container>:/tmp/bkp.dump ~/bkp-$(date +%F-%H%M).dump
 ```
 
 Se ainda assim falhar, o `deploy-auto.sh` gera um backup próprio em

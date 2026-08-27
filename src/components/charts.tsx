@@ -30,7 +30,14 @@ export function Sparkline({
   });
   const path = `M${pts.join(" L")}`;
   return (
-    <svg width={width} height={height} className={cn("overflow-visible", className)} aria-hidden="true">
+    <svg
+      width="100%"
+      height={height}
+      viewBox={`0 0 ${width} ${height}`}
+      preserveAspectRatio="none"
+      className={cn("overflow-visible", className)}
+      aria-hidden="true"
+    >
       {fill && (
         <path d={`${path} L${width},${height} L0,${height} Z`} fill={stroke} opacity="0.1" />
       )}
@@ -64,7 +71,7 @@ export function BarChart({
           const h = Math.max((Math.abs(d.value) / max) * (height - 26), d.value > 0 ? 4 : 2);
           return (
             <div key={i} className="group relative flex flex-1 flex-col items-center justify-end self-stretch">
-              <div className="pointer-events-none absolute -top-1 z-10 -translate-y-full rounded-md bg-ink-900 px-2 py-1 font-mono text-[10px] whitespace-nowrap text-paper-50 opacity-0 shadow-pop transition-opacity group-hover:opacity-100 tnum">
+              <div className="pointer-events-none absolute -top-1 z-10 -translate-y-full rounded-md bg-ink-900 px-2 py-1 font-mono text-[10px] whitespace-nowrap text-paper-50 opacity-0 shadow-pop transition-opacity group-hover:opacity-100 group-active:opacity-100 tnum">
                 {d.hint ?? formatValue(d.value)}
               </div>
               <div
@@ -194,3 +201,4 @@ export function HBars({
     </div>
   );
 }
+

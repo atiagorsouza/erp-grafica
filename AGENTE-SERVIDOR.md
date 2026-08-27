@@ -16,7 +16,8 @@
 |---|---|
 | Pasta do ERP | `/www/wwwroot/erp-grafica` |
 | Processo | pm2 sob root (`pm2 ls` para ver o nome) |
-| Banco | PostgreSQL 17 — conexão no `.env` (`DATABASE_URL`) |
+| Banco | PostgreSQL **18.0 (aPanel)** em `/www/server/pgsql` — conexão no `.env` (`DATABASE_URL`). O `pg_dump` CERTO é `/www/server/pgsql/bin/pg_dump` (o do PATH é 17 e não serve; desde a 3.70.3 o `update.sh` acha sozinho) |
+| ⚠️ Cluster 17 local | `/usr/lib/postgresql/17` **não é o banco do ERP** (é instalação antiga do sistema). Não use, não delete — só mexa com go-ahead do dono |
 | URL pública | `https://app.vtdigital.site` (túnel Cloudflare) |
 | Healthcheck | `curl -s http://127.0.0.1:3000/api/health` → `{"ok":true}` |
 | Versão rodando | `curl -s http://127.0.0.1:3000/api/version` → `upToDate` |
@@ -86,12 +87,14 @@ pm2 restart <nome-do-processo>     # confira com: pm2 ls
 ls -la .next/BUILD_ID              # deve existir (regra 1.3 do manual)
 curl -s http://127.0.0.1:3000/api/version    # "version" nova E "upToDate": true
 
-# 6. Smoke ponta a ponta (cria e remove os PRÓPRIOS dados de teste)
+# 6. Carimbo de versão consistente — ANTES do smoke: a checagem 11.8
+#    do smoke compara o carimbo com o código (desde a 3.70.3 o próprio
+#    update.sh já carimba; este passo é a rede de segurança)
+node scripts/check-version.mjs     # deve terminar "✔ Versionamento consistente"
+
+# 7. Smoke ponta a ponta (cria e remove os PRÓPRIOS dados de teste)
 set -a; source .env; set +a
 npm run e2e:smoke                  # deve terminar "🎉 concluído com sucesso"
-
-# 7. Carimbo de versão consistente
-node scripts/check-version.mjs     # deve terminar "✔ Versionamento consistente"
 ```
 
 **Se qualquer etapa falhar: PARE.** Não invente caminho alternativo,
@@ -282,3 +285,27 @@ dono.
 
 *Manual criado na v3.70.1 (2026-08-27). Mantido pelo agente de
 desenvolvimento — se encontrar erro aqui, reporte no grupo.*
+
+## 10. Lições do deploy 27/08 (3.70.1 → 3.72.1)
+
+Cada linha abaixo custou tempo real de produção. São regras agora.
+
+1. **`export PATH` vale só no shell onde foi digitado.** Cada comando
+   seu roda num shell novo — o update precisa rodar NO MESMO comando
+   (ou use o caminho absoluto). Desde a 3.72.2 o `update.sh` acha o
+   pg_dump certo sozinho (Debian + aPanel).
+2. **Processo `next-server` zumbi na porta 3000.** Se o PM2 for
+   zerado/recriado, o processo ANTIGO continua vivo FORA do PM2,
+   segurando a porta e servindo versão velha da memória. Sintoma:
+   `/api/version` mostra uma versão que não existe mais no código.
+   Cura: `sudo pkill -9 -f next-server; sudo fuser -k 3000/tcp`,
+   depois `pm2 restart`. (É a lição nº 1 do `deploy-auto.sh`.)
+3. **`pm2 save` depois de qualquer mudança na lista do PM2** — sem
+   isso o reboot traz a lista antiga.
+4. **Update cortado por timeout NÃO concluiu.** Confira
+   `.next/BUILD_ID` e `docs/` antes de prosseguir; rodar o update de
+   novo é seguro (backup novo + build idempotente).
+5. **Timeout do agente ≠ falha do update.** Monitore com pauses
+   maiores (o build pode levar 8-12 min) e NÃO reexecute etapas
+   paralelamente.
+

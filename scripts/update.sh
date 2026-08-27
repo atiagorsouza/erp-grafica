@@ -54,6 +54,73 @@ previous_version() {
   fi
 }
 
+# ──────────────────────────────────────────────────────────────────
+# escolher_pgdump (v3.70.3)
+#
+# pg_dump se recusa quando o CLIENTE é mais antigo que o SERVIDOR.
+# Em produção (27/08/2026): cliente 17.11 × servidor 18.0 →
+# "aborting because of server version mismatch" → update travou no
+# backup (e travar no backup é o comportamento CERTO — incidente
+# 24/08). O que faltava era achar o binário certo: em máquinas com
+# o servidor 18 instalado localmente, o pg_dump 18 costuma existir
+# em /usr/lib/postgresql/18/bin — apenas fora do PATH.
+#
+# Aqui descobrimos o major do SERVIDOR e escolhemos o candidato:
+#   1º major exato → 2º qualquer >= servidor → 3º o do PATH.
+# Detecção falhou? Comportamento anterior (pg_dump do PATH).
+# ──────────────────────────────────────────────────────────────────
+escolher_pgdump() {
+  PGDUMP_BIN=""
+  PG_SERVER_MAJOR=""
+
+  PG_SERVER_MAJOR="$(
+    node -e '
+      const pg=require("pg");
+      (async()=>{const c=new pg.Client({connectionString:process.env.DATABASE_URL});
+        try{await c.connect();const r=await c.query("show server_version_num");
+          console.log(String(r.rows[0].server_version_num).slice(0,2));await c.end();}
+        catch{}})();
+    ' 2>/dev/null
+  )"
+  [[ "$PG_SERVER_MAJOR" =~ ^[0-9]+$ ]] || PG_SERVER_MAJOR=""
+
+  local -a candidatos=()
+  local p
+  p="$(command -v pg_dump 2>/dev/null || true)"
+  [ -n "$p" ] && candidatos+=("$p")
+  # Caminhos conhecidos: Debian padrão (/usr/lib/postgresql/<N>/bin) e
+  # aPanel (/www/server/pgsql/bin — CONFIRMADO em produção 27/08: o
+  # PostgreSQL 18 do ERP mora lá, enquanto o PATH só tem o cliente 17).
+  while IFS= read -r b; do candidatos+=("$b"); done < <(
+    ls -1rv /usr/lib/postgresql/*/bin/pg_dump /www/server/pgsql*/bin/pg_dump /www/server/postgresql*/bin/pg_dump 2>/dev/null || true
+  )
+
+  major_de() { "$1" --version 2>/dev/null | sed -nE 's/^pg_dump \(PostgreSQL\) ([0-9]+).*/\1/p' | head -n1; }
+  PGDUMP_BIN="${candidatos[0]:-}"
+
+  if [ -n "$PG_SERVER_MAJOR" ] && [ "${#candidatos[@]}" -gt 0 ]; then
+    local c m escolhido=""
+    # 1) major exato
+    for c in "${candidatos[@]}"; do
+      m="$(major_de "$c")"
+      if [ "$m" = "$PG_SERVER_MAJOR" ]; then escolhido="$c"; break; fi
+    done
+    # 2) qualquer >= servidor (pg_dump aceita servidor mais antigo)
+    if [ -z "$escolhido" ]; then
+      for c in "${candidatos[@]}"; do
+        m="$(major_de "$c")"
+        if [ -n "$m" ] && [ "$m" -ge "$PG_SERVER_MAJOR" ] 2>/dev/null; then escolhido="$c"; break; fi
+      done
+    fi
+    [ -n "$escolhido" ] && PGDUMP_BIN="$escolhido"
+  fi
+
+  if [ -n "$PGDUMP_BIN" ]; then
+    c_info "pg_dump: $("$PGDUMP_BIN" --version 2>/dev/null | head -n1)${PG_SERVER_MAJOR:+ · servidor PostgreSQL $PG_SERVER_MAJOR}"
+  else
+    c_warn "nenhum pg_dump encontrado no PATH nem em /usr/lib/postgresql/*/bin"
+  fi
+}
 backup_state() {
   local from_v backup_dir
   from_v="$(previous_version)"
@@ -83,23 +150,31 @@ backup_state() {
   # perdidos, recuperados horas depois do backup pré-apagão.
   # Update sem backup RESTAURÁVEL não roda mais. Aborta na hora.
   dump_ok=0
-  if command -v pg_dump >/dev/null 2>&1; then
+  escolher_pgdump
+  if [ -n "$PGDUMP_BIN" ]; then
     c_info "Exportando banco com pg_dump..."
-    if pg_dump "$DATABASE_URL" --no-owner --no-acl -F c -f "${backup_dir}/database.dump" >"${backup_dir}/pg_dump.log" 2>&1 && [ -s "${backup_dir}/database.dump" ]; then
+    if "$PGDUMP_BIN" "$DATABASE_URL" --no-owner --no-acl -F c -f "${backup_dir}/database.dump" >"${backup_dir}/pg_dump.log" 2>&1 && [ -s "${backup_dir}/database.dump" ]; then
       c_ok "Dump custom do banco salvo"
       dump_ok=1
-    elif pg_dump "$DATABASE_URL" --no-owner --no-acl -f "${backup_dir}/database.sql" >>"${backup_dir}/pg_dump.log" 2>&1 && [ -s "${backup_dir}/database.sql" ]; then
+    elif "$PGDUMP_BIN" "$DATABASE_URL" --no-owner --no-acl -f "${backup_dir}/database.sql" >>"${backup_dir}/pg_dump.log" 2>&1 && [ -s "${backup_dir}/database.sql" ]; then
       c_ok "Dump SQL do banco salvo"
       dump_ok=1
     fi
   fi
   if [ "$dump_ok" = "0" ]; then
     c_warn "pg_dump falhou ou indisponível — tentando fallback JSON"
+    # v3.70.3 — bug visto NA PRODUÇÃO (27/08): o validador era
+    # `require('./${backup_dir}/...')` e, com backup_dir ABSOLUTO, virava
+    # `.//www/wwwroot/...` → "Cannot find module". O dump JSON era gravado
+    # certinho e a VALIDAÇÃO é que explodia — o update abortava dizendo
+    # "sem backup" com o arquivo lá. Como o fallback só roda quando o
+    # pg_dump falha, o bug nunca tinha aparecido num update que passasse.
+    # Agora o caminho entra por argv (à prova de formato).
     if node scripts/backup-db-json.mjs "${backup_dir}/database-fallback.json" \
-       && node -e "const j=require('./${backup_dir}/database-fallback.json'); if(!j.tables || Object.keys(j.tables).length < 10) process.exit(1)"; then
+       && node -e "const j=JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')); if(!j.tables || Object.keys(j.tables).length < 10) process.exit(1)" "${backup_dir}/database-fallback.json"; then
       c_ok "Fallback JSON salvo e VALIDADO (tabelas presentes)"
     else
-      die "SEM BACKUP RESTAURÁVEL — update abortado por segurança. Descubra por que o pg_dump falhou (cat ${backup_dir}/pg_dump.log — costuma ser binário mais antigo que o servidor) e rode o update de novo."
+      die "SEM BACKUP RESTAURÁVEL — update abortado por segurança. Descubra por que o pg_dump falhou (cat ${backup_dir}/pg_dump.log) e rode o update de novo.${PG_SERVER_MAJOR:+ Servidor PostgreSQL ${PG_SERVER_MAJOR} detectado — instale o cliente: apt-get install -y postgresql-client-${PG_SERVER_MAJOR} (ou export PATH=/usr/lib/postgresql/${PG_SERVER_MAJOR}/bin:$PATH; em aPanel: /www/server/pgsql/bin)}"
     fi
   fi
 
@@ -242,7 +317,24 @@ main() {
   migrate_schema
   rebuild
   write_meta
+  carimbar_versao
   print_done
+}
+
+# v3.70.3 — o updater precisa DEIXAR O CARIMBO CERTO. Até aqui só o
+# deploy-auto tocava em settings.app_version; quem atualizava via
+# update.sh ficava com o carimbo da versão ANTERIOR — e o e2e:smoke
+# reprovava no final (11.8) depois de 300 checagens verdes, com o
+# sistema perfeitamente instalado. Era a pendência #1 do incidente
+# 25/08. O --fix aqui é seguro: VERSION é a fonte da verdade e acaba
+# de ser entregue pelo git pull.
+carimbar_versao() {
+  c_info "Carimbando a versão no banco (settings.app_version)..."
+  if node scripts/check-version.mjs --fix; then
+    c_ok "Versão carimbada: v${VERSION}"
+  else
+    c_warn "check-version falhou — rode e confira: node scripts/check-version.mjs --fix"
+  fi
 }
 
 main "$@"
