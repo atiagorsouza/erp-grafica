@@ -1,6 +1,7 @@
 import {
   pgTable,
   serial,
+  bigserial,
   text,
   timestamp,
   numeric,
@@ -11,6 +12,7 @@ import {
   date,
   uniqueIndex,
   index,
+  primaryKey,
 } from "drizzle-orm/pg-core";
 /* Tipo só para a auto-referência de item_categories.parent_id: sem
    ele o TypeScript entra em recursão infinita ao inferir a tabela. */
@@ -1625,3 +1627,75 @@ export const campaignTargets = pgTable("campaign_targets", {
 
 export type Campaign = typeof campaigns.$inferSelect;
 export type CampaignTarget = typeof campaignTargets.$inferSelect;
+
+/* ------------------------------------------------------------------ */
+/*  TABELAS DO SERVIÇO WHATSAPP (blindagem v3.68.9)                    */
+/*                                                                     */
+/*  Histórico: estas tabelas eram criadas SÓ pelo serviço              */
+/*  (`services/whatsapp/src/pre-cadastro.mjs` e `auth-state.mjs`,      */
+/*  com CREATE TABLE IF NOT EXISTS). Qualquer `drizzle-kit push`       */
+/*  enxergava elas como "sobra" e propunha DROP — foi a suspeita       */
+/*  central do incidente 2026-08-25 (`docs/INCIDENTE-2026-08-25-       */
+/*  CONVERSAS.md`, pendência 2). A partir daqui o Drizzle GERENCIA     */
+/*  as tabelas; o CREATE IF NOT EXISTS do serviço continua             */
+/*  idempotente para quem sobe o bot antes do primeiro push.           */
+/*                                                                     */
+/*  ATENÇÃO ao editar: as definições abaixo devem continuar            */
+/*  ISOMORFAS ao DDL do serviço (tipos, defaults, índice).             */
+/*  Divergência aqui = drizzle-kit propondo ALTER/DROP na              */
+/*  tabela onde mora o histórico de conversas.                         */
+/* ------------------------------------------------------------------ */
+export const whatsappConversas = pgTable("whatsapp_conversas", {
+  /** Número em formato E.164 (ex.: 5521994427557) — é a chave. */
+  phoneE164: text("phone_e164").primaryKey(),
+  /** Cliente vinculado quando o número é reconhecido no cadastro. */
+  customerId: integer("customer_id"),
+  /** Etapa do fluxo de pré-cadastro do bot. */
+  etapa: text("etapa").default("pedir_nome").notNull(),
+  ultimaMsg: timestamp("ultima_msg", { withTimezone: true, mode: "date" }).defaultNow().notNull(),
+  primeiraMsg: timestamp("primeira_msg", { withTimezone: true, mode: "date" }).defaultNow().notNull(),
+  /** Contador de mensagens recebidas na conversa. */
+  recebidas: integer("recebidas").default(0).notNull(),
+  /** Se o bot já mandou a saudação inicial nesta conversa. */
+  saudou: boolean("saudou").default(false).notNull(),
+  /** Quem assumiu a conversa (modo humano) e quando. */
+  assumidaPor: text("assumida_por"),
+  assumidaEm: timestamp("assumida_em", { withTimezone: true, mode: "date" }),
+  /** Aviso de ausência é uma vez por conversa, não por mensagem. */
+  avisouAusencia: boolean("avisou_ausencia").default(false).notNull(),
+});
+
+export const whatsappMensagens = pgTable(
+  "whatsapp_mensagens",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    phoneE164: text("phone_e164").notNull(),
+    /** "recebida" | "enviada" — direção da mensagem. */
+    direcao: text("direcao").notNull(),
+    texto: text("texto"),
+    /** ID da mensagem no WhatsApp (deduplicação/rastreio). */
+    waId: text("wa_id"),
+    criadoEm: timestamp("criado_em", { withTimezone: true, mode: "date" }).defaultNow().notNull(),
+  },
+  (table) => [
+    /* Mesmo índice que o serviço cria — alimenta a listagem e o
+       histórico por número. */
+    index("whatsapp_mensagens_fone_idx").on(table.phoneE164, table.criadoEm.desc()),
+  ],
+);
+
+export const whatsappAuth = pgTable(
+  "whatsapp_auth",
+  {
+    /** Sessão do Baileys (hoje sempre "default"). */
+    sessionId: text("session_id").notNull(),
+    chave: text("chave").notNull(),
+    /** Credenciais serializadas (formato BufferJSON do Baileys). */
+    valor: jsonb("valor").notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).defaultNow().notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.sessionId, table.chave] })],
+);
+
+export type WhatsappConversa = typeof whatsappConversas.$inferSelect;
+export type WhatsappMensagem = typeof whatsappMensagens.$inferSelect;

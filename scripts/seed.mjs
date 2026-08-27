@@ -84,50 +84,144 @@ async function main() {
   //  A interface permite criar/editar/remover qualquer uma delas.
   // ====================================================================
   const itemCategorySeed = [
-    // Produtos — categorias comerciais solicitadas
-    ["product", "Gráfica", "🖨️", "#2563eb"],
-    ["product", "Papelaria Personalizada", "✂️", "#8b5cf6"],
-    ["product", "Brindes", "🎁", "#ec4899"],
-    ["product", "DTF", "🧵", "#f97316"],
-    ["product", "Produtos 3D", "🧊", "#f59e0b"],
-    ["product", "Sublimação", "👕", "#db2777"],
-    ["product", "Comunicação Visual", "🪧", "#06b6d4"],
+    // Produtos — árvore v2 aprovada (docs/ARVORE-CATEGORIAS.md):
+    // 10 categorias mestre + subcategorias (máx. 2 níveis — a UI e o
+    // smoke só aceitam dois níveis). No cadastro de produto escolhe-se
+    // a SUBCATEGORIA; a mestre agrupa na árvore.
+    // Formato: [module, nome, ícone, cor, pai|null]
+    ...[
+      ["🏷️", "Adesivos & Etiquetas", "#0ea5e9", [
+        "Adesivo vinil A4 / A3 (Konica)",
+        "Adesivo vinil impresso (m² · terceirizado)",
+        "Adesivo vinil com recorte (m² · terceirizado)",
+        "Adesivo com recorte e máscara (m² · terceirizado)",
+        "Adesivo DTF UV (terceirizado)",
+        "Etiqueta BOPP (branco · prata · transparente)",
+        "Etiqueta térmica em rolo",
+      ]],
+      ["💼", "Para Empresas", "#2563eb", [
+        "Cartão de visita (100un · 200un)",
+        "Papel timbrado A4",
+        "Envelope (ofício · saco)",
+        "Pasta com bolso",
+        "Crachá",
+        "Talão (pedido · comanda · recibo)",
+        "Bloco de rascunho",
+      ]],
+      ["📓", "Papelaria Personalizada", "#8b5cf6", [
+        "Agenda personalizada",
+        "Planner (diário · semanal)",
+        "Caderno capa dura",
+        "Caderneta (wire-o · espiral)",
+        "Bloco de notas",
+        "Calendário (mesa · parede)",
+        "Caderneta de vacinação",
+        "Etiqueta escolar",
+        "Kit papelaria personalizada",
+      ]],
+      ["🎉", "Festa & Convites", "#ec4899", [
+        "Convite (casamento · infantil · batizado · formatura)",
+        "Topo de bolo",
+        "Caixa pegue-e-monte (milk · cone · sushi)",
+        "Saia de cupcake",
+        "Cardápio de mesa",
+        "Placa informativa",
+        "Lembrancinha",
+      ]],
+      ["🛍️", "Para Vender e Enviar", "#f97316", [
+        "Tag para roupa / joia",
+        "Cartão de agradecimento",
+        "Cartão fidelidade",
+        "Lacre de delivery",
+        "Cinta de papel",
+        "Fita adesiva personalizada",
+        "Sacola de papel",
+      ]],
+      ["👕", "Camisas & Tecido", "#db2777", [
+        "Camisa sublimática (própria)",
+        "Body infantil sublimático (própria)",
+        "Camiseta DTF (terceirizado)",
+        "Ecobag (terceirizado)",
+        "Boné / moletom (terceirizado)",
+      ]],
+      ["🥤", "Copos & Canecas", "#14b8a6", [
+        "Copo long drink (por cor)",
+        "Taça de gin",
+        "Eco copo",
+        "Caneca de chopp (acrílico)",
+        "Caneca de cerâmica (sublimação)",
+        "Squeeze de alumínio",
+      ]],
+      ["🎖️", "Bottons & Afins", "#a855f7", [
+        "Botton alfinete 44mm",
+        "Botton espelho 58mm",
+        "Chaveiro botton 44mm",
+        "Abridor botton 44mm",
+        "Passador de agenda 22mm",
+        "Clips botton 22mm",
+      ]],
+      ["🧊", "Impressão 3D", "#f59e0b", [
+        "Peça 3D em PLA (arte pronta)",
+        "Peça 3D com modelagem",
+        "Cortador de biscoito",
+        "Action figure / vaso / luminária",
+        "Suporte (celular · controle)",
+        "Troféu / medalha",
+      ]],
+      ["📣", "Panfletos & Cartazes", "#06b6d4", [
+        "Panfleto A5 (100un · milheiro)",
+        "Flyer / filipeta",
+        "Folder com dobra",
+        "Cartaz A3 / A2",
+        "Poster fotográfico",
+        "Impressão avulsa A4 / A3 colorida",
+        "Banner em lona (terceirizado)",
+      ]],
+    ].flatMap(([icon, master, color, subs]) => [
+      ["product", master, icon, color, null],
+      ...subs.map((s) => ["product", s, icon, color, master]),
+    ]),
     // Materiais e estoque — agrupamento operacional
-    ["material", "Papéis e Cartões", "📄", "#2563eb"],
-    ["material", "Papéis Fotográficos", "📷", "#a855f7"],
-    ["material", "Etiquetas & Ribbons", "🏷️", "#10b981"],
-    ["material", "Sublimação", "👕", "#db2777"],
-    ["material", "Têxtil & DTF", "🧵", "#f97316"],
-    ["material", "Filamentos 3D", "🧊", "#f59e0b"],
-    ["material", "Embalagens", "📦", "#64748b"],
-    ["material", "Comunicação Visual", "🪧", "#06b6d4"],
-    ["material", "Consumíveis de Impressão", "🧪", "#0ea5e9"],
+    ["material", "Papéis e Cartões", "📄", "#2563eb", null],
+    ["material", "Papéis Fotográficos", "📷", "#a855f7", null],
+    ["material", "Etiquetas & Ribbons", "🏷️", "#10b981", null],
+    ["material", "Sublimação", "👕", "#db2777", null],
+    ["material", "Têxtil & DTF", "🧵", "#f97316", null],
+    ["material", "Filamentos 3D", "🧊", "#f59e0b", null],
+    ["material", "Embalagens", "📦", "#64748b", null],
+    ["material", "Comunicação Visual", "🪧", "#06b6d4", null],
+    ["material", "Consumíveis de Impressão", "🧪", "#0ea5e9", null],
+    // Componentes de botton (árvore v2: peça pequena, muita variação)
+    ["material", "Componentes de Botton", "🎖️", "#a855f7", null],
     // Serviços — organiza operação e terceirização
-    ["service", "Design & Criação", "🎨", "#8b5cf6"],
-    ["service", "Impressão Digital", "🖨️", "#2563eb"],
-    ["service", "Papelaria Personalizada", "✂️", "#a855f7"],
-    ["service", "Brindes & Sublimação", "🎁", "#ec4899"],
-    ["service", "Comunicação Visual", "🪧", "#06b6d4"],
-    ["service", "DTF UV", "✨", "#f97316"],
-    ["service", "DTF Têxtil", "🧵", "#ea580c"],
-    ["service", "Modelagem & Impressão 3D", "🧊", "#f59e0b"],
-    ["service", "Fotografia", "📷", "#14b8a6"],
+    ["service", "Design & Criação", "🎨", "#8b5cf6", null],
+    ["service", "Impressão Digital", "🖨️", "#2563eb", null],
+    ["service", "Papelaria Personalizada", "✂️", "#a855f7", null],
+    ["service", "Brindes & Sublimação", "🎁", "#ec4899", null],
+    ["service", "Comunicação Visual", "🪧", "#06b6d4", null],
+    ["service", "DTF UV", "✨", "#f97316", null],
+    ["service", "DTF Têxtil", "🧵", "#ea580c", null],
+    ["service", "Modelagem & Impressão 3D", "🧊", "#f59e0b", null],
+    ["service", "Fotografia", "📷", "#14b8a6", null],
     // Acabamentos
-    ["finishing", "Corte & Vinco", "✂️", "#2563eb"],
-    ["finishing", "Laminação", "✨", "#8b5cf6"],
-    ["finishing", "Plastificação", "🛡️", "#0ea5e9"],
-    ["finishing", "Encadernação", "📚", "#a855f7"],
-    ["finishing", "Montagem & Embalagem", "📦", "#64748b"],
+    ["finishing", "Corte & Vinco", "✂️", "#2563eb", null],
+    ["finishing", "Laminação", "✨", "#8b5cf6", null],
+    ["finishing", "Plastificação", "🛡️", "#0ea5e9", null],
+    ["finishing", "Encadernação", "📚", "#a855f7", null],
+    ["finishing", "Montagem & Embalagem", "📦", "#64748b", null],
     // Tabelas (como solicitado)
-    ["pricing_table", "DTF", "🧵", "#f97316"],
-    ["pricing_table", "Comunicação Visual", "🪧", "#06b6d4"],
+    ["pricing_table", "DTF", "🧵", "#f97316", null],
+    ["pricing_table", "Comunicação Visual", "🪧", "#06b6d4", null],
   ];
   const itemCatIds = {};
   let catOrder = 0;
-  for (const [module, name, icon, color] of itemCategorySeed) {
+  for (const [module, name, icon, color, parentName] of itemCategorySeed) {
+    /* O pai é resolvido PELO NOME dentro do mesmo módulo — as mestres
+       são semeadas antes das subcategorias, então o id já existe. */
+    const parentId = parentName ? itemCatIds[`${module}:${parentName}`] : null;
     const r = await q(
-      `INSERT INTO item_categories (module, name, icon, color, "order") VALUES ($1,$2,$3,$4,$5) RETURNING id`,
-      [module, name, icon, color, catOrder++]
+      `INSERT INTO item_categories (module, name, icon, color, "order", parent_id) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
+      [module, name, icon, color, catOrder++, parentId]
     );
     itemCatIds[`${module}:${name}`] = r.rows[0].id;
   }
@@ -500,11 +594,11 @@ async function main() {
   //  esta estrutura base de custo unitário.
   // ====================================================================
   const productSeed = [
-    ["Cartão de Visita 4x4 (10un)", "Cartão colorido frente e verso, 10 un por folha A4 couché 150g", "Gráfica", "Konica C284-e", "laser", "color", 0.1, 2, "Papel Couché 150g A4", 0.1, 0.50, 0.12, 0.24, 0.27],
-    ["Foto 10x15 (L18050)", "Impressão fotográfica 10x15cm, 6 cores, 100% cobertura, papel glossy", "Gráfica", "Epson L18050", "jato-de-tinta", "color", 1, 1, "Papel Foto 10x15 Glossy", 1, 0.50, 0.45, 0.90, 1.02],
-    ["Caneca Sublimática 325ml", "Caneca com arte personalizada — sublimação 4 tintas, 100% cobertura", "Brindes", "Epson SureColor F170", "sublimacao", "color", 1, 1, "Caneca Sublimática 325ml", 1, 0.55, 5.5, 12, 14],
-    ["Etiqueta Redonda 50x50mm (milheiro)", "Etiqueta adesiva impressa em térmica com ribbon resina. Cálculo: ribbon por etiqueta + rolo etiqueta", "Papelaria Personalizada", "Zebra GC420t", "termica", "mono", 1, 1, "Rolo Etiqueta 50x50mm Redonda (1000un)", 0.001, 0.50, 0.07, 0.14, 0.16],
-    ["Impressão Colorida A4 (1 via)", "Impressão colorida em papel A4 75g, Laser", "Gráfica", "Konica C284-e", "laser", "color", 1, 1, "Papel A4 75g (folha)", 1, 0.45, 0.35, 0.64, 0.72],
+    ["Cartão de Visita 4x4 (10un)", "Cartão colorido frente e verso, 10 un por folha A4 couché 150g", "Cartão de visita (100un · 200un)", "Konica C284-e", "laser", "color", 0.1, 2, "Papel Couché 150g A4", 0.1, 0.50, 0.12, 0.24, 0.27],
+    ["Foto 10x15 (L18050)", "Impressão fotográfica 10x15cm, 6 cores, 100% cobertura, papel glossy", "Poster fotográfico", "Epson L18050", "jato-de-tinta", "color", 1, 1, "Papel Foto 10x15 Glossy", 1, 0.50, 0.45, 0.90, 1.02],
+    ["Caneca Sublimática 325ml", "Caneca com arte personalizada — sublimação 4 tintas, 100% cobertura", "Caneca de cerâmica (sublimação)", "Epson SureColor F170", "sublimacao", "color", 1, 1, "Caneca Sublimática 325ml", 1, 0.55, 5.5, 12, 14],
+    ["Etiqueta Redonda 50x50mm (milheiro)", "Etiqueta adesiva impressa em térmica com ribbon resina. Cálculo: ribbon por etiqueta + rolo etiqueta", "Etiqueta térmica em rolo", "Zebra GC420t", "termica", "mono", 1, 1, "Rolo Etiqueta 50x50mm Redonda (1000un)", 0.001, 0.50, 0.07, 0.14, 0.16],
+    ["Impressão Colorida A4 (1 via)", "Impressão colorida em papel A4 75g, Laser", "Impressão avulsa A4 / A3 colorida", "Konica C284-e", "laser", "color", 1, 1, "Papel A4 75g (folha)", 1, 0.45, 0.35, 0.64, 0.72],
   ];
   for (const [name, description, pCat, printer, printerCat, colorMode, pages, copies, material, materialQty, margin, cost, sell, finalPrice] of productSeed) {
     await q(
@@ -523,7 +617,7 @@ async function main() {
     [
       "200 Adesivos Vinil A3+ com Plotter",
       "Receita de tiragem: 25 adesivos por A3+, impressão laser colorida e recorte eletrônico por peça.",
-      itemCatIds["product:Comunicação Visual"],
+      itemCatIds["product:Adesivo vinil A4 / A3 (Konica)"],
       printerIds["Konica C284-e"],
       catIds["laser"],
       formatIds["laser:A3+ (SRA3)"],
@@ -544,7 +638,7 @@ async function main() {
     [
       "50 Caixinhas Milk Fotográficas",
       "Receita de tiragem: 1 caixinha por A4, jato de tinta fotográfico, plotter corte/vinco por peça e fita fixa por lote.",
-      itemCatIds["product:Papelaria Personalizada"],
+      itemCatIds["product:Caixa pegue-e-monte (milk · cone · sushi)"],
       printerIds["Epson L18050"],
       catIds["jato-de-tinta"],
       formatIds["jato-de-tinta:A4"],
@@ -686,11 +780,13 @@ async function main() {
   }
 
   // ---------- CONTADORES ATÔMICOS DE DOCUMENTOS ----------
-  // Os exemplos já ocupam PED-2026-0001 e CMP-2026-0001.
+  // Os exemplos já ocupam ORC-2026-0001, PED-2026-0001 e CMP-2026-0001.
+  // (BUG corrigido: o contador de quote ficava em 0 — a primeira cotação
+  //  nova colidia com ORC-2026-0001 e devolvia 500 na API.)
   const currentYear = new Date().getFullYear();
   await q(
     `INSERT INTO document_counters (document_type, year, current) VALUES
-      ('quote',$1,0), ('order',$1,1), ('sale',$1,0), ('purchase',$1,1)`,
+      ('quote',$1,1), ('order',$1,1), ('sale',$1,0), ('purchase',$1,1)`,
     [currentYear]
   );
 

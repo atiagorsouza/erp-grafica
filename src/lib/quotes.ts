@@ -322,32 +322,45 @@ export async function createQuote(raw: unknown) {
 
   const warnings = await priceWarnings(items);
 
-  const number = await nextDocumentNumber("quote");
   const validUntil = d.validUntil || new Date(Date.now() + quoteDefaults.validityDays * 86400000).toISOString().slice(0, 10);
 
-  const row = await db.transaction(async (tx) => {
-    const [quote] = await tx
-      .insert(quotes)
-      .values({
-        number,
-        customerId: d.customerId || null,
-        status: d.status || "rascunho",
-        validUntil,
-        subtotal: toDecimalString(totals.subtotal),
-        discount: toDecimalString(totals.discount),
-        taxes: toDecimalString(totals.taxes),
-        shippingFee: toDecimalString(totals.shippingFee),
-        total: toDecimalString(totals.total),
-        paymentMethod: d.paymentMethod || quoteDefaults.payment,
-        channel: d.channel || "Atendimento",
-        sellerName: d.sellerName || quoteDefaults.seller || pricingDefaults.pdv_seller_default || "OPERADOR",
-        notes: d.notes || quoteDefaults.notes || null,
-      })
-      .returning();
-    await saveItemsTx(tx, quote.id, items);
-    await syncKanbanForQuote(tx, quote, items);
-    return quote;
-  });
+  /* O contador de documentos pode estar ATRASADO em relação aos números
+     já gravados (importação da base curada, restore parcial, seed).
+     Em vez de estourar 23505 no cliente, reagimos ao conflito gerando
+     o próximo número e tentando de novo — até 3 vezes. */
+  let row: typeof quotes.$inferSelect | undefined;
+  for (let attempt = 0; attempt < 3 && !row; attempt++) {
+    const number = await nextDocumentNumber("quote");
+    try {
+      row = await db.transaction(async (tx) => {
+        const [quote] = await tx
+          .insert(quotes)
+          .values({
+            number,
+            customerId: d.customerId || null,
+            status: d.status || "rascunho",
+            validUntil,
+            subtotal: toDecimalString(totals.subtotal),
+            discount: toDecimalString(totals.discount),
+            taxes: toDecimalString(totals.taxes),
+            shippingFee: toDecimalString(totals.shippingFee),
+            total: toDecimalString(totals.total),
+            paymentMethod: d.paymentMethod || quoteDefaults.payment,
+            channel: d.channel || "Atendimento",
+            sellerName: d.sellerName || quoteDefaults.seller || pricingDefaults.pdv_seller_default || "OPERADOR",
+            notes: d.notes || quoteDefaults.notes || null,
+          })
+          .returning();
+        await saveItemsTx(tx, quote.id, items);
+        await syncKanbanForQuote(tx, quote, items);
+        return quote;
+      });
+    } catch (e) {
+      const code = (e as { code?: string }).code;
+      if (code !== "23505") throw e; // só conflito de número tenta de novo
+    }
+  }
+  if (!row) throw new Error("Não foi possível gerar número único de orçamento após 3 tentativas.");
 
   return { ok: true as const, row, warnings };
 }

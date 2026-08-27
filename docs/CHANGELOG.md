@@ -10,7 +10,21 @@
 
 - 3D: filamento e material do estoque, impressora cobra so horas
 
-# Changelog — PrintFlow ERP
+## [3.70.0] — 2026-08-27
+
+Blindagem das tabelas do WhatsApp, árvore de categorias v2 no seed e o smoke 100% verde de novo (estava falhando em 4 pontos).
+
+- **Blindagem v3.68.9 (pendência do incidente 25/08)**: `whatsapp_conversas`, `whatsapp_mensagens` e `whatsapp_auth` agora são GERENCIADAS pelo schema Drizzle (`src/db/schema.ts`), isomorfas ao DDL do serviço (`CREATE TABLE IF NOT EXISTS` continua idempotente para quem sobe o bot antes do push). Com isto o `drizzle-kit push` deixa de propor DROP nas tabelas onde mora o histórico de conversas
+- **Seed com a árvore v2 aprovada** (`docs/ARVORE-CATEGORIAS.md`): 10 mestres + subcategorias (máx. 2 níveis) e "Componentes de Botton" em materiais. O seed antigo nascia ACHATADO e o e2e reprovava "0 subcategoria(s)" — a tela de produtos e o PDV já estavam prontos para a árvore
+- **Bug do contador de orçamento**: seed deixava `quote` em 0 mas gravava `ORC-2026-0001` — a primeira cotação nova devolvia **500** (duplicata). Contador corrigido para 1 E `createQuote` ganhou retry em conflito 23505 (defesa contra contadores atrasados em importações/restores)
+- **`check-version.mjs` sem `psql`**: passou a usar o driver `pg` (mesmo da aplicação) e banco inalcançável com `DATABASE_URL` configurado agora é ERRO BARULHENTO — era fio pendente da 3.68.2 e causou o falso "consistente" no sandbox (sem psql, sem carimbo, tudo silencioso)
+- **`install.sh` completo**: instalação do zero agora aplica as logos da VTDIGITAL (`aplicar-logo.mjs`) e carimba `settings.app_version` (`check-version.mjs`) — antes nascia sem marca e sem versão, e o e2e reprovava na seção 11.995
+
+> **Nota sobre a numeração:** existiu um commit "v3.69.2 (galeria de fotos de produto)" revertido no `main` antes de qualquer release. Para não repetir rótulo de pacote diferente (o erro da 3.67.0), esta versão pulou para **3.70.0**.
+
+---
+
+
 
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).  
 Versionamento: [SemVer](https://semver.org/lang/pt-BR/).
