@@ -14,6 +14,13 @@ const nextConfig: NextConfig = {
      (Nesta versão do Next não existe a chave `eslint` no config; o lint
      já não roda no build.) */
   typescript: { ignoreBuildErrors: true },
+
+  /* Ambiente de desenvolvimento em sandbox/preview (Arena, Codespaces,
+     Gitpod…) serve a aplicação por um host público com proxy. O Next 16
+     recusa requisições de dev vindas de origem desconhecida — sem esta
+     lista o preview carrega o HTML e depois quebra no HMR/Server Actions.
+     Não afeta produção: `allowedDevOrigins` só vale para `next dev`. */
+  allowedDevOrigins: ["*.e2b.app", "*.app.github.dev", "*.gitpod.io"],
 };
 
 export default nextConfig;

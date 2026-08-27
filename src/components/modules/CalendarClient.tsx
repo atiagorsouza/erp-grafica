@@ -22,7 +22,7 @@ import {
 import { Icon } from "@/components/icons";
 import { cn } from "@/lib/format";
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 type Row = Record<string, any>;
 
 const MONTHS = [
@@ -431,7 +431,7 @@ export function CalendarClient({ dates }: { dates: Row[] }) {
         }
       >
         <p className="text-[13px] text-ink-700">
-          Desativar <strong>"{deleteModal?.title}"</strong> ({deleteModal?.day}/{deleteModal?.month})?
+          Desativar <strong>&ldquo;{deleteModal?.title}&rdquo;</strong> ({deleteModal?.day}/{deleteModal?.month})?
         </p>
         <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-[11.5px] text-amber-800">
           A ação pode ser revertida ativando a data novamente em “Mostrar desativadas”.

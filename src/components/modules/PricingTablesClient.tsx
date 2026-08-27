@@ -8,7 +8,7 @@ import { Badge, Button, Field, IconButton, Input, Modal, PageHeader, toast } fro
 import { Icon } from "@/components/icons";
 import { cn } from "@/lib/format";
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 type Row = Record<string, any>;
 
 const TYPES = [

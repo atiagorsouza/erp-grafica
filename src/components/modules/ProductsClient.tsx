@@ -39,7 +39,7 @@ import { Icon, type IconName } from "@/components/icons";
 import { CategoriasManager } from "@/components/modules/CategoriasManager";
 import { cn } from "@/lib/format";
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 type Row = Record<string, any>;
 
 /* Bloco de formulário com título e explicação.
@@ -910,7 +910,7 @@ export function ProductsClient({
                     if (tiers.length === 0) return null;
                     return (
                       <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-[11.5px] text-amber-900">
-                        Nenhuma faixa começa em 1 unidade — o site vai ancorar o card no preço calculado ({formatMoney(alvo)}). Se a intenção é vender avulso por outro valor, crie a faixa "a partir de 1".
+                        Nenhuma faixa começa em 1 unidade — o site vai ancorar o card no preço calculado ({formatMoney(alvo)}). Se a intenção é vender avulso por outro valor, crie a faixa &ldquo;a partir de 1&rdquo;.
                       </div>
                     );
                   }
@@ -1170,7 +1170,7 @@ export function ProductsClient({
                   )}
                   {liveCalc.baseCost === 0 && liveCalc.finalPrice === 0 && (
                     <p className="mt-1.5 rounded-md bg-amber-500/15 px-2.5 py-1.5 text-[10.5px] text-amber-300">
-                      Custo base R$ 0,00 — sem impressão, material ou serviço configurado o preço sai ZERADO ("não está precificando"). Preencha ao lado antes de vender.
+                      Custo base R$ 0,00 — sem impressão, material ou serviço configurado o preço sai ZERADO (&ldquo;não está precificando&rdquo;). Preencha ao lado antes de vender.
                     </p>
                   )}
                 </div>
